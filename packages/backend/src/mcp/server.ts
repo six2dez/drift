@@ -236,8 +236,14 @@ class McpServer {
 
       const response = await this.handleRpc(rpc);
 
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify(response));
+      if (response === null) {
+        // Notification - acknowledge with 202, no body
+        res.writeHead(202);
+        res.end();
+      } else {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(response));
+      }
     } catch (err) {
       res.writeHead(400, { "Content-Type": "application/json" });
       res.end(
@@ -250,7 +256,7 @@ class McpServer {
 
   private async handleRpc(
     rpc: JsonRpcRequest
-  ): Promise<ReturnType<typeof jsonRpcSuccess>> {
+  ): Promise<ReturnType<typeof jsonRpcSuccess> | null> {
     switch (rpc.method) {
       case "initialize":
         return jsonRpcSuccess(rpc.id, {
@@ -263,7 +269,11 @@ class McpServer {
         });
 
       case "notifications/initialized":
-        // Client acknowledgement, no response needed for notifications
+      case "notifications/cancelled":
+        // Notifications don't get responses per JSON-RPC 2.0 spec
+        return null;
+
+      case "ping":
         return jsonRpcSuccess(rpc.id, {});
 
       case "tools/list":

@@ -1,3 +1,5 @@
+import { existsSync, accessSync, constants } from "fs";
+import { join } from "path";
 import type { ChatMessage } from "shared";
 
 /**
@@ -33,27 +35,27 @@ export function buildCliHistory(
   if (history.length === 0) return "";
 
   const trimmed = history.slice(-maxMessages);
-  const result: ChatMessage[] = [];
+  // Build from newest to oldest, then reverse (avoids O(n^2) unshift)
+  const reversed: ChatMessage[] = [];
   let total = 0;
 
   for (let i = trimmed.length - 1; i >= 0; i--) {
     const msg = trimmed[i]!;
     const len = msg.role.length + 2 + msg.content.length;
-    if (total + len > maxChars && result.length > 0) break;
-    if (len > maxChars && result.length === 0) {
-      result.unshift({
+    if (total + len > maxChars && reversed.length > 0) break;
+    if (len > maxChars && reversed.length === 0) {
+      reversed.push({
         ...msg,
         content: msg.content.slice(0, Math.max(maxChars, 1)),
       });
       break;
     }
-    result.unshift(msg);
+    reversed.push(msg);
     total += len;
   }
 
-  return (
-    result.map((m) => `${m.role}: ${m.content}`).join("\n") + "\n\n"
-  );
+  reversed.reverse();
+  return reversed.map((m) => `${m.role}: ${m.content}`).join("\n") + "\n\n";
 }
 
 /**
@@ -86,9 +88,6 @@ export function resolveCommand(
   command: string,
   extraPath?: string
 ): string | null {
-  const { existsSync } = require("fs") as typeof import("fs");
-  const { join } = require("path") as typeof import("path");
-
   // If already absolute, verify it exists
   if (command.startsWith("/")) {
     return existsSync(command) ? command : null;
@@ -101,8 +100,6 @@ export function resolveCommand(
     const candidate = join(dir, command);
     try {
       if (existsSync(candidate)) {
-        const { accessSync, constants } =
-          require("fs") as typeof import("fs");
         accessSync(candidate, constants.X_OK);
         return candidate;
       }

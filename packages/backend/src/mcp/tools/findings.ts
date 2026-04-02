@@ -25,6 +25,10 @@ export const createFindingTool: McpTool = {
         type: "string",
         description: "Who/what reported this finding (default: 'Drift')",
       },
+      dedupeKey: {
+        type: "string",
+        description: "Deduplication key to prevent duplicate findings for the same issue",
+      },
     },
     required: ["requestId", "title"],
   },
@@ -38,6 +42,7 @@ export async function executeCreateFinding(
   const title = args["title"] as string;
   const description = (args["description"] as string) ?? "";
   const reporter = (args["reporter"] as string) ?? "Drift";
+  const dedupeKey = (args["dedupeKey"] as string) ?? undefined;
 
   const query = `
     mutation($input: CreateFindingInput!) {
@@ -67,6 +72,7 @@ export async function executeCreateFinding(
       title,
       description,
       reporter,
+      ...(dedupeKey ? { dedupeKey } : {}),
     },
   });
 
