@@ -9,50 +9,79 @@ export const useSettingsStore = defineStore("settings", () => {
   const providerStatuses = ref<ProviderStatus[]>([]);
   const mcpStatus = ref<McpServerInfo | null>(null);
   const loading = ref(false);
+  const initError = ref<string | null>(null);
 
   async function initialize() {
     loading.value = true;
-    const [sResult, pResult, mResult] = await Promise.all([
-      sdk.backend.getSettings(),
-      sdk.backend.getProviderStatuses(),
-      sdk.backend.getMcpStatus(),
-    ]);
-    if (sResult.kind === "Ok") settings.value = sResult.value;
-    if (pResult.kind === "Ok") providerStatuses.value = pResult.value;
-    if (mResult.kind === "Ok") mcpStatus.value = mResult.value;
+    initError.value = null;
+
+    try {
+      const results = await Promise.allSettled([
+        sdk.backend.getSettings(),
+        sdk.backend.getProviderStatuses(),
+        sdk.backend.getMcpStatus(),
+      ]);
+
+      const sResult = results[0]?.status === "fulfilled" ? results[0].value : null;
+      const pResult = results[1]?.status === "fulfilled" ? results[1].value : null;
+      const mResult = results[2]?.status === "fulfilled" ? results[2].value : null;
+
+      if (sResult?.kind === "Ok") settings.value = sResult.value;
+      if (pResult?.kind === "Ok") providerStatuses.value = pResult.value;
+      if (mResult?.kind === "Ok") mcpStatus.value = mResult.value;
+    } catch (err) {
+      initError.value = (err as Error).message;
+    }
+
     loading.value = false;
 
-    // Fix #11: Listen for real-time MCP status changes
-    sdk.backend.onEvent("mcp-status", (event) => {
-      mcpStatus.value = {
-        running: event.running,
-        port: event.port,
-        toolCount: event.toolCount,
-        host: mcpStatus.value?.host ?? "127.0.0.1",
-        token: mcpStatus.value?.token ?? "",
-        url: mcpStatus.value?.url ?? "",
-      };
-    });
+    // Listen for real-time MCP status changes
+    try {
+      sdk.backend.onEvent("mcp-status", (event) => {
+        mcpStatus.value = {
+          running: event.running,
+          port: event.port,
+          toolCount: event.toolCount,
+          host: mcpStatus.value?.host ?? "127.0.0.1",
+          token: mcpStatus.value?.token ?? "",
+          url: mcpStatus.value?.url ?? "",
+        };
+      });
+    } catch {
+      // onEvent may not be available in all SDK versions
+    }
   }
 
   async function updateSettings(input: Partial<Settings>) {
-    const result = await sdk.backend.updateSettings(input);
-    if (result.kind === "Ok") settings.value = result.value;
+    try {
+      const result = await sdk.backend.updateSettings(input);
+      if (result.kind === "Ok") settings.value = result.value;
+    } catch {
+      // Silently fail, settings will be stale
+    }
   }
 
   async function refreshProviders() {
-    const result = await sdk.backend.getProviderStatuses();
-    if (result.kind === "Ok") providerStatuses.value = result.value;
+    try {
+      const result = await sdk.backend.getProviderStatuses();
+      if (result.kind === "Ok") providerStatuses.value = result.value;
+    } catch {
+      // Silently fail
+    }
   }
 
   async function toggleMcp() {
-    if (mcpStatus.value?.running) {
-      await sdk.backend.stopMcpServer();
-    } else {
-      await sdk.backend.startMcpServer();
+    try {
+      if (mcpStatus.value?.running) {
+        await sdk.backend.stopMcpServer();
+      } else {
+        await sdk.backend.startMcpServer();
+      }
+      const result = await sdk.backend.getMcpStatus();
+      if (result.kind === "Ok") mcpStatus.value = result.value;
+    } catch {
+      // Silently fail
     }
-    const result = await sdk.backend.getMcpStatus();
-    if (result.kind === "Ok") mcpStatus.value = result.value;
   }
 
   function isProviderAvailable(providerId: string): boolean {
@@ -64,6 +93,7 @@ export const useSettingsStore = defineStore("settings", () => {
     providerStatuses,
     mcpStatus,
     loading,
+    initError,
     initialize,
     updateSettings,
     refreshProviders,

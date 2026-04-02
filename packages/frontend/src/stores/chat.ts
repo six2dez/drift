@@ -8,7 +8,6 @@ export const useChatStore = defineStore("chat", () => {
 
   const chats = ref<StoredChat[]>([]);
   const activeChatId = ref<string | null>(null);
-  // Fix #6: Use Record instead of Map for Vue reactivity
   const sessionIds = ref<Record<string, string>>({});
 
   const activeChat = computed(() =>
@@ -18,9 +17,14 @@ export const useChatStore = defineStore("chat", () => {
   const activeMessages = computed(() => activeChat.value?.messages ?? []);
 
   async function loadChats() {
-    const result = await sdk.backend.getChats();
-    if (result.kind === "Ok") {
-      chats.value = result.value;
+    try {
+      const result = await sdk.backend.getChats();
+      if (result.kind === "Ok") {
+        chats.value = result.value;
+      }
+    } catch {
+      // Backend not ready or failed, start with empty chats
+      chats.value = [];
     }
   }
 
@@ -53,11 +57,19 @@ export const useChatStore = defineStore("chat", () => {
 
   async function saveActiveChat() {
     if (!activeChat.value) return;
-    await sdk.backend.saveChat(activeChat.value);
+    try {
+      await sdk.backend.saveChat(activeChat.value);
+    } catch {
+      // Persistence failed, chat still in memory
+    }
   }
 
   async function deleteChat(chatId: string) {
-    await sdk.backend.deleteChat(chatId);
+    try {
+      await sdk.backend.deleteChat(chatId);
+    } catch {
+      // Continue with local deletion even if backend fails
+    }
     chats.value = chats.value.filter((c) => c.id !== chatId);
     if (activeChatId.value === chatId) {
       activeChatId.value = chats.value[0]?.id ?? null;
@@ -75,7 +87,6 @@ export const useChatStore = defineStore("chat", () => {
   function clearSession(chatId: string) {
     const sid = sessionIds.value[chatId];
     if (sid) {
-      // Fix #8: Handle promise rejection
       sdk.backend.closeCliSession({ sessionId: sid }).catch(() => {});
       delete sessionIds.value[chatId];
     }

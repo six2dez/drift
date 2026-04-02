@@ -10,18 +10,29 @@ const activeTab = ref<"chat" | "settings">("chat");
 const settingsStore = useSettingsStore();
 const chatStore = useChatStore();
 const ready = ref(false);
+const initError = ref<string | null>(null);
 
 onMounted(async () => {
-  await Promise.all([settingsStore.initialize(), chatStore.loadChats()]);
-  // If no chats exist, create one
-  if (chatStore.chats.length === 0) {
-    const raw = settingsStore.settings?.activeProvider ?? CliProvider.Claude;
-    const validProviders = Object.values(CliProvider) as string[];
-    const providerId = validProviders.includes(raw) ? raw : CliProvider.Claude;
-    chatStore.createChat(providerId);
-  } else {
-    chatStore.activeChatId = chatStore.chats[0]?.id ?? null;
+  try {
+    await Promise.allSettled([
+      settingsStore.initialize(),
+      chatStore.loadChats(),
+    ]);
+
+    // Create a default chat if none exist
+    if (chatStore.chats.length === 0) {
+      const raw = settingsStore.settings?.activeProvider ?? CliProvider.Claude;
+      const validProviders = Object.values(CliProvider) as string[];
+      const providerId = validProviders.includes(raw) ? raw : CliProvider.Claude;
+      chatStore.createChat(providerId);
+    } else {
+      chatStore.activeChatId = chatStore.chats[0]?.id ?? null;
+    }
+  } catch (err) {
+    initError.value = `Initialization failed: ${(err as Error).message}`;
   }
+
+  // Always set ready to true so the UI is usable
   ready.value = true;
 });
 </script>
@@ -47,6 +58,11 @@ onMounted(async () => {
       >
         Settings
       </button>
+    </div>
+
+    <!-- Init error -->
+    <div v-if="initError" class="mx-4 mt-2 px-3 py-2 text-xs text-red-400 bg-red-950 border border-red-800 rounded">
+      {{ initError }}
     </div>
 
     <!-- Content -->
