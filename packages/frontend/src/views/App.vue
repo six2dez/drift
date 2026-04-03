@@ -5,18 +5,13 @@ import { useChatStore } from "../stores/chat";
 import { CliProvider } from "shared";
 import ChatView from "./ChatView.vue";
 import SettingsView from "./SettingsView.vue";
-import TabMenu from "primevue/tabmenu";
+import Button from "primevue/button";
 
-const activeTab = ref(0);
+const activeTab = ref<"chat" | "settings">("chat");
 const settingsStore = useSettingsStore();
 const chatStore = useChatStore();
 const ready = ref(false);
 const initError = ref<string | undefined>(undefined);
-
-const tabs = [
-  { label: "Chat", icon: "fas fa-comments" },
-  { label: "Settings", icon: "fas fa-cog" },
-];
 
 onMounted(async () => {
   try {
@@ -41,11 +36,26 @@ onMounted(async () => {
 <template>
   <div class="flex flex-col h-full w-full bg-surface-800">
     <!-- Header -->
-    <div class="flex items-center gap-2 px-4 py-2 border-b border-surface-700">
-      <span class="text-lg font-semibold text-surface-100">Drift</span>
-      <span class="text-xs text-surface-400">CLI AI Agent</span>
+    <div class="flex items-center px-4 py-2 border-b border-surface-700 gap-3">
+      <span class="text-base font-bold text-surface-100">Drift</span>
+      <span class="text-xs text-surface-500">CLI AI Agent</span>
       <div class="flex-1" />
-      <TabMenu v-model:activeIndex="activeTab" :model="tabs" />
+      <Button
+        label="Chat"
+        icon="fas fa-comments"
+        :severity="activeTab === 'chat' ? undefined : 'secondary'"
+        :text="activeTab !== 'chat'"
+        size="small"
+        @click="activeTab = 'chat'"
+      />
+      <Button
+        label="Settings"
+        icon="fas fa-cog"
+        :severity="activeTab === 'settings' ? undefined : 'secondary'"
+        :text="activeTab !== 'settings'"
+        size="small"
+        @click="activeTab = 'settings'"
+      />
     </div>
 
     <!-- Init error -->
@@ -58,10 +68,10 @@ onMounted(async () => {
 
     <!-- Content -->
     <div v-if="!ready" class="flex-1 flex items-center justify-center text-surface-400">
-      Loading...
+      <i class="fas fa-spinner fa-spin mr-2" /> Loading...
     </div>
     <div v-else class="flex-1 overflow-hidden">
-      <ChatView v-if="activeTab === 0" />
+      <ChatView v-if="activeTab === 'chat'" />
       <SettingsView v-else />
     </div>
   </div>

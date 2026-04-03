@@ -1,16 +1,6 @@
 import type { DefineAPI, SDK, DefineEvents } from "caido:plugin";
-import { readFile, writeFile } from "fs/promises";
-import {
-  existsSync,
-  accessSync,
-  constants as fsConstants,
-  mkdtempSync,
-  writeFileSync,
-  rmSync,
-} from "fs";
+import { readFile, writeFile, stat, mkdir, rm } from "fs/promises";
 import { spawn } from "child_process";
-import { randomUUID } from "crypto";
-import { tmpdir } from "os";
 import path from "path";
 
 // ── Types (inline to avoid Zod which crashes QuickJS) ──────────────
@@ -118,48 +108,43 @@ async function saveJson(filename: string, data: unknown): Promise<void> {
   }
 }
 
-// ── CLI resolution ──────────────────────────────────────────────────
+// ── Async helpers ───────────────────────────────────────────────────
 
-function resolveCommand(command: string): string | undefined {
-  // Absolute path
-  if (command.startsWith("/")) {
-    return existsSync(command) ? command : undefined;
-  }
-
-  // Search PATH
-  const home = process.env["HOME"] ?? "";
-  const extra = [
-    `${home}/.local/bin`,
-    `${home}/bin`,
-    "/opt/homebrew/bin",
-    "/usr/local/bin",
-    `${home}/.cargo/bin`,
-    `${home}/.nvm/current/bin`,
-  ];
-  const dirs = [...extra, ...(process.env["PATH"] ?? "").split(":")].filter(
-    (d) => d.length > 0
-  );
-
-  for (const dir of dirs) {
-    const candidate = path.join(dir, command);
-    try {
-      if (existsSync(candidate)) {
-        accessSync(candidate, fsConstants.X_OK);
-        return candidate;
-      }
-    } catch {
-      continue;
-    }
-  }
-  return undefined;
+async function fileExists(p: string): Promise<boolean> {
+  try { await stat(p); return true; } catch { return false; }
 }
 
-function checkProvider(id: string): ProviderStatus {
+async function writeTemp(dir: string, name: string, content: string): Promise<string> {
+  await mkdir(dir, { recursive: true });
+  const fp = path.join(dir, name);
+  await writeFile(fp, content);
+  return fp;
+}
+
+function genId(): string {
+  return Math.random().toString(36).slice(2) + Date.now().toString(36);
+}
+
+// ── CLI resolution (async via `which`) ──────────────────────────────
+
+function resolveCommand(command: string): Promise<string | undefined> {
+  return new Promise((resolve) => {
+    const child = spawn("which", [command]);
+    let out = "";
+    child.stdout?.on("data", (d: Buffer) => { out += d.toString(); });
+    child.on("close", (code) => {
+      resolve(code === 0 && out.trim() !== "" ? out.trim() : undefined);
+    });
+    child.on("error", () => resolve(undefined));
+  });
+}
+
+async function checkProvider(id: string): Promise<ProviderStatus> {
   const config = currentSettings.providers[id];
   if (!config?.enabled || !config?.command) {
     return { id, available: false, error: "Disabled" };
   }
-  const resolved = resolveCommand(config.command);
+  const resolved = await resolveCommand(config.command);
   if (resolved === undefined) {
     return { id, available: false, error: `"${config.command}" not found in PATH` };
   }
@@ -205,16 +190,17 @@ async function updateSettings(
 
 // ── API: Providers ──────────────────────────────────────────────────
 
-function getProviderStatuses(_sdk: BackendSDK): Result<ProviderStatus[]> {
+async function getProviderStatuses(_sdk: BackendSDK): Promise<Result<ProviderStatus[]>> {
   const ids = ["claude-cli", "gemini-cli", "codex-cli", "copilot-cli"];
-  return ok(ids.map(checkProvider));
+  const statuses = await Promise.all(ids.map(checkProvider));
+  return ok(statuses);
 }
 
-function checkProviderAvailability(
+async function checkProviderAvailability(
   _sdk: BackendSDK,
   providerId: string
-): Result<ProviderStatus> {
-  return ok(checkProvider(providerId));
+): Promise<Result<ProviderStatus>> {
+  return ok(await checkProvider(providerId));
 }
 
 // ── API: MCP ────────────────────────────────────────────────────────
@@ -239,12 +225,13 @@ async function startMcpServer(sdk: BackendSDK): Promise<Result<McpServerInfo>> {
 
   // Check if MCP server asset exists
   const mcpScript = path.join(assetsPath, "mcp-server.mjs");
-  if (!existsSync(mcpScript)) {
+  if (!(await fileExists(mcpScript))) {
     return err("MCP server script not found in plugin assets.");
   }
 
   // Create temp dir for MCP configs
-  mcpTempDir = mkdtempSync(path.join(tmpdir(), "drift-mcp-"));
+  mcpTempDir = path.join(pluginPath, "mcp-tmp-" + genId());
+  await mkdir(mcpTempDir, { recursive: true });
 
   sdk.console.log(`[drift] MCP ready. Script: ${mcpScript}, temp: ${mcpTempDir}`);
   sdk.api.send("mcp-status", { running: true, port: 0, toolCount: 12 });
@@ -259,13 +246,9 @@ async function startMcpServer(sdk: BackendSDK): Promise<Result<McpServerInfo>> {
   });
 }
 
-function stopMcpServer(sdk: BackendSDK): Result<void> {
-  if (mcpTempDir) {
-    try {
-      rmSync(mcpTempDir, { recursive: true, force: true });
-    } catch {
-      // silent
-    }
+async function stopMcpServer(sdk: BackendSDK): Promise<Result<void>> {
+  if (mcpTempDir !== undefined) {
+    try { await rm(mcpTempDir, { recursive: true, force: true }); } catch { /* silent */ }
     mcpTempDir = undefined;
   }
   sdk.api.send("mcp-status", { running: false, port: 0, toolCount: 0 });
@@ -348,16 +331,15 @@ async function sendCliMessage(
         if (sid !== undefined) {
           args.push("--resume", sid);
         } else {
-          sid = randomUUID();
+          sid = genId();
           args.push("--session-id", sid);
           cliSessions.set(input.chatId, sid);
         }
 
         // MCP config
-        if (mcpTempDir) {
-          const mcpCfgPath = path.join(mcpTempDir, `mcp-${input.chatId}.json`);
+        if (mcpTempDir !== undefined) {
           const mcpScript = path.join(assetsPath, "mcp-server.mjs");
-          if (existsSync(mcpScript)) {
+          if (await fileExists(mcpScript)) {
             const mcpCfg = {
               mcpServers: {
                 drift: {
@@ -371,9 +353,11 @@ async function sendCliMessage(
                 },
               },
             };
-            writeFileSync(mcpCfgPath, JSON.stringify(mcpCfg, null, 2), {
-              mode: 0o600,
-            });
+            const mcpCfgPath = await writeTemp(
+              mcpTempDir,
+              `mcp-${input.chatId}.json`,
+              JSON.stringify(mcpCfg, null, 2)
+            );
             args.push("--mcp-config", mcpCfgPath);
           }
         }
@@ -398,17 +382,8 @@ async function sendCliMessage(
 
     // ── Spawn process ──
     return new Promise<Result<string>>((resolve) => {
-      const env: Record<string, string> = {
-        ...process.env as Record<string, string>,
-        CI: "1",
-        NO_COLOR: "1",
-        TERM: "dumb",
-        FORCE_COLOR: "0",
-      };
-
+      // Spawn inheriting Caido's environment (no process.env access)
       const proc = spawn(resolved, args, {
-        env,
-        cwd: process.env["HOME"] ?? "/tmp",
         stdio: ["pipe", "pipe", "pipe"],
       });
 

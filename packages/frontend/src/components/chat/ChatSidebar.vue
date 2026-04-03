@@ -24,7 +24,7 @@ function formatTime(ts: number): string {
 </script>
 
 <template>
-  <div class="flex flex-col h-full bg-surface-800">
+  <div class="flex flex-col h-full bg-surface-900 border-r border-surface-700">
     <div class="p-2">
       <Button
         label="New Chat"
