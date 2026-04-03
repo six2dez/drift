@@ -24,6 +24,7 @@ export default defineConfig({
       kind: "backend",
       id: "backend",
       root: "packages/backend",
+      assets: ["./assets/**/*"],
     },
     {
       kind: "frontend",

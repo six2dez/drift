@@ -1,9 +1,19 @@
 import type { DefineAPI, SDK, DefineEvents } from "caido:plugin";
 import { readFile, writeFile } from "fs/promises";
-import { spawn as nodeSpawn } from "child_process";
+import {
+  existsSync,
+  accessSync,
+  constants as fsConstants,
+  mkdtempSync,
+  writeFileSync,
+  rmSync,
+} from "fs";
+import { spawn } from "child_process";
+import { randomUUID } from "crypto";
+import { tmpdir } from "os";
 import path from "path";
 
-// === Inline types (avoid Zod import) ===
+// ── Types (inline to avoid Zod which crashes QuickJS) ──────────────
 
 type ProviderConfig = { command: string; enabled: boolean };
 type CaidoApiConfig = { url: string; token: string };
@@ -35,10 +45,18 @@ type McpServerInfo = {
   url: string;
 };
 
+type ChatMessage = {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  timestamp: number;
+  providerId: string;
+};
+
 type StoredChat = {
   id: string;
   title: string;
-  messages: unknown[];
+  messages: ChatMessage[];
   providerId: string;
   cliSessionId: string | null;
   createdAt: number;
@@ -46,10 +64,14 @@ type StoredChat = {
 };
 
 type Result<T> = { kind: "Ok"; value: T } | { kind: "Error"; error: string };
-function ok<T>(value: T): Result<T> { return { kind: "Ok", value }; }
-function err<T>(error: string): Result<T> { return { kind: "Error", error }; }
+function ok<T>(value: T): Result<T> {
+  return { kind: "Ok", value };
+}
+function err<T>(error: string): Result<T> {
+  return { kind: "Error", error };
+}
 
-// === Default settings ===
+// ── Defaults ────────────────────────────────────────────────────────
 
 const DEFAULT_SETTINGS: Settings = {
   providers: {
@@ -66,16 +88,22 @@ const DEFAULT_SETTINGS: Settings = {
   processTimeoutSeconds: 120,
 };
 
-// === Simple persistence ===
+// ── State ───────────────────────────────────────────────────────────
 
 let pluginPath = "";
+let assetsPath = "";
 let currentSettings: Settings = { ...DEFAULT_SETTINGS };
 let currentChats: StoredChat[] = [];
+// Session resume tracking: chatId → cliSessionId
+const cliSessions = new Map<string, string>();
+// MCP temp config cleanup
+let mcpTempDir: string | undefined;
+
+// ── Persistence ─────────────────────────────────────────────────────
 
 async function loadJson<T>(filename: string, fallback: T): Promise<T> {
   try {
-    const filePath = path.join(pluginPath, `${filename}.json`);
-    const data = await readFile(filePath, "utf-8");
+    const data = await readFile(path.join(pluginPath, `${filename}.json`), "utf-8");
     return JSON.parse(data) as T;
   } catch {
     return fallback;
@@ -84,91 +112,168 @@ async function loadJson<T>(filename: string, fallback: T): Promise<T> {
 
 async function saveJson(filename: string, data: unknown): Promise<void> {
   try {
-    const filePath = path.join(pluginPath, `${filename}.json`);
-    await writeFile(filePath, JSON.stringify(data, null, 2));
+    await writeFile(path.join(pluginPath, `${filename}.json`), JSON.stringify(data, null, 2));
   } catch {
-    // Persistence failed silently
+    // silent
   }
 }
 
-// === CLI availability check ===
+// ── CLI resolution ──────────────────────────────────────────────────
 
-async function checkCliAvailability(command: string): Promise<ProviderStatus & { id: string }> {
-  // Use `which` to find the command - works without process.env
-  return new Promise((resolve) => {
-    const child = nodeSpawn("which", [command]);
-    let stdout = "";
-    child.stdout?.on("data", (d: Buffer) => { stdout += d.toString(); });
-    child.on("close", (code) => {
-      if (code === 0 && stdout.trim()) {
-        resolve({ id: "", available: true, resolvedPath: stdout.trim() });
-      } else {
-        resolve({ id: "", available: false, error: `"${command}" not found in PATH` });
+function resolveCommand(command: string): string | undefined {
+  // Absolute path
+  if (command.startsWith("/")) {
+    return existsSync(command) ? command : undefined;
+  }
+
+  // Search PATH
+  const home = process.env["HOME"] ?? "";
+  const extra = [
+    `${home}/.local/bin`,
+    `${home}/bin`,
+    "/opt/homebrew/bin",
+    "/usr/local/bin",
+    `${home}/.cargo/bin`,
+    `${home}/.nvm/current/bin`,
+  ];
+  const dirs = [...extra, ...(process.env["PATH"] ?? "").split(":")].filter(
+    (d) => d.length > 0
+  );
+
+  for (const dir of dirs) {
+    const candidate = path.join(dir, command);
+    try {
+      if (existsSync(candidate)) {
+        accessSync(candidate, fsConstants.X_OK);
+        return candidate;
       }
-    });
-    child.on("error", (e) => {
-      resolve({ id: "", available: false, error: String(e) });
-    });
-  });
+    } catch {
+      continue;
+    }
+  }
+  return undefined;
 }
 
-// === API functions ===
+function checkProvider(id: string): ProviderStatus {
+  const config = currentSettings.providers[id];
+  if (!config?.enabled || !config?.command) {
+    return { id, available: false, error: "Disabled" };
+  }
+  const resolved = resolveCommand(config.command);
+  if (resolved === undefined) {
+    return { id, available: false, error: `"${config.command}" not found in PATH` };
+  }
+  return { id, available: true, resolvedPath: resolved };
+}
+
+// ── Events ──────────────────────────────────────────────────────────
 
 type BackendEvents = DefineEvents<{
-  "cli-output-chunk": (data: { sessionId: string; delta: string; stream: "stdout" | "stderr" }) => void;
-  "cli-session-state": (data: { sessionId: string; state: string; error?: string }) => void;
-  "mcp-status": (data: { running: boolean; port: number; toolCount: number }) => void;
+  "cli-output-chunk": (data: {
+    sessionId: string;
+    delta: string;
+    stream: "stdout" | "stderr";
+  }) => void;
+  "cli-session-state": (data: {
+    sessionId: string;
+    state: string;
+    error?: string;
+  }) => void;
+  "mcp-status": (data: {
+    running: boolean;
+    port: number;
+    toolCount: number;
+  }) => void;
 }>;
 
 type BackendSDK = SDK<API, BackendEvents>;
+
+// ── API: Settings ───────────────────────────────────────────────────
 
 function getSettings(_sdk: BackendSDK): Result<Settings> {
   return ok(currentSettings);
 }
 
-async function updateSettings(_sdk: BackendSDK, input: Partial<Settings>): Promise<Result<Settings>> {
+async function updateSettings(
+  _sdk: BackendSDK,
+  input: Partial<Settings>
+): Promise<Result<Settings>> {
   currentSettings = { ...currentSettings, ...input };
   await saveJson("settings", currentSettings);
   return ok(currentSettings);
 }
 
-async function getProviderStatuses(_sdk: BackendSDK): Promise<Result<ProviderStatus[]>> {
-  const providers = ["claude-cli", "gemini-cli", "codex-cli", "copilot-cli"];
-  const statuses: ProviderStatus[] = [];
-  for (const id of providers) {
-    const config = currentSettings.providers[id];
-    if (!config?.enabled || !config?.command) {
-      statuses.push({ id, available: false, error: "Disabled" });
-      continue;
-    }
-    const result = await checkCliAvailability(config.command);
-    statuses.push({ ...result, id });
-  }
-  return ok(statuses);
+// ── API: Providers ──────────────────────────────────────────────────
+
+function getProviderStatuses(_sdk: BackendSDK): Result<ProviderStatus[]> {
+  const ids = ["claude-cli", "gemini-cli", "codex-cli", "copilot-cli"];
+  return ok(ids.map(checkProvider));
 }
 
-async function checkProviderAvailability(_sdk: BackendSDK, providerId: string): Promise<Result<ProviderStatus>> {
-  const config = currentSettings.providers[providerId];
-  if (!config?.enabled || !config?.command) {
-    return ok({ id: providerId, available: false, error: "Disabled" });
-  }
-  const result = await checkCliAvailability(config.command);
-  return ok({ ...result, id: providerId });
+function checkProviderAvailability(
+  _sdk: BackendSDK,
+  providerId: string
+): Result<ProviderStatus> {
+  return ok(checkProvider(providerId));
 }
+
+// ── API: MCP ────────────────────────────────────────────────────────
 
 function getMcpStatus(_sdk: BackendSDK): Result<McpServerInfo> {
-  return ok({ running: false, host: "127.0.0.1", port: 9877, token: "", toolCount: 0, url: "" });
+  const ready = mcpTempDir !== undefined;
+  return ok({
+    running: ready,
+    host: currentSettings.mcp.host,
+    port: currentSettings.mcp.port,
+    token: "",
+    toolCount: ready ? 12 : 0,
+    url: ready ? `stdio://${assetsPath}/mcp-server.mjs` : "",
+  });
 }
 
-async function startMcpServer(_sdk: BackendSDK): Promise<Result<McpServerInfo>> {
-  return err("MCP server not yet available in this build");
+async function startMcpServer(sdk: BackendSDK): Promise<Result<McpServerInfo>> {
+  // Check prerequisites
+  if (!currentSettings.caidoApi.token) {
+    return err("Caido API token not configured. Set it in Settings > Caido API.");
+  }
+
+  // Check if MCP server asset exists
+  const mcpScript = path.join(assetsPath, "mcp-server.mjs");
+  if (!existsSync(mcpScript)) {
+    return err("MCP server script not found in plugin assets.");
+  }
+
+  // Create temp dir for MCP configs
+  mcpTempDir = mkdtempSync(path.join(tmpdir(), "drift-mcp-"));
+
+  sdk.console.log(`[drift] MCP ready. Script: ${mcpScript}, temp: ${mcpTempDir}`);
+  sdk.api.send("mcp-status", { running: true, port: 0, toolCount: 12 });
+
+  return ok({
+    running: true,
+    host: currentSettings.mcp.host,
+    port: 0,
+    token: "",
+    toolCount: 12,
+    url: `stdio://${mcpScript}`,
+  });
 }
 
-function stopMcpServer(_sdk: BackendSDK): Result<void> {
+function stopMcpServer(sdk: BackendSDK): Result<void> {
+  if (mcpTempDir) {
+    try {
+      rmSync(mcpTempDir, { recursive: true, force: true });
+    } catch {
+      // silent
+    }
+    mcpTempDir = undefined;
+  }
+  sdk.api.send("mcp-status", { running: false, port: 0, toolCount: 0 });
   return ok(undefined);
 }
 
-// Chat persistence
+// ── API: Chats ──────────────────────────────────────────────────────
+
 function getChat(_sdk: BackendSDK, chatId: string): Result<StoredChat | undefined> {
   return ok(currentChats.find((c) => c.id === chatId));
 }
@@ -179,64 +284,131 @@ function getChats(_sdk: BackendSDK): Result<StoredChat[]> {
 
 async function saveChat(_sdk: BackendSDK, chat: StoredChat): Promise<Result<void>> {
   const idx = currentChats.findIndex((c) => c.id === chat.id);
-  if (idx >= 0) { currentChats[idx] = chat; } else { currentChats.push(chat); }
+  if (idx >= 0) {
+    currentChats[idx] = chat;
+  } else {
+    currentChats.push(chat);
+  }
   await saveJson("chats", currentChats);
   return ok(undefined);
 }
 
 async function deleteChat(_sdk: BackendSDK, chatId: string): Promise<Result<void>> {
   currentChats = currentChats.filter((c) => c.id !== chatId);
+  cliSessions.delete(chatId);
   await saveJson("chats", currentChats);
   return ok(undefined);
 }
 
-// CLI session stubs (will be implemented properly once backend loads)
-async function createCliSession(sdk: BackendSDK, input: { providerId: string; chatId: string }): Promise<Result<string>> {
-  const config = currentSettings.providers[input.providerId];
-  if (!config?.command) return err(`Provider ${input.providerId} not configured`);
+// ── API: CLI Sessions ───────────────────────────────────────────────
 
-  const avail = await checkCliAvailability(config.command);
-  if (!avail.available) return err(`CLI not found: ${config.command}. ${avail.error ?? ""}`);
+async function createCliSession(
+  sdk: BackendSDK,
+  input: { providerId: string; chatId: string }
+): Promise<Result<string>> {
+  const status = checkProvider(input.providerId);
+  if (!status.available) {
+    return err(`CLI not found: ${status.error}`);
+  }
 
   const sessionId = `drift-${Date.now()}`;
+  sdk.console.log(`[drift] session created: ${sessionId} for ${input.providerId}`);
   return ok(sessionId);
 }
 
-async function sendCliMessage(sdk: BackendSDK, input: { sessionId: string; chatId: string; text: string; history?: unknown[]; httpContext?: string }): Promise<Result<string>> {
+async function sendCliMessage(
+  sdk: BackendSDK,
+  input: {
+    sessionId: string;
+    chatId: string;
+    text: string;
+    history?: ChatMessage[];
+    httpContext?: string;
+  }
+): Promise<Result<string>> {
   try {
-    // Find the provider from settings
-    const chat = currentChats.find(c => c.id === input.chatId);
-    const providerId = (chat as { providerId?: string } | undefined)?.providerId ?? currentSettings.activeProvider;
+    const chat = currentChats.find((c) => c.id === input.chatId);
+    const providerId =
+      chat?.providerId ?? currentSettings.activeProvider;
     const config = currentSettings.providers[providerId];
     if (!config?.command) return err("Provider not configured");
 
-    const avail = await checkCliAvailability(config.command);
-    if (!avail.available || !avail.resolvedPath) return err(`CLI not found: ${config.command}`);
+    const resolved = resolveCommand(config.command);
+    if (resolved === undefined) return err(`CLI not found: ${config.command}`);
 
-    // Build command based on provider
-    const cmd = avail.resolvedPath;
-    let args: string[];
+    // ── Build args per provider ──
+    const args: string[] = [];
+
     switch (providerId) {
-      case "claude-cli":
-        args = ["-p"];
+      case "claude-cli": {
+        args.push("-p");
+
+        // Session resume
+        let sid = cliSessions.get(input.chatId);
+        if (sid !== undefined) {
+          args.push("--resume", sid);
+        } else {
+          sid = randomUUID();
+          args.push("--session-id", sid);
+          cliSessions.set(input.chatId, sid);
+        }
+
+        // MCP config
+        if (mcpTempDir) {
+          const mcpCfgPath = path.join(mcpTempDir, `mcp-${input.chatId}.json`);
+          const mcpScript = path.join(assetsPath, "mcp-server.mjs");
+          if (existsSync(mcpScript)) {
+            const mcpCfg = {
+              mcpServers: {
+                drift: {
+                  type: "stdio",
+                  command: "node",
+                  args: [mcpScript],
+                  env: {
+                    CAIDO_URL: currentSettings.caidoApi.url,
+                    CAIDO_TOKEN: currentSettings.caidoApi.token,
+                  },
+                },
+              },
+            };
+            writeFileSync(mcpCfgPath, JSON.stringify(mcpCfg, null, 2), {
+              mode: 0o600,
+            });
+            args.push("--mcp-config", mcpCfgPath);
+          }
+        }
         break;
+      }
       case "gemini-cli":
-        args = ["--output-format", "text", "-p", "."];
+        args.push("--output-format", "text", "-p", ".");
         break;
       case "codex-cli":
-        args = ["exec", "--color", "never", "-"];
+        args.push("exec", "--color", "never", "-");
         break;
       case "copilot-cli":
-        args = ["-p", "--quiet"];
+        args.push("-p", "--quiet");
         break;
-      default:
-        args = [];
     }
 
-    // Spawn without env override - inherit from Caido's runtime
-    // (process.env is not available in Caido's backend)
+    // ── Build prompt with context ──
+    let prompt = input.text;
+    if (input.httpContext) {
+      prompt = `[Current HTTP Request]\n${input.httpContext}\n\n${prompt}`;
+    }
+
+    // ── Spawn process ──
     return new Promise<Result<string>>((resolve) => {
-      const proc = nodeSpawn(cmd, args, {
+      const env: Record<string, string> = {
+        ...process.env as Record<string, string>,
+        CI: "1",
+        NO_COLOR: "1",
+        TERM: "dumb",
+        FORCE_COLOR: "0",
+      };
+
+      const proc = spawn(resolved, args, {
+        env,
+        cwd: process.env["HOME"] ?? "/tmp",
         stdio: ["pipe", "pipe", "pipe"],
       });
 
@@ -262,12 +434,13 @@ async function sendCliMessage(sdk: BackendSDK, input: { sessionId: string; chatI
         stderr += chunk.toString();
       });
 
-      proc.stdin?.write(input.text + "\n");
+      proc.stdin?.write(prompt + "\n");
       proc.stdin?.end();
 
       proc.on("close", (code) => {
         clearTimeout(timeout);
-        const output = stdout.trim() || stderr.trim() || `(exit code: ${code})`;
+        const output =
+          stdout.trim() || stderr.trim() || `(exit code: ${code})`;
         resolve(ok(output));
       });
 
@@ -285,15 +458,21 @@ function cancelCliMessage(_sdk: BackendSDK, _sessionId: string): Result<void> {
   return ok(undefined);
 }
 
-function closeCliSession(_sdk: BackendSDK, _input: { sessionId: string }): Result<void> {
+function closeCliSession(
+  _sdk: BackendSDK,
+  _input: { sessionId: string }
+): Result<void> {
   return ok(undefined);
 }
 
-function getCliSessionState(_sdk: BackendSDK, sessionId: string): Result<{ sessionId: string; state: string }> {
+function getCliSessionState(
+  _sdk: BackendSDK,
+  sessionId: string
+): Result<{ sessionId: string; state: string }> {
   return ok({ sessionId, state: "running" });
 }
 
-// === API type and init ===
+// ── API type + init ─────────────────────────────────────────────────
 
 export type API = DefineAPI<{
   getSettings: typeof getSettings;
@@ -318,10 +497,18 @@ export type BackendEventsExport = BackendEvents;
 
 export function init(sdk: SDK<API, BackendEvents>) {
   pluginPath = sdk.meta.path();
+  assetsPath = sdk.meta.assetsPath();
+  sdk.console.log(`[drift] init — plugin: ${pluginPath}, assets: ${assetsPath}`);
 
   // Load persisted data
-  loadJson<Settings>("settings", DEFAULT_SETTINGS).then((s) => { currentSettings = s; });
-  loadJson<StoredChat[]>("chats", []).then((c) => { currentChats = c; });
+  loadJson<Settings>("settings", DEFAULT_SETTINGS).then((s) => {
+    currentSettings = s;
+    sdk.console.log("[drift] settings loaded");
+  });
+  loadJson<StoredChat[]>("chats", []).then((c) => {
+    currentChats = c;
+    sdk.console.log(`[drift] ${c.length} chats loaded`);
+  });
 
   // Register APIs
   sdk.api.register("getSettings", getSettings);
