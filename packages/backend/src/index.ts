@@ -1,5 +1,6 @@
 import type { DefineAPI, SDK, DefineEvents } from "caido:plugin";
-import { readFile, writeFile, access, stat } from "fs/promises";
+import { readFile, writeFile } from "fs/promises";
+import { spawn as nodeSpawn } from "child_process";
 import path from "path";
 
 // === Inline types (avoid Zod import) ===
@@ -93,37 +94,22 @@ async function saveJson(filename: string, data: unknown): Promise<void> {
 // === CLI availability check ===
 
 async function checkCliAvailability(command: string): Promise<ProviderStatus & { id: string }> {
-  try {
-    const home = process.env["HOME"] ?? "";
-    const extraDirs = [
-      `${home}/.local/bin`, `${home}/bin`, "/opt/homebrew/bin",
-      "/usr/local/bin", `${home}/.cargo/bin`,
-    ];
-    const pathEnv = [...extraDirs, ...(process.env["PATH"] ?? "").split(":")].filter(Boolean);
-
-    if (command.startsWith("/")) {
-      try {
-        await access(command);
-        return { id: "", available: true, resolvedPath: command };
-      } catch {
-        return { id: "", available: false, error: `Not found: ${command}` };
+  // Use `which` to find the command - works without process.env
+  return new Promise((resolve) => {
+    const child = nodeSpawn("which", [command]);
+    let stdout = "";
+    child.stdout?.on("data", (d: Buffer) => { stdout += d.toString(); });
+    child.on("close", (code) => {
+      if (code === 0 && stdout.trim()) {
+        resolve({ id: "", available: true, resolvedPath: stdout.trim() });
+      } else {
+        resolve({ id: "", available: false, error: `"${command}" not found in PATH` });
       }
-    }
-
-    for (const dir of pathEnv) {
-      const candidate = path.join(dir, command);
-      try {
-        const s = await stat(candidate);
-        if (s.isFile()) {
-          return { id: "", available: true, resolvedPath: candidate };
-        }
-      } catch { continue; }
-    }
-
-    return { id: "", available: false, error: `"${command}" not found in PATH` };
-  } catch (e) {
-    return { id: "", available: false, error: String(e) };
-  }
+    });
+    child.on("error", (e) => {
+      resolve({ id: "", available: false, error: String(e) });
+    });
+  });
 }
 
 // === API functions ===
@@ -218,8 +204,6 @@ async function createCliSession(sdk: BackendSDK, input: { providerId: string; ch
 
 async function sendCliMessage(sdk: BackendSDK, input: { sessionId: string; chatId: string; text: string; history?: unknown[]; httpContext?: string }): Promise<Result<string>> {
   try {
-    const { spawn } = await import("child_process");
-
     // Find the provider from settings
     const chat = currentChats.find(c => c.id === input.chatId);
     const providerId = (chat as { providerId?: string } | undefined)?.providerId ?? currentSettings.activeProvider;
@@ -249,21 +233,10 @@ async function sendCliMessage(sdk: BackendSDK, input: { sessionId: string; chatI
         args = [];
     }
 
-    // Build environment
-    const home = process.env["HOME"] ?? "";
-    const extraPath = [
-      `${home}/.local/bin`, `${home}/bin`, "/opt/homebrew/bin", "/usr/local/bin",
-    ].join(":");
-    const env = {
-      ...process.env,
-      PATH: `${extraPath}:${process.env["PATH"] ?? ""}`,
-      CI: "1", NO_COLOR: "1", TERM: "dumb", FORCE_COLOR: "0",
-    };
-
+    // Spawn without env override - inherit from Caido's runtime
+    // (process.env is not available in Caido's backend)
     return new Promise<Result<string>>((resolve) => {
-      const proc = spawn(cmd, args, {
-        env,
-        cwd: home || "/tmp",
+      const proc = nodeSpawn(cmd, args, {
         stdio: ["pipe", "pipe", "pipe"],
       });
 
