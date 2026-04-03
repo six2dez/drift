@@ -1,5 +1,6 @@
 import type { DefineAPI, SDK, DefineEvents } from "caido:plugin";
 import { readFile, writeFile } from "fs/promises";
+import { existsSync, accessSync, constants as fsConstants } from "fs";
 import path from "path";
 
 // === Inline types (avoid Zod import) ===
@@ -94,10 +95,6 @@ async function saveJson(filename: string, data: unknown): Promise<void> {
 
 function checkCliAvailability(command: string): ProviderStatus & { id: string } {
   try {
-    const { existsSync, accessSync, constants } = require("fs");
-    const { join } = require("path");
-
-    // Build enhanced PATH
     const home = process.env["HOME"] ?? "";
     const extraDirs = [
       `${home}/.local/bin`, `${home}/bin`, "/opt/homebrew/bin",
@@ -105,7 +102,6 @@ function checkCliAvailability(command: string): ProviderStatus & { id: string } 
     ];
     const pathEnv = [...extraDirs, ...(process.env["PATH"] ?? "").split(":")].filter(Boolean);
 
-    // If absolute path
     if (command.startsWith("/")) {
       if (existsSync(command)) {
         return { id: "", available: true, resolvedPath: command };
@@ -113,12 +109,11 @@ function checkCliAvailability(command: string): ProviderStatus & { id: string } 
       return { id: "", available: false, error: `Not found: ${command}` };
     }
 
-    // Search PATH
     for (const dir of pathEnv) {
-      const candidate = join(dir, command);
+      const candidate = path.join(dir, command);
       try {
         if (existsSync(candidate)) {
-          accessSync(candidate, constants.X_OK);
+          accessSync(candidate, fsConstants.X_OK);
           return { id: "", available: true, resolvedPath: candidate };
         }
       } catch { continue; }
