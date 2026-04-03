@@ -1,6 +1,5 @@
 import type { DefineAPI, SDK, DefineEvents } from "caido:plugin";
-import { readFile, writeFile } from "fs/promises";
-import { existsSync, accessSync, constants as fsConstants } from "fs";
+import { readFile, writeFile, access, stat } from "fs/promises";
 import path from "path";
 
 // === Inline types (avoid Zod import) ===
@@ -93,7 +92,7 @@ async function saveJson(filename: string, data: unknown): Promise<void> {
 
 // === CLI availability check ===
 
-function checkCliAvailability(command: string): ProviderStatus & { id: string } {
+async function checkCliAvailability(command: string): Promise<ProviderStatus & { id: string }> {
   try {
     const home = process.env["HOME"] ?? "";
     const extraDirs = [
@@ -103,17 +102,19 @@ function checkCliAvailability(command: string): ProviderStatus & { id: string } 
     const pathEnv = [...extraDirs, ...(process.env["PATH"] ?? "").split(":")].filter(Boolean);
 
     if (command.startsWith("/")) {
-      if (existsSync(command)) {
+      try {
+        await access(command);
         return { id: "", available: true, resolvedPath: command };
+      } catch {
+        return { id: "", available: false, error: `Not found: ${command}` };
       }
-      return { id: "", available: false, error: `Not found: ${command}` };
     }
 
     for (const dir of pathEnv) {
       const candidate = path.join(dir, command);
       try {
-        if (existsSync(candidate)) {
-          accessSync(candidate, fsConstants.X_OK);
+        const s = await stat(candidate);
+        if (s.isFile()) {
           return { id: "", available: true, resolvedPath: candidate };
         }
       } catch { continue; }
@@ -145,25 +146,27 @@ async function updateSettings(_sdk: BackendSDK, input: Partial<Settings>): Promi
   return ok(currentSettings);
 }
 
-function getProviderStatuses(_sdk: BackendSDK): Result<ProviderStatus[]> {
+async function getProviderStatuses(_sdk: BackendSDK): Promise<Result<ProviderStatus[]>> {
   const providers = ["claude-cli", "gemini-cli", "codex-cli", "copilot-cli"];
-  const statuses = providers.map((id) => {
+  const statuses: ProviderStatus[] = [];
+  for (const id of providers) {
     const config = currentSettings.providers[id];
     if (!config?.enabled || !config?.command) {
-      return { id, available: false, error: "Disabled" };
+      statuses.push({ id, available: false, error: "Disabled" });
+      continue;
     }
-    const result = checkCliAvailability(config.command);
-    return { ...result, id };
-  });
+    const result = await checkCliAvailability(config.command);
+    statuses.push({ ...result, id });
+  }
   return ok(statuses);
 }
 
-function checkProviderAvailability(_sdk: BackendSDK, providerId: string): Result<ProviderStatus> {
+async function checkProviderAvailability(_sdk: BackendSDK, providerId: string): Promise<Result<ProviderStatus>> {
   const config = currentSettings.providers[providerId];
   if (!config?.enabled || !config?.command) {
     return ok({ id: providerId, available: false, error: "Disabled" });
   }
-  const result = checkCliAvailability(config.command);
+  const result = await checkCliAvailability(config.command);
   return ok({ ...result, id: providerId });
 }
 
@@ -206,7 +209,7 @@ async function createCliSession(sdk: BackendSDK, input: { providerId: string; ch
   const config = currentSettings.providers[input.providerId];
   if (!config?.command) return err(`Provider ${input.providerId} not configured`);
 
-  const avail = checkCliAvailability(config.command);
+  const avail = await checkCliAvailability(config.command);
   if (!avail.available) return err(`CLI not found: ${config.command}. ${avail.error ?? ""}`);
 
   const sessionId = `drift-${Date.now()}`;
@@ -223,7 +226,7 @@ async function sendCliMessage(sdk: BackendSDK, input: { sessionId: string; chatI
     const config = currentSettings.providers[providerId];
     if (!config?.command) return err("Provider not configured");
 
-    const avail = checkCliAvailability(config.command);
+    const avail = await checkCliAvailability(config.command);
     if (!avail.available || !avail.resolvedPath) return err(`CLI not found: ${config.command}`);
 
     // Build command based on provider
