@@ -13,6 +13,8 @@ import { deleteChat, getChat, getChats, saveChat } from "./api/chats";
 import { getMcpStatus, startMcpServer, stopMcpServer } from "./api/mcp";
 import { getSettings, updateSettings } from "./api/settings";
 import { setSDK } from "./sdk";
+import { getChatsStore } from "./stores/chats";
+import { getSettingsStore } from "./stores/settings";
 import type { BackendEvents } from "./types";
 
 export * from "./types";
@@ -39,16 +41,12 @@ export type API = DefineAPI<{
 export function init(sdk: SDK<API, BackendEvents>) {
   setSDK(sdk);
 
-  // Initialize stores - these are lazy singletons, safe to fail
+  // Pre-initialize stores (async, fire-and-forget)
   try {
-    const { getSettingsStore } = require("./stores/settings") as typeof import("./stores/settings");
-    const { getChatsStore } = require("./stores/chats") as typeof import("./stores/chats");
-    const settingsStore = getSettingsStore();
-    const chatsStore = getChatsStore();
-    settingsStore.initialize().catch(() => {});
-    chatsStore.initialize().catch(() => {});
+    getSettingsStore().initialize().catch(() => {});
+    getChatsStore().initialize().catch(() => {});
   } catch {
-    // Stores will be lazily created on first API call
+    // Store creation failed, will retry lazily on first API call
   }
 
   // Register all API endpoints
