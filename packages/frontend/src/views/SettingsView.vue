@@ -1,9 +1,16 @@
 <script setup lang="ts">
 import { onMounted } from "vue";
 import { useSettingsStore } from "../stores/settings";
+import { useSDK } from "../plugins/sdk";
 import { CliProvider, CLI_PROVIDER_DISPLAY_NAMES } from "shared";
+import Card from "primevue/card";
+import InputText from "primevue/inputtext";
+import InputNumber from "primevue/inputnumber";
+import Button from "primevue/button";
+import Tag from "primevue/tag";
 
 const store = useSettingsStore();
+const sdk = useSDK();
 
 const allProviders = [
   CliProvider.Claude,
@@ -17,7 +24,7 @@ onMounted(() => store.initialize());
 async function updateProviderCommand(providerId: string, command: string) {
   const providers = { ...store.settings.providers };
   const existing = providers[providerId];
-  if (existing) providers[providerId] = { ...existing, command };
+  if (existing !== undefined) providers[providerId] = { ...existing, command };
   await store.updateSettings({ providers });
   await store.refreshProviders();
 }
@@ -25,272 +32,176 @@ async function updateProviderCommand(providerId: string, command: string) {
 async function toggleProvider(providerId: string) {
   const providers = { ...store.settings.providers };
   const existing = providers[providerId];
-  if (existing)
-    providers[providerId] = { ...existing, enabled: !existing.enabled };
+  if (existing !== undefined) providers[providerId] = { ...existing, enabled: !existing.enabled };
   await store.updateSettings({ providers });
   await store.refreshProviders();
 }
 
-async function updateCaidoApiUrl(url: string) {
-  await store.updateSettings({
-    caidoApi: { ...store.settings.caidoApi, url },
-  });
+async function updateCaidoApi(field: "url" | "token", value: string) {
+  await store.updateSettings({ caidoApi: { ...store.settings.caidoApi, [field]: value } });
 }
 
-async function updateCaidoApiToken(token: string) {
-  await store.updateSettings({
-    caidoApi: { ...store.settings.caidoApi, token },
-  });
+async function updateNumber(field: "processTimeoutSeconds" | "maxHistoryMessages", value: number) {
+  await store.updateSettings({ [field]: value });
 }
 
-async function updateTimeout(val: string) {
-  const n = parseInt(val, 10);
-  if (!isNaN(n) && n >= 10)
-    await store.updateSettings({ processTimeoutSeconds: n });
+function getStatus(pid: string) {
+  return store.providerStatuses.find((s) => s.id === pid);
 }
-
-async function updateMaxHistory(val: string) {
-  const n = parseInt(val, 10);
-  if (!isNaN(n) && n >= 1)
-    await store.updateSettings({ maxHistoryMessages: n });
-}
-
-const inputStyle =
-  "flex: 1; padding: 4px 8px; font-size: 13px; border-radius: 4px; border: 1px solid #555; background: #1e1e1e; color: #e0e0e0; outline: none;";
-const labelStyle = "font-size: 13px; color: #aaa; width: 60px; flex-shrink: 0;";
-const sectionStyle =
-  "padding: 12px; border-radius: 6px; border: 1px solid #333;";
 </script>
 
 <template>
-  <div style="padding: 16px; overflow-y: auto; height: 100%; max-width: 640px;">
+  <div class="p-4 overflow-y-auto h-full" style="max-width: 700px;">
     <!-- Init error -->
     <div
-      v-if="store.initError"
-      style="margin-bottom: 12px; padding: 8px 12px; font-size: 12px; color: #f87171; background: #1c1917; border: 1px solid #7f1d1d; border-radius: 6px;"
+      v-if="store.initError !== undefined"
+      class="mb-4 px-3 py-2 text-xs text-red-400 bg-red-950 border border-red-800 rounded"
     >
-      Backend: {{ store.initError }}
+      {{ store.initError }}
     </div>
 
-    <!-- Loading -->
-    <div v-if="store.loading" style="color: #888;">Loading...</div>
+    <!-- CLI Providers -->
+    <div class="flex items-center gap-2 mb-3">
+      <h2 class="text-lg font-semibold text-surface-100">CLI Providers</h2>
+      <Button
+        label="Refresh"
+        icon="fas fa-sync"
+        text
+        size="small"
+        @click="store.refreshProviders()"
+      />
+    </div>
 
-    <div v-else style="display: flex; flex-direction: column; gap: 24px;">
-      <!-- CLI Providers -->
-      <section>
-        <div
-          style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;"
-        >
-          <h2 style="font-size: 16px; font-weight: 600; color: #e0e0e0; margin: 0;">
-            CLI Providers
-          </h2>
-          <button
-            style="font-size: 11px; padding: 2px 8px; border-radius: 4px; background: #333; color: #aaa; border: none; cursor: pointer;"
-            @click="store.refreshProviders()"
-          >
-            Refresh
-          </button>
-        </div>
-
-        <div style="display: flex; flex-direction: column; gap: 12px;">
-          <div v-for="pid in allProviders" :key="pid" :style="sectionStyle">
-            <div
-              style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px;"
-            >
-              <span
-                style="width: 8px; height: 8px; border-radius: 50%; display: inline-block;"
-                :style="{
-                  background: store.isProviderAvailable(pid)
-                    ? '#22c55e'
-                    : '#ef4444',
-                }"
-              />
-              <span style="font-weight: 500; color: #e0e0e0; font-size: 14px;">
-                {{ CLI_PROVIDER_DISPLAY_NAMES[pid] }}
-              </span>
-              <div style="flex: 1;" />
-              <button
-                style="font-size: 11px; padding: 4px 8px; border-radius: 4px; border: none; cursor: pointer;"
-                :style="{
-                  background: store.settings.providers[pid]?.enabled
-                    ? '#6366f1'
-                    : '#333',
-                  color: store.settings.providers[pid]?.enabled
-                    ? '#fff'
-                    : '#aaa',
-                }"
-                @click="toggleProvider(pid)"
-              >
-                {{
-                  store.settings.providers[pid]?.enabled
-                    ? "Enabled"
-                    : "Disabled"
-                }}
-              </button>
-            </div>
-            <div style="display: flex; align-items: center; gap: 8px;">
-              <label :style="labelStyle">Command:</label>
-              <input
-                :value="store.settings.providers[pid]?.command ?? ''"
-                :style="inputStyle"
-                @change="
-                  (e: Event) =>
-                    updateProviderCommand(
-                      pid,
-                      (e.target as HTMLInputElement).value
-                    )
-                "
-              />
-            </div>
-            <div
-              v-if="
-                store.providerStatuses.find((s) => s.id === pid)?.resolvedPath
-              "
-              style="margin-top: 4px; font-size: 11px; color: #666;"
-            >
-              {{
-                store.providerStatuses.find((s) => s.id === pid)?.resolvedPath
-              }}
-            </div>
-            <div
-              v-if="store.providerStatuses.find((s) => s.id === pid)?.error"
-              style="margin-top: 4px; font-size: 11px; color: #ef4444;"
-            >
-              {{ store.providerStatuses.find((s) => s.id === pid)?.error }}
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <!-- Caido API -->
-      <section>
-        <h2
-          style="font-size: 16px; font-weight: 600; color: #e0e0e0; margin: 0 0 12px 0;"
-        >
-          Caido API
-        </h2>
-        <div :style="sectionStyle">
-          <div
-            style="display: flex; flex-direction: column; gap: 8px;"
-          >
-            <div style="display: flex; align-items: center; gap: 8px;">
-              <label :style="labelStyle">URL:</label>
-              <input
-                :value="store.settings.caidoApi.url"
-                :style="inputStyle"
-                placeholder="http://localhost:8080"
-                @change="
-                  (e: Event) =>
-                    updateCaidoApiUrl(
-                      (e.target as HTMLInputElement).value
-                    )
-                "
-              />
-            </div>
-            <div style="display: flex; align-items: center; gap: 8px;">
-              <label :style="labelStyle">Token:</label>
-              <input
-                :value="store.settings.caidoApi.token"
-                type="password"
-                :style="inputStyle"
-                placeholder="Your Caido PAT token"
-                @change="
-                  (e: Event) =>
-                    updateCaidoApiToken(
-                      (e.target as HTMLInputElement).value
-                    )
-                "
-              />
-            </div>
-            <p style="font-size: 11px; color: #666; margin: 4px 0 0 0;">
-              Required for MCP tools. Generate a PAT in Caido &gt; Settings
-              &gt; API Keys.
-            </p>
-          </div>
-        </div>
-      </section>
-
-      <!-- MCP Server -->
-      <section>
-        <h2
-          style="font-size: 16px; font-weight: 600; color: #e0e0e0; margin: 0 0 12px 0;"
-        >
-          MCP Server
-        </h2>
-        <div :style="sectionStyle">
-          <div style="display: flex; align-items: center; gap: 12px;">
-            <span
-              style="width: 8px; height: 8px; border-radius: 50%; display: inline-block;"
-              :style="{
-                background: store.mcpStatus?.running ? '#22c55e' : '#666',
-              }"
+    <div class="flex flex-col gap-3 mb-6">
+      <Card
+        v-for="pid in allProviders"
+        :key="pid"
+        :pt="{ body: { class: 'p-3' }, content: { class: 'p-0' } }"
+      >
+        <template #content>
+          <div class="flex items-center gap-3 mb-2">
+            <i
+              class="fas fa-circle text-xs"
+              :class="getStatus(pid)?.available ? 'text-green-500' : 'text-red-500'"
             />
-            <span style="font-size: 13px; color: #e0e0e0;">
-              {{
-                store.mcpStatus?.running
-                  ? `Running on port ${store.mcpStatus.port} (${store.mcpStatus.toolCount} tools)`
-                  : "Stopped"
-              }}
+            <span class="font-medium text-surface-100">
+              {{ CLI_PROVIDER_DISPLAY_NAMES[pid] }}
             </span>
-            <div style="flex: 1;" />
-            <button
-              style="font-size: 11px; padding: 4px 12px; border-radius: 4px; border: none; cursor: pointer;"
-              :style="{
-                background: store.mcpStatus?.running ? '#ef4444' : '#16a34a',
-                color: '#fff',
-              }"
-              @click="store.toggleMcp()"
-            >
-              {{ store.mcpStatus?.running ? "Stop" : "Start" }}
-            </button>
+            <div class="flex-1" />
+            <Tag
+              :value="store.settings.providers[pid]?.enabled ? 'Enabled' : 'Disabled'"
+              :severity="store.settings.providers[pid]?.enabled ? 'success' : 'secondary'"
+              class="cursor-pointer"
+              @click="toggleProvider(pid)"
+            />
           </div>
-          <p style="font-size: 11px; color: #666; margin: 8px 0 0 0;">
-            Exposes Caido tools to CLI agents: history, replay, findings, scope,
-            environment, workflows, intercept.
+          <div class="flex items-center gap-2">
+            <label class="text-xs text-surface-400 w-16">Command:</label>
+            <InputText
+              :modelValue="store.settings.providers[pid]?.command ?? ''"
+              class="flex-1 p-inputtext-sm"
+              @change="(e: Event) => updateProviderCommand(pid, (e.target as HTMLInputElement).value)"
+            />
+          </div>
+          <div v-if="getStatus(pid)?.resolvedPath !== undefined" class="mt-1 text-xs text-surface-400">
+            {{ getStatus(pid)?.resolvedPath }}
+          </div>
+          <div v-if="getStatus(pid)?.error !== undefined" class="mt-1 text-xs text-red-400">
+            {{ getStatus(pid)?.error }}
+          </div>
+        </template>
+      </Card>
+    </div>
+
+    <!-- Caido API -->
+    <h2 class="text-lg font-semibold text-surface-100 mb-3">Caido API</h2>
+    <Card :pt="{ body: { class: 'p-3' }, content: { class: 'p-0' } }" class="mb-6">
+      <template #content>
+        <div class="flex flex-col gap-2">
+          <div class="flex items-center gap-2">
+            <label class="text-sm text-surface-300 w-14">URL:</label>
+            <InputText
+              :modelValue="store.settings.caidoApi.url"
+              placeholder="http://localhost:8080"
+              class="flex-1 p-inputtext-sm"
+              @change="(e: Event) => updateCaidoApi('url', (e.target as HTMLInputElement).value)"
+            />
+          </div>
+          <div class="flex items-center gap-2">
+            <label class="text-sm text-surface-300 w-14">Token:</label>
+            <InputText
+              :modelValue="store.settings.caidoApi.token"
+              type="password"
+              placeholder="Your Caido PAT token"
+              class="flex-1 p-inputtext-sm"
+              @change="(e: Event) => updateCaidoApi('token', (e.target as HTMLInputElement).value)"
+            />
+          </div>
+          <p class="text-xs text-surface-400">
+            Required for MCP tools. Generate a PAT in Caido > Settings > API Keys.
           </p>
         </div>
-      </section>
+      </template>
+    </Card>
 
-      <!-- Process Settings -->
-      <section>
-        <h2
-          style="font-size: 16px; font-weight: 600; color: #e0e0e0; margin: 0 0 12px 0;"
-        >
-          Process
-        </h2>
-        <div :style="sectionStyle">
-          <div style="display: flex; flex-direction: column; gap: 8px;">
-            <div style="display: flex; align-items: center; gap: 8px;">
-              <label style="font-size: 13px; color: #aaa;">Timeout (s):</label>
-              <input
-                :value="store.settings.processTimeoutSeconds"
-                type="number"
-                min="10"
-                style="width: 80px; padding: 4px 8px; font-size: 13px; border-radius: 4px; border: 1px solid #555; background: #1e1e1e; color: #e0e0e0; outline: none;"
-                @change="
-                  (e: Event) =>
-                    updateTimeout((e.target as HTMLInputElement).value)
-                "
-              />
-            </div>
-            <div style="display: flex; align-items: center; gap: 8px;">
-              <label style="font-size: 13px; color: #aaa;"
-                >Max history msgs:</label
-              >
-              <input
-                :value="store.settings.maxHistoryMessages"
-                type="number"
-                min="1"
-                style="width: 80px; padding: 4px 8px; font-size: 13px; border-radius: 4px; border: 1px solid #555; background: #1e1e1e; color: #e0e0e0; outline: none;"
-                @change="
-                  (e: Event) =>
-                    updateMaxHistory((e.target as HTMLInputElement).value)
-                "
-              />
-            </div>
+    <!-- MCP Server -->
+    <h2 class="text-lg font-semibold text-surface-100 mb-3">MCP Server</h2>
+    <Card :pt="{ body: { class: 'p-3' }, content: { class: 'p-0' } }" class="mb-6">
+      <template #content>
+        <div class="flex items-center gap-3">
+          <i
+            class="fas fa-circle text-xs"
+            :class="store.mcpStatus?.running ? 'text-green-500' : 'text-surface-500'"
+          />
+          <span class="text-sm text-surface-100">
+            {{ store.mcpStatus?.running
+              ? `Running (${store.mcpStatus.toolCount} tools)`
+              : "Stopped" }}
+          </span>
+          <div class="flex-1" />
+          <Button
+            :label="store.mcpStatus?.running ? 'Stop' : 'Start'"
+            :icon="store.mcpStatus?.running ? 'fas fa-stop' : 'fas fa-play'"
+            :severity="store.mcpStatus?.running ? 'danger' : 'success'"
+            size="small"
+            @click="store.toggleMcp()"
+          />
+        </div>
+        <p class="text-xs text-surface-400 mt-2">
+          Exposes Caido tools to CLI agents via MCP: history, replay, findings, scope, environment, intercept.
+        </p>
+      </template>
+    </Card>
+
+    <!-- Process -->
+    <h2 class="text-lg font-semibold text-surface-100 mb-3">Process</h2>
+    <Card :pt="{ body: { class: 'p-3' }, content: { class: 'p-0' } }">
+      <template #content>
+        <div class="flex flex-col gap-3">
+          <div class="flex items-center gap-2">
+            <label class="text-sm text-surface-300">Timeout (s):</label>
+            <InputNumber
+              :modelValue="store.settings.processTimeoutSeconds"
+              :min="10"
+              :max="600"
+              class="w-24"
+              inputClass="p-inputtext-sm"
+              @update:modelValue="(v: number) => updateNumber('processTimeoutSeconds', v)"
+            />
+          </div>
+          <div class="flex items-center gap-2">
+            <label class="text-sm text-surface-300">Max history msgs:</label>
+            <InputNumber
+              :modelValue="store.settings.maxHistoryMessages"
+              :min="1"
+              :max="50"
+              class="w-24"
+              inputClass="p-inputtext-sm"
+              @update:modelValue="(v: number) => updateNumber('maxHistoryMessages', v)"
+            />
           </div>
         </div>
-      </section>
-    </div>
+      </template>
+    </Card>
   </div>
 </template>

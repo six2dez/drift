@@ -10,13 +10,9 @@ defineProps<{
 <template>
   <div class="flex flex-col gap-3 p-4">
     <div v-if="messages.length === 0" class="text-center text-surface-400 py-8">
-      <p class="text-lg mb-1">No messages yet</p>
-      <p class="text-sm">Send a message to start chatting with your CLI AI</p>
+      <i class="fas fa-comments text-2xl mb-2" />
+      <p class="text-sm">Send a message to start chatting</p>
     </div>
-    <MessageBubble
-      v-for="msg in messages"
-      :key="msg.id"
-      :message="msg"
-    />
+    <MessageBubble v-for="msg in messages" :key="msg.id" :message="msg" />
   </div>
 </template>

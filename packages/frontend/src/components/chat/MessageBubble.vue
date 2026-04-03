@@ -3,61 +3,53 @@ import { computed, ref } from "vue";
 import MarkdownIt from "markdown-it";
 import DOMPurify from "dompurify";
 import type { ChatMessage } from "shared";
+import Button from "primevue/button";
 
 const props = defineProps<{
   message: ChatMessage;
 }>();
 
 const copied = ref(false);
-
-const md = new MarkdownIt({
-  html: false,
-  linkify: true,
-  breaks: true,
-});
+const md = new MarkdownIt({ html: false, linkify: true, breaks: true });
 
 const renderedHtml = computed(() => {
   if (props.message.role === "user") return "";
-  const raw = md.render(props.message.content);
-  return DOMPurify.sanitize(raw);
+  return DOMPurify.sanitize(md.render(props.message.content));
 });
 
 async function copyContent() {
   try {
     await navigator.clipboard.writeText(props.message.content);
     copied.value = true;
-    setTimeout(() => (copied.value = false), 1500);
-  } catch {}
+    setTimeout(() => { copied.value = false; }, 1500);
+  } catch {
+    // clipboard not available
+  }
 }
 </script>
 
 <template>
   <div
-    style="position: relative; max-width: 85%; padding: 8px 12px; border-radius: 8px; font-size: 13px; line-height: 1.5;"
-    :style="{
-      marginLeft: message.role === 'user' ? 'auto' : '0',
-      marginRight: message.role === 'user' ? '0' : 'auto',
-      background: message.role === 'user' ? '#6366f1' : '#2a2a2a',
-      color: message.role === 'user' ? '#fff' : '#e0e0e0',
-    }"
+    class="group relative max-w-[85%] px-3 py-2 rounded-lg text-sm"
+    :class="message.role === 'user'
+      ? 'ml-auto bg-primary-600 text-white'
+      : 'mr-auto bg-surface-700 text-surface-100'"
   >
-    <div v-if="message.role === 'user'" style="white-space: pre-wrap;">
+    <div v-if="message.role === 'user'" class="whitespace-pre-wrap">
       {{ message.content }}
     </div>
-
     <div
       v-else
+      class="prose prose-sm prose-invert max-w-none [&_pre]:bg-surface-800 [&_pre]:p-2 [&_pre]:rounded [&_pre]:overflow-x-auto [&_code]:text-xs [&_a]:text-primary-400"
       v-html="renderedHtml"
-      style="overflow-wrap: break-word;"
     />
-
-    <button
-      style="position: absolute; top: 4px; right: 4px; font-size: 10px; padding: 2px 6px; border-radius: 4px; background: #444; color: #aaa; border: none; cursor: pointer; opacity: 0; transition: opacity 0.2s;"
+    <Button
+      :icon="copied ? 'fas fa-check' : 'fas fa-copy'"
+      text
+      rounded
+      size="small"
+      class="absolute top-1 right-1 opacity-0 group-hover:opacity-100"
       @click="copyContent"
-      @mouseenter="($event.currentTarget as HTMLElement).style.opacity = '1'"
-      @mouseleave="($event.currentTarget as HTMLElement).style.opacity = '0'"
-    >
-      {{ copied ? 'Copied' : 'Copy' }}
-    </button>
+    />
   </div>
 </template>
