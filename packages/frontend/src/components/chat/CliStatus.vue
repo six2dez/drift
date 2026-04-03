@@ -8,13 +8,13 @@ defineProps<{
 </script>
 
 <template>
-  <div class="flex items-center gap-2 px-4 py-1.5 border-b border-surface-200 dark:border-surface-700 text-xs text-surface-400">
+  <div style="display: flex; align-items: center; gap: 8px; padding: 4px 16px; border-bottom: 1px solid #333; font-size: 11px; color: #888;">
     <span
-      class="w-1.5 h-1.5 rounded-full"
-      :class="isStreaming ? 'bg-yellow-500 animate-pulse' : 'bg-green-500'"
+      style="width: 6px; height: 6px; border-radius: 50%; display: inline-block;"
+      :style="{ background: isStreaming ? '#eab308' : '#22c55e' }"
     />
-    <span>{{ CLI_PROVIDER_DISPLAY_NAMES[providerId as CliProvider] ?? providerId }}</span>
-    <span v-if="isStreaming" class="text-yellow-500">Streaming...</span>
+    <span style="color: #ccc;">{{ CLI_PROVIDER_DISPLAY_NAMES[providerId as CliProvider] ?? providerId }}</span>
+    <span v-if="isStreaming" style="color: #eab308;">Streaming...</span>
     <span v-else>Ready</span>
   </div>
 </template>

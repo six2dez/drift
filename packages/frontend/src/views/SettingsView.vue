@@ -15,7 +15,6 @@ const allProviders = [
 onMounted(() => store.initialize());
 
 async function updateProviderCommand(providerId: string, command: string) {
-  if (!store.settings) return;
   const providers = { ...store.settings.providers };
   const existing = providers[providerId];
   if (existing) providers[providerId] = { ...existing, command };
@@ -24,96 +23,140 @@ async function updateProviderCommand(providerId: string, command: string) {
 }
 
 async function toggleProvider(providerId: string) {
-  if (!store.settings) return;
   const providers = { ...store.settings.providers };
   const existing = providers[providerId];
-  if (existing) providers[providerId] = { ...existing, enabled: !existing.enabled };
+  if (existing)
+    providers[providerId] = { ...existing, enabled: !existing.enabled };
   await store.updateSettings({ providers });
   await store.refreshProviders();
 }
 
 async function updateCaidoApiUrl(url: string) {
-  if (!store.settings) return;
-  await store.updateSettings({ caidoApi: { ...store.settings.caidoApi, url } });
+  await store.updateSettings({
+    caidoApi: { ...store.settings.caidoApi, url },
+  });
 }
 
 async function updateCaidoApiToken(token: string) {
-  if (!store.settings) return;
-  await store.updateSettings({ caidoApi: { ...store.settings.caidoApi, token } });
+  await store.updateSettings({
+    caidoApi: { ...store.settings.caidoApi, token },
+  });
 }
 
 async function updateTimeout(val: string) {
   const n = parseInt(val, 10);
-  if (!isNaN(n) && n >= 10) await store.updateSettings({ processTimeoutSeconds: n });
+  if (!isNaN(n) && n >= 10)
+    await store.updateSettings({ processTimeoutSeconds: n });
 }
 
 async function updateMaxHistory(val: string) {
   const n = parseInt(val, 10);
-  if (!isNaN(n) && n >= 1) await store.updateSettings({ maxHistoryMessages: n });
+  if (!isNaN(n) && n >= 1)
+    await store.updateSettings({ maxHistoryMessages: n });
 }
+
+const inputStyle =
+  "flex: 1; padding: 4px 8px; font-size: 13px; border-radius: 4px; border: 1px solid #555; background: #1e1e1e; color: #e0e0e0; outline: none;";
+const labelStyle = "font-size: 13px; color: #aaa; width: 60px; flex-shrink: 0;";
+const sectionStyle =
+  "padding: 12px; border-radius: 6px; border: 1px solid #333;";
 </script>
 
 <template>
-  <div class="p-4 overflow-y-auto h-full max-w-2xl">
-    <div v-if="store.loading" class="text-surface-400">Loading...</div>
+  <div style="padding: 16px; overflow-y: auto; height: 100%; max-width: 640px;">
+    <!-- Init error -->
+    <div
+      v-if="store.initError"
+      style="margin-bottom: 12px; padding: 8px 12px; font-size: 12px; color: #f87171; background: #1c1917; border: 1px solid #7f1d1d; border-radius: 6px;"
+    >
+      Backend: {{ store.initError }}
+    </div>
 
-    <div v-else-if="store.settings" class="space-y-6">
+    <!-- Loading -->
+    <div v-if="store.loading" style="color: #888;">Loading...</div>
+
+    <div v-else style="display: flex; flex-direction: column; gap: 24px;">
       <!-- CLI Providers -->
       <section>
-        <div class="flex items-center gap-2 mb-3">
-          <h2 class="text-lg font-semibold text-surface-900 dark:text-surface-100">CLI Providers</h2>
+        <div
+          style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;"
+        >
+          <h2 style="font-size: 16px; font-weight: 600; color: #e0e0e0; margin: 0;">
+            CLI Providers
+          </h2>
           <button
-            class="text-xs px-2 py-0.5 rounded bg-surface-200 dark:bg-surface-700 text-surface-500 hover:text-surface-800 dark:hover:text-surface-200"
+            style="font-size: 11px; padding: 2px 8px; border-radius: 4px; background: #333; color: #aaa; border: none; cursor: pointer;"
             @click="store.refreshProviders()"
           >
             Refresh
           </button>
         </div>
 
-        <div class="space-y-3">
-          <div
-            v-for="pid in allProviders"
-            :key="pid"
-            class="p-3 rounded border border-surface-200 dark:border-surface-700"
-          >
-            <div class="flex items-center gap-3 mb-2">
+        <div style="display: flex; flex-direction: column; gap: 12px;">
+          <div v-for="pid in allProviders" :key="pid" :style="sectionStyle">
+            <div
+              style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px;"
+            >
               <span
-                class="w-2 h-2 rounded-full"
-                :class="store.isProviderAvailable(pid) ? 'bg-green-500' : 'bg-red-500'"
+                style="width: 8px; height: 8px; border-radius: 50%; display: inline-block;"
+                :style="{
+                  background: store.isProviderAvailable(pid)
+                    ? '#22c55e'
+                    : '#ef4444',
+                }"
               />
-              <span class="font-medium text-surface-900 dark:text-surface-100">
+              <span style="font-weight: 500; color: #e0e0e0; font-size: 14px;">
                 {{ CLI_PROVIDER_DISPLAY_NAMES[pid] }}
               </span>
-              <div class="flex-1" />
+              <div style="flex: 1;" />
               <button
-                class="text-xs px-2 py-1 rounded"
-                :class="store.settings.providers[pid]?.enabled
-                  ? 'bg-primary-500 text-white'
-                  : 'bg-surface-200 dark:bg-surface-700 text-surface-600 dark:text-surface-300'"
+                style="font-size: 11px; padding: 4px 8px; border-radius: 4px; border: none; cursor: pointer;"
+                :style="{
+                  background: store.settings.providers[pid]?.enabled
+                    ? '#6366f1'
+                    : '#333',
+                  color: store.settings.providers[pid]?.enabled
+                    ? '#fff'
+                    : '#aaa',
+                }"
                 @click="toggleProvider(pid)"
               >
-                {{ store.settings.providers[pid]?.enabled ? 'Enabled' : 'Disabled' }}
+                {{
+                  store.settings.providers[pid]?.enabled
+                    ? "Enabled"
+                    : "Disabled"
+                }}
               </button>
             </div>
-            <div class="flex items-center gap-2">
-              <label class="text-xs text-surface-400 w-16">Command:</label>
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <label :style="labelStyle">Command:</label>
               <input
                 :value="store.settings.providers[pid]?.command ?? ''"
-                class="flex-1 px-2 py-1 text-sm rounded border border-surface-200 dark:border-surface-700 bg-surface-50 dark:bg-surface-900 text-surface-900 dark:text-surface-100"
-                @change="(e: Event) => updateProviderCommand(pid, (e.target as HTMLInputElement).value)"
+                :style="inputStyle"
+                @change="
+                  (e: Event) =>
+                    updateProviderCommand(
+                      pid,
+                      (e.target as HTMLInputElement).value
+                    )
+                "
               />
             </div>
             <div
-              v-if="store.providerStatuses.find(s => s.id === pid)?.resolvedPath"
-              class="mt-1 text-xs text-surface-400"
+              v-if="
+                store.providerStatuses.find((s) => s.id === pid)?.resolvedPath
+              "
+              style="margin-top: 4px; font-size: 11px; color: #666;"
             >
-              {{ store.providerStatuses.find(s => s.id === pid)?.resolvedPath }}
+              {{
+                store.providerStatuses.find((s) => s.id === pid)?.resolvedPath
+              }}
             </div>
             <div
-              v-if="store.providerStatuses.find(s => s.id === pid)?.error"
-              class="mt-1 text-xs text-red-500"
+              v-if="store.providerStatuses.find((s) => s.id === pid)?.error"
+              style="margin-top: 4px; font-size: 11px; color: #ef4444;"
             >
-              {{ store.providerStatuses.find(s => s.id === pid)?.error }}
+              {{ store.providerStatuses.find((s) => s.id === pid)?.error }}
             </div>
           </div>
         </div>
@@ -121,87 +164,130 @@ async function updateMaxHistory(val: string) {
 
       <!-- Caido API -->
       <section>
-        <h2 class="text-lg font-semibold mb-3 text-surface-900 dark:text-surface-100">Caido API</h2>
-        <div class="p-3 rounded border border-surface-200 dark:border-surface-700 space-y-2">
-          <div class="flex items-center gap-2">
-            <label class="text-sm text-surface-600 dark:text-surface-300 w-16">URL:</label>
-            <input
-              :value="store.settings.caidoApi.url"
-              class="flex-1 px-2 py-1 text-sm rounded border border-surface-200 dark:border-surface-700 bg-surface-50 dark:bg-surface-900 text-surface-900 dark:text-surface-100"
-              placeholder="http://localhost:8080"
-              @change="(e: Event) => updateCaidoApiUrl((e.target as HTMLInputElement).value)"
-            />
+        <h2
+          style="font-size: 16px; font-weight: 600; color: #e0e0e0; margin: 0 0 12px 0;"
+        >
+          Caido API
+        </h2>
+        <div :style="sectionStyle">
+          <div
+            style="display: flex; flex-direction: column; gap: 8px;"
+          >
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <label :style="labelStyle">URL:</label>
+              <input
+                :value="store.settings.caidoApi.url"
+                :style="inputStyle"
+                placeholder="http://localhost:8080"
+                @change="
+                  (e: Event) =>
+                    updateCaidoApiUrl(
+                      (e.target as HTMLInputElement).value
+                    )
+                "
+              />
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <label :style="labelStyle">Token:</label>
+              <input
+                :value="store.settings.caidoApi.token"
+                type="password"
+                :style="inputStyle"
+                placeholder="Your Caido PAT token"
+                @change="
+                  (e: Event) =>
+                    updateCaidoApiToken(
+                      (e.target as HTMLInputElement).value
+                    )
+                "
+              />
+            </div>
+            <p style="font-size: 11px; color: #666; margin: 4px 0 0 0;">
+              Required for MCP tools. Generate a PAT in Caido &gt; Settings
+              &gt; API Keys.
+            </p>
           </div>
-          <div class="flex items-center gap-2">
-            <label class="text-sm text-surface-600 dark:text-surface-300 w-16">Token:</label>
-            <input
-              :value="store.settings.caidoApi.token"
-              type="password"
-              class="flex-1 px-2 py-1 text-sm rounded border border-surface-200 dark:border-surface-700 bg-surface-50 dark:bg-surface-900 text-surface-900 dark:text-surface-100"
-              placeholder="Your Caido PAT token"
-              @change="(e: Event) => updateCaidoApiToken((e.target as HTMLInputElement).value)"
-            />
-          </div>
-          <p class="text-xs text-surface-400">
-            Required for MCP tools. Generate a PAT in Caido &gt; Settings &gt; API Keys.
-          </p>
         </div>
       </section>
 
       <!-- MCP Server -->
       <section>
-        <h2 class="text-lg font-semibold mb-3 text-surface-900 dark:text-surface-100">MCP Server</h2>
-        <div class="p-3 rounded border border-surface-200 dark:border-surface-700 space-y-2">
-          <div class="flex items-center gap-3">
+        <h2
+          style="font-size: 16px; font-weight: 600; color: #e0e0e0; margin: 0 0 12px 0;"
+        >
+          MCP Server
+        </h2>
+        <div :style="sectionStyle">
+          <div style="display: flex; align-items: center; gap: 12px;">
             <span
-              class="w-2 h-2 rounded-full"
-              :class="store.mcpStatus?.running ? 'bg-green-500' : 'bg-surface-500'"
+              style="width: 8px; height: 8px; border-radius: 50%; display: inline-block;"
+              :style="{
+                background: store.mcpStatus?.running ? '#22c55e' : '#666',
+              }"
             />
-            <span class="text-sm text-surface-900 dark:text-surface-100">
-              {{ store.mcpStatus?.running
-                ? `Running on port ${store.mcpStatus.port} (${store.mcpStatus.toolCount} tools)`
-                : 'Stopped' }}
+            <span style="font-size: 13px; color: #e0e0e0;">
+              {{
+                store.mcpStatus?.running
+                  ? `Running on port ${store.mcpStatus.port} (${store.mcpStatus.toolCount} tools)`
+                  : "Stopped"
+              }}
             </span>
-            <div class="flex-1" />
+            <div style="flex: 1;" />
             <button
-              class="text-xs px-3 py-1 rounded"
-              :class="store.mcpStatus?.running
-                ? 'bg-red-500 text-white hover:bg-red-600'
-                : 'bg-green-600 text-white hover:bg-green-700'"
+              style="font-size: 11px; padding: 4px 12px; border-radius: 4px; border: none; cursor: pointer;"
+              :style="{
+                background: store.mcpStatus?.running ? '#ef4444' : '#16a34a',
+                color: '#fff',
+              }"
               @click="store.toggleMcp()"
             >
-              {{ store.mcpStatus?.running ? 'Stop' : 'Start' }}
+              {{ store.mcpStatus?.running ? "Stop" : "Start" }}
             </button>
           </div>
-          <p class="text-xs text-surface-400">
-            Exposes Caido tools to CLI agents: search history, replay requests, create findings, manage scope, environment, workflows, and intercept.
+          <p style="font-size: 11px; color: #666; margin: 8px 0 0 0;">
+            Exposes Caido tools to CLI agents: history, replay, findings, scope,
+            environment, workflows, intercept.
           </p>
         </div>
       </section>
 
       <!-- Process Settings -->
       <section>
-        <h2 class="text-lg font-semibold mb-3 text-surface-900 dark:text-surface-100">Process</h2>
-        <div class="p-3 rounded border border-surface-200 dark:border-surface-700 space-y-2">
-          <div class="flex items-center gap-2">
-            <label class="text-sm text-surface-600 dark:text-surface-300">Timeout (s):</label>
-            <input
-              :value="store.settings.processTimeoutSeconds"
-              type="number"
-              min="10"
-              class="w-20 px-2 py-1 text-sm rounded border border-surface-200 dark:border-surface-700 bg-surface-50 dark:bg-surface-900 text-surface-900 dark:text-surface-100"
-              @change="(e: Event) => updateTimeout((e.target as HTMLInputElement).value)"
-            />
-          </div>
-          <div class="flex items-center gap-2">
-            <label class="text-sm text-surface-600 dark:text-surface-300">Max history msgs:</label>
-            <input
-              :value="store.settings.maxHistoryMessages"
-              type="number"
-              min="1"
-              class="w-20 px-2 py-1 text-sm rounded border border-surface-200 dark:border-surface-700 bg-surface-50 dark:bg-surface-900 text-surface-900 dark:text-surface-100"
-              @change="(e: Event) => updateMaxHistory((e.target as HTMLInputElement).value)"
-            />
+        <h2
+          style="font-size: 16px; font-weight: 600; color: #e0e0e0; margin: 0 0 12px 0;"
+        >
+          Process
+        </h2>
+        <div :style="sectionStyle">
+          <div style="display: flex; flex-direction: column; gap: 8px;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <label style="font-size: 13px; color: #aaa;">Timeout (s):</label>
+              <input
+                :value="store.settings.processTimeoutSeconds"
+                type="number"
+                min="10"
+                style="width: 80px; padding: 4px 8px; font-size: 13px; border-radius: 4px; border: 1px solid #555; background: #1e1e1e; color: #e0e0e0; outline: none;"
+                @change="
+                  (e: Event) =>
+                    updateTimeout((e.target as HTMLInputElement).value)
+                "
+              />
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <label style="font-size: 13px; color: #aaa;"
+                >Max history msgs:</label
+              >
+              <input
+                :value="store.settings.maxHistoryMessages"
+                type="number"
+                min="1"
+                style="width: 80px; padding: 4px 8px; font-size: 13px; border-radius: 4px; border: 1px solid #555; background: #1e1e1e; color: #e0e0e0; outline: none;"
+                @change="
+                  (e: Event) =>
+                    updateMaxHistory((e.target as HTMLInputElement).value)
+                "
+              />
+            </div>
           </div>
         </div>
       </section>

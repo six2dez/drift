@@ -180,7 +180,7 @@ function handleProviderChange(provider: string) {
 </script>
 
 <template>
-  <div class="flex h-full">
+  <div style="display: flex; height: 100%;">
     <!-- Sidebar -->
     <ChatSidebar
       :chats="chatStore.chats"
@@ -191,24 +191,20 @@ function handleProviderChange(provider: string) {
     />
 
     <!-- Main chat area -->
-    <div class="flex flex-col flex-1 min-w-0">
-      <!-- Status bar -->
-      <div class="flex items-center gap-2">
-        <CliStatus
-          :provider-id="currentProvider"
-          :is-streaming="isStreaming"
-          class="flex-1"
-        />
-      </div>
+    <div style="display: flex; flex-direction: column; flex: 1; min-width: 0;">
+      <CliStatus
+        :provider-id="currentProvider"
+        :is-streaming="isStreaming"
+      />
 
       <!-- Error banner -->
       <div
         v-if="errorMessage"
-        class="mx-4 mt-2 px-3 py-2 text-xs text-red-400 bg-red-950 border border-red-800 rounded flex items-center gap-2"
+        style="margin: 8px 16px 0; padding: 8px 12px; font-size: 12px; color: #f87171; background: #1c1917; border: 1px solid #7f1d1d; border-radius: 6px; display: flex; align-items: center; gap: 8px;"
       >
-        <span class="flex-1">{{ errorMessage }}</span>
+        <span style="flex: 1;">{{ errorMessage }}</span>
         <button
-          class="text-red-300 hover:text-white text-xs underline"
+          style="color: #fca5a5; font-size: 11px; text-decoration: underline; background: none; border: none; cursor: pointer;"
           @click="errorMessage = null"
         >
           Dismiss
@@ -216,19 +212,19 @@ function handleProviderChange(provider: string) {
       </div>
 
       <!-- Messages -->
-      <div ref="messagesContainer" class="flex-1 overflow-y-auto">
+      <div ref="messagesContainer" style="flex: 1; overflow-y: auto;">
         <MessageList :messages="chatStore.activeMessages" />
 
         <!-- Streaming indicator -->
-        <div v-if="isStreaming" class="px-4 pb-2">
+        <div v-if="isStreaming" style="padding: 0 16px 8px;">
           <div
             v-if="streamingContent"
-            class="max-w-[85%] mr-auto px-3 py-2 rounded-lg text-sm whitespace-pre-wrap bg-surface-100 dark:bg-surface-800 text-surface-900 dark:text-surface-100 opacity-70"
+            style="max-width: 85%; padding: 8px 12px; border-radius: 8px; font-size: 13px; white-space: pre-wrap; background: #2a2a2a; color: #ccc; opacity: 0.7;"
           >
-            {{ streamingContent }}<span class="animate-pulse">|</span>
+            {{ streamingContent }}<span style="animation: pulse 1s infinite;">|</span>
           </div>
-          <div v-else class="flex items-center gap-2 text-xs text-surface-400 py-2">
-            <span class="w-1.5 h-1.5 rounded-full bg-yellow-500 animate-pulse" />
+          <div v-else style="display: flex; align-items: center; gap: 8px; font-size: 11px; color: #888; padding: 8px 0;">
+            <span style="width: 6px; height: 6px; border-radius: 50%; background: #eab308; display: inline-block; animation: pulse 1s infinite;" />
             Waiting for response...
           </div>
         </div>

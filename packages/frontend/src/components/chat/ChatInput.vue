@@ -40,41 +40,42 @@ function handleKeydown(e: KeyboardEvent) {
 </script>
 
 <template>
-  <div class="border-t border-surface-200 dark:border-surface-700 p-3">
+  <div style="border-top: 1px solid #333; padding: 12px;">
     <!-- Provider selector -->
-    <div class="flex items-center gap-2 mb-2">
+    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
       <select
         :value="provider"
-        class="text-xs px-2 py-1 rounded border border-surface-200 dark:border-surface-700 bg-surface-50 dark:bg-surface-900 text-surface-900 dark:text-surface-100"
+        style="font-size: 12px; padding: 4px 8px; border-radius: 4px; border: 1px solid #555; background: #1e1e1e; color: #e0e0e0;"
         @change="(e: Event) => emit('update:provider', (e.target as HTMLSelectElement).value)"
       >
         <option
           v-for="p in allProviders"
           :key="p"
           :value="p"
+          style="color: #e0e0e0; background: #1e1e1e;"
         >
-          {{ settingsStore.isProviderAvailable(p) ? '' : '  ' }}{{ CLI_PROVIDER_DISPLAY_NAMES[p] }}{{ settingsStore.isProviderAvailable(p) ? '' : ' (not found)' }}
+          {{ CLI_PROVIDER_DISPLAY_NAMES[p] }}{{ settingsStore.isProviderAvailable(p) ? '' : ' (not found)' }}
         </option>
       </select>
       <span
-        class="w-1.5 h-1.5 rounded-full"
-        :class="settingsStore.isProviderAvailable(provider) ? 'bg-green-500' : 'bg-red-500'"
+        style="width: 6px; height: 6px; border-radius: 50%; display: inline-block;"
+        :style="{ background: settingsStore.isProviderAvailable(provider) ? '#22c55e' : '#ef4444' }"
       />
     </div>
 
     <!-- Input area -->
-    <div class="flex items-end gap-2">
+    <div style="display: flex; align-items: flex-end; gap: 8px;">
       <textarea
         v-model="input"
         :disabled="isStreaming"
         placeholder="Type your message... (Enter to send, Shift+Enter for newline)"
         rows="2"
-        class="flex-1 px-3 py-2 text-sm rounded border border-surface-200 dark:border-surface-700 bg-surface-50 dark:bg-surface-900 text-surface-900 dark:text-surface-100 resize-none focus:outline-none focus:border-primary-500"
+        style="flex: 1; padding: 8px 12px; font-size: 13px; border-radius: 6px; border: 1px solid #555; background: #1e1e1e; color: #e0e0e0; resize: none; outline: none; font-family: inherit;"
         @keydown="handleKeydown"
       />
       <button
         v-if="isStreaming"
-        class="px-4 py-2 text-sm rounded bg-red-500 text-white hover:bg-red-600"
+        style="padding: 8px 16px; font-size: 13px; border-radius: 6px; background: #ef4444; color: white; border: none; cursor: pointer;"
         @click="emit('cancel')"
       >
         Stop
@@ -82,7 +83,8 @@ function handleKeydown(e: KeyboardEvent) {
       <button
         v-else
         :disabled="!input.trim() || !settingsStore.isProviderAvailable(provider)"
-        class="px-4 py-2 text-sm rounded bg-primary-500 text-white disabled:opacity-50 hover:bg-primary-600"
+        style="padding: 8px 16px; font-size: 13px; border-radius: 6px; background: #6366f1; color: white; border: none; cursor: pointer;"
+        :style="{ opacity: (!input.trim() || !settingsStore.isProviderAvailable(provider)) ? 0.5 : 1 }"
         @click="handleSend"
       >
         Send

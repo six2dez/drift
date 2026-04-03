@@ -23,47 +23,45 @@ function formatTime(ts: number): string {
 </script>
 
 <template>
-  <div class="flex flex-col h-full border-r border-surface-200 dark:border-surface-700 w-56">
-    <!-- New chat button -->
-    <div class="p-2">
+  <div style="display: flex; flex-direction: column; height: 100%; width: 180px; border-right: 1px solid #333; flex-shrink: 0;">
+    <div style="padding: 8px;">
       <button
-        class="w-full px-3 py-1.5 text-sm rounded bg-primary-500 text-white hover:bg-primary-600"
+        style="width: 100%; padding: 6px 12px; font-size: 13px; border-radius: 6px; background: #6366f1; color: white; border: none; cursor: pointer;"
         @click="emit('create')"
       >
         + New Chat
       </button>
     </div>
 
-    <!-- Chat list -->
-    <div class="flex-1 overflow-y-auto">
+    <div style="flex: 1; overflow-y: auto;">
       <div
         v-for="chat in chats"
         :key="chat.id"
-        class="group flex items-center gap-2 px-3 py-2 cursor-pointer text-sm border-b border-surface-100 dark:border-surface-800"
-        :class="chat.id === activeChatId
-          ? 'bg-surface-100 dark:bg-surface-800'
-          : 'hover:bg-surface-50 dark:hover:bg-surface-900'"
+        style="display: flex; align-items: center; gap: 8px; padding: 8px 12px; cursor: pointer; border-bottom: 1px solid #222;"
+        :style="{ background: chat.id === activeChatId ? '#2a2a2a' : 'transparent' }"
         @click="emit('select', chat.id)"
+        @mouseenter="($event.currentTarget as HTMLElement).style.background = chat.id === activeChatId ? '#2a2a2a' : '#1e1e1e'"
+        @mouseleave="($event.currentTarget as HTMLElement).style.background = chat.id === activeChatId ? '#2a2a2a' : 'transparent'"
       >
-        <div class="flex-1 min-w-0">
-          <div class="truncate text-surface-900 dark:text-surface-100">
+        <div style="flex: 1; min-width: 0;">
+          <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #e0e0e0; font-size: 12px;">
             {{ chat.title }}
           </div>
-          <div class="flex items-center gap-1 text-xs text-surface-400">
-            <span>{{ CLI_PROVIDER_DISPLAY_NAMES[chat.providerId as CliProvider] }}</span>
+          <div style="display: flex; align-items: center; gap: 4px; font-size: 11px; color: #888;">
+            <span>{{ CLI_PROVIDER_DISPLAY_NAMES[chat.providerId as CliProvider]?.split(' ')[0] }}</span>
             <span>&middot;</span>
             <span>{{ formatTime(chat.updatedAt) }}</span>
           </div>
         </div>
         <button
-          class="opacity-0 group-hover:opacity-100 text-xs text-surface-400 hover:text-red-500 px-1"
+          style="font-size: 14px; color: #666; background: none; border: none; cursor: pointer; padding: 0 4px;"
           @click.stop="emit('delete', chat.id)"
         >
           &times;
         </button>
       </div>
 
-      <div v-if="chats.length === 0" class="px-3 py-4 text-xs text-surface-400 text-center">
+      <div v-if="chats.length === 0" style="padding: 16px 12px; font-size: 11px; color: #666; text-align: center;">
         No chats yet
       </div>
     </div>

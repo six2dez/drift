@@ -27,35 +27,35 @@ async function copyContent() {
     await navigator.clipboard.writeText(props.message.content);
     copied.value = true;
     setTimeout(() => (copied.value = false), 1500);
-  } catch {
-    // fallback
-  }
+  } catch {}
 }
 </script>
 
 <template>
   <div
-    class="group relative max-w-[85%] px-3 py-2 rounded-lg text-sm"
-    :class="message.role === 'user'
-      ? 'ml-auto bg-primary-500 text-white'
-      : 'mr-auto bg-surface-100 dark:bg-surface-800 text-surface-900 dark:text-surface-100'"
+    style="position: relative; max-width: 85%; padding: 8px 12px; border-radius: 8px; font-size: 13px; line-height: 1.5;"
+    :style="{
+      marginLeft: message.role === 'user' ? 'auto' : '0',
+      marginRight: message.role === 'user' ? '0' : 'auto',
+      background: message.role === 'user' ? '#6366f1' : '#2a2a2a',
+      color: message.role === 'user' ? '#fff' : '#e0e0e0',
+    }"
   >
-    <!-- User messages: plain text -->
-    <div v-if="message.role === 'user'" class="whitespace-pre-wrap">
+    <div v-if="message.role === 'user'" style="white-space: pre-wrap;">
       {{ message.content }}
     </div>
 
-    <!-- Assistant messages: rendered markdown -->
     <div
       v-else
-      class="prose prose-sm dark:prose-invert max-w-none [&_pre]:bg-surface-200 [&_pre]:dark:bg-surface-900 [&_pre]:p-2 [&_pre]:rounded [&_pre]:overflow-x-auto [&_code]:text-xs [&_a]:text-primary-400"
       v-html="renderedHtml"
+      style="overflow-wrap: break-word;"
     />
 
-    <!-- Copy button -->
     <button
-      class="absolute top-1 right-1 opacity-0 group-hover:opacity-100 text-xs px-1.5 py-0.5 rounded bg-surface-200 dark:bg-surface-700 text-surface-500 hover:text-surface-800 dark:hover:text-surface-200 transition-opacity"
+      style="position: absolute; top: 4px; right: 4px; font-size: 10px; padding: 2px 6px; border-radius: 4px; background: #444; color: #aaa; border: none; cursor: pointer; opacity: 0; transition: opacity 0.2s;"
       @click="copyContent"
+      @mouseenter="($event.currentTarget as HTMLElement).style.opacity = '1'"
+      @mouseleave="($event.currentTarget as HTMLElement).style.opacity = '0'"
     >
       {{ copied ? 'Copied' : 'Copy' }}
     </button>
