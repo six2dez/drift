@@ -1,5 +1,4 @@
-import { createServer, type Server, type IncomingMessage, type ServerResponse } from "http";
-import { randomUUID } from "crypto";
+import type { Server, IncomingMessage, ServerResponse } from "http";
 import type { McpServerInfo, Settings } from "shared";
 import { CaidoGraphQLClient } from "./caido-client";
 import {
@@ -87,6 +86,10 @@ class McpServer {
     if (this.server) {
       throw new Error("MCP server already running");
     }
+
+    // Dynamic imports - http/crypto may not be available in all runtimes
+    const { createServer } = await import("http");
+    const { randomUUID } = await import("crypto");
 
     this.host = settings.mcp.host;
     this.port = settings.mcp.port;

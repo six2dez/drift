@@ -1,8 +1,6 @@
-import { randomUUID } from "crypto";
 import { writeFileSync, rmSync, mkdtempSync } from "fs";
 import { join, dirname } from "path";
 import { tmpdir } from "os";
-import type { ChildProcess } from "child_process";
 import type {
   CliProvider,
   CliSessionStateEvent,
@@ -31,7 +29,7 @@ type ActiveSession = {
   cliSessionId: string | null;
   state: "starting" | "running" | "stopped" | "error";
   error?: string;
-  activeProcess: ChildProcess | null;
+  activeProcess: { kill: (signal?: string) => void } | null;
   tempMcpConfig: TempMcpConfig | null;
   tempPromptFile: string | null;
 };
@@ -160,7 +158,7 @@ class SessionManager {
     // Generate session ID for Claude on first message
     const isFirstMessage = session.cliSessionId === null;
     if (isFirstMessage && adapter.supportsResume) {
-      session.cliSessionId = randomUUID();
+      session.cliSessionId = Math.random().toString(36).slice(2) + Date.now().toString(36);
     }
 
     // Build command with resolved path
@@ -206,7 +204,8 @@ class SessionManager {
     const [cmd, ...args] = command;
 
     return new Promise<string>((resolve, reject) => {
-      let proc: ChildProcess;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      let proc: any;
       try {
         proc = spawn(cmd!, args, {
           env: { ...process.env, ...env },
