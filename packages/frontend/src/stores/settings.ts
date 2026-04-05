@@ -54,8 +54,9 @@ export const useSettingsStore = defineStore("settings", () => {
       if (mResult?.kind === "Error" && mResult.error !== "")
         errors.push(`mcp: ${mResult.error}`);
 
-      if (errors.length > 0) {
-        initError.value = errors.join("; ");
+      const msg = errors.join("; ").trim();
+      if (msg.length > 0) {
+        initError.value = msg;
       }
     } catch (err) {
       initError.value = (err as Error).message;

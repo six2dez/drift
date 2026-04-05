@@ -389,10 +389,22 @@ async function sendCliMessage(
     }
 
     // ── Build prompt with context ──
-    let prompt = input.text;
-    if (input.httpContext) {
-      prompt = `[Current HTTP Request]\n${input.httpContext}\n\n${prompt}`;
+    let prompt = "";
+
+    // Add system context for first message
+    if (!cliSessions.has(input.chatId) || providerId !== "claude-cli") {
+      prompt += "You are a security assistant integrated with Caido (a web security proxy). ";
+      if (mcpTempDir !== undefined && providerId === "claude-cli") {
+        prompt += "You have access to Caido MCP tools: search_history, get_request, send_request, create_finding, list_findings, get_scope, check_scope, get_environment, set_environment, create_replay_session, intercept_status, intercept_pause, intercept_resume, run_workflow. Use them to answer questions about HTTP traffic, create findings, and interact with Caido. ";
+      }
+      prompt += "\n\n";
     }
+
+    if (input.httpContext !== undefined && input.httpContext !== "") {
+      prompt += `[Current HTTP Request/Response]\n${input.httpContext}\n\n`;
+    }
+
+    prompt += input.text;
 
     // ── Spawn process ──
     sessionStates.set(input.sessionId, "running");
