@@ -289,7 +289,7 @@ async function createCliSession(
   sdk: BackendSDK,
   input: { providerId: string; chatId: string }
 ): Promise<Result<string>> {
-  const status = checkProvider(input.providerId);
+  const status = await checkProvider(input.providerId);
   if (!status.available) {
     return err(`CLI not found: ${status.error}`);
   }

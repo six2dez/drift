@@ -39,15 +39,20 @@ export const useSettingsStore = defineStore("settings", () => {
       if (pResult?.kind === "Ok") providerStatuses.value = pResult.value;
       if (mResult?.kind === "Ok") mcpStatus.value = mResult.value;
 
-      // Collect errors for debugging
+      // Collect errors for debugging (only real errors, not empty ones)
       const errors: string[] = [];
       if (results[0]?.status === "rejected")
-        errors.push(`settings: ${results[0].reason}`);
-      if (sResult?.kind === "Error") errors.push(`settings: ${sResult.error}`);
+        errors.push(`settings: ${String(results[0].reason)}`);
+      if (sResult?.kind === "Error" && sResult.error !== "")
+        errors.push(`settings: ${sResult.error}`);
       if (results[1]?.status === "rejected")
-        errors.push(`providers: ${results[1].reason}`);
+        errors.push(`providers: ${String(results[1].reason)}`);
+      if (pResult?.kind === "Error" && pResult.error !== "")
+        errors.push(`providers: ${pResult.error}`);
       if (results[2]?.status === "rejected")
-        errors.push(`mcp: ${results[2].reason}`);
+        errors.push(`mcp: ${String(results[2].reason)}`);
+      if (mResult?.kind === "Error" && mResult.error !== "")
+        errors.push(`mcp: ${mResult.error}`);
 
       if (errors.length > 0) {
         initError.value = errors.join("; ");
