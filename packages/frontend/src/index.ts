@@ -82,7 +82,7 @@ export const init = (sdk: FrontendSDK) => {
   app.mount(root);
 
   sdk.navigation.addPage("/drift", { body: root });
-  sdk.sidebar.registerItem("Drift", "/drift", { icon: "fas fa-terminal" });
+  sdk.sidebar.registerItem("Drift", "/drift", { icon: "fas fa-hurricane" });
 
   // ── Commands ──────────────────────────────────────────────────────
 
