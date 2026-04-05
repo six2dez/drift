@@ -226,7 +226,7 @@ function getMcpStatus(_sdk: BackendSDK): Result<McpServerInfo> {
     host: currentSettings.mcp.host,
     port: currentSettings.mcp.port,
     token: "",
-    toolCount: ready ? 12 : 0,
+    toolCount: ready ? 14 : 0,
     url: ready ? `stdio://${assetsPath}/mcp-server.mjs` : "",
   });
 }
@@ -248,14 +248,14 @@ async function startMcpServer(sdk: BackendSDK): Promise<Result<McpServerInfo>> {
   await mkdir(mcpTempDir, { recursive: true });
 
   sdk.console.log(`[drift] MCP ready. Script: ${mcpScript}, temp: ${mcpTempDir}`);
-  sdk.api.send("mcp-status", { running: true, port: 0, toolCount: 12 });
+  sdk.api.send("mcp-status", { running: true, port: 0, toolCount: 14 });
 
   return ok({
     running: true,
     host: currentSettings.mcp.host,
     port: 0,
     token: "",
-    toolCount: 12,
+    toolCount: 14,
     url: `stdio://${mcpScript}`,
   });
 }
@@ -350,9 +350,10 @@ async function sendCliMessage(
           cliSessions.set(input.chatId, sid);
         }
 
-        // MCP config
+        // MCP config - pass --mcp-config so Claude Code discovers Caido tools
         if (mcpTempDir !== undefined) {
           const mcpScript = path.join(assetsPath, "mcp-server.mjs");
+          sdk.console.log(`[drift] MCP script path: ${mcpScript}, exists: ${await fileExists(mcpScript)}`);
           if (await fileExists(mcpScript)) {
             const mcpCfg = {
               mcpServers: {
@@ -398,7 +399,7 @@ async function sendCliMessage(
         case "claude-cli":
           prompt += "You are a security assistant integrated with Caido (a web security proxy). ";
           if (mcpTempDir !== undefined) {
-            prompt += "You have access to Caido MCP tools: search_history, get_request, send_request, create_finding, list_findings, get_scope, check_scope, get_environment, set_environment, create_replay_session, intercept_status, intercept_pause, intercept_resume, run_workflow. Use them to answer questions about HTTP traffic, create findings, and interact with Caido. ";
+            prompt += "You have MCP tools connected to this Caido instance. When the user asks about HTTP requests, traffic, or security testing, USE the MCP tools directly - do not say you cannot access them. Available tools: search_history (search HTTP traffic with HTTPQL filters), get_request (get full raw request/response by ID), send_request (replay HTTP requests), create_finding (report vulnerabilities), list_findings, get_scope, check_scope, get_environment, set_environment, create_replay_session, intercept_status, intercept_pause, intercept_resume, run_workflow. For example, to get the last 5 requests, call search_history with no filter and limit 5. ";
           }
           break;
         case "gemini-cli":
@@ -440,6 +441,7 @@ async function sendCliMessage(
     prompt += input.text;
 
     // ── Spawn process ──
+    sdk.console.log(`[drift] spawn: ${resolved} ${args.join(" ")}`);
     sessionStates.set(input.sessionId, "running");
     return new Promise<Result<string>>((resolve) => {
       const proc = spawn(resolved, args, {
