@@ -23,56 +23,34 @@ export function setPendingContext(ctx: string) {
 
 // ── Extract raw text from Caido context objects ─────────────────────
 
-function extractRequestText(ctx: unknown): string {
+function extractCaidoText(ctx: unknown, key: "request" | "response"): string {
   try {
     const c = ctx as Record<string, unknown>;
-    // Try Caido SDK Request object (has methods)
-    const req = c["request"] as Record<string, unknown> | undefined;
-    if (req !== undefined) {
-      // Try getRaw().toText() pattern (Caido SDK Request type)
-      if (typeof req["getRaw"] === "function") {
-        const raw = (req as { getRaw: () => { toText: () => string } }).getRaw();
-        if (typeof raw?.toText === "function") return raw.toText();
-      }
-      // Try getMethod + getUrl + getHeaders pattern
-      if (typeof req["getMethod"] === "function" && typeof req["getUrl"] === "function") {
-        const method = (req as { getMethod: () => string }).getMethod();
-        const url = (req as { getUrl: () => string }).getUrl();
-        const headers = typeof req["getHeaders"] === "function"
-          ? JSON.stringify((req as { getHeaders: () => Record<string, string[]> }).getHeaders(), null, 2)
-          : "";
-        const body = typeof req["getBody"] === "function"
-          ? ((req as { getBody: () => { toText: () => string } | undefined }).getBody()?.toText() ?? "")
-          : "";
-        return `${method} ${url}\n${headers}\n\n${body}`;
-      }
-      // Try plain .raw string
-      if (typeof req["raw"] === "string") return req["raw"] as string;
-    }
-    return JSON.stringify(ctx);
-  } catch {
-    return String(ctx);
-  }
-}
+    const obj = c[key] as Record<string, unknown> | undefined;
+    if (obj === undefined) return JSON.stringify(ctx);
 
-function extractResponseText(ctx: unknown): string {
-  try {
-    const c = ctx as Record<string, unknown>;
-    const resp = c["response"] as Record<string, unknown> | undefined;
-    if (resp !== undefined) {
-      if (typeof resp["getRaw"] === "function") {
-        const raw = (resp as { getRaw: () => { toText: () => string } }).getRaw();
-        if (typeof raw?.toText === "function") return raw.toText();
-      }
-      if (typeof resp["getCode"] === "function") {
-        const code = (resp as { getCode: () => number }).getCode();
-        const body = typeof resp["getBody"] === "function"
-          ? ((resp as { getBody: () => { toText: () => string } | undefined }).getBody()?.toText() ?? "")
-          : "";
-        return `HTTP ${code}\n\n${body}`;
-      }
-      if (typeof resp["raw"] === "string") return resp["raw"] as string;
+    // Try getRaw().toText() (Caido SDK object)
+    if (typeof obj["getRaw"] === "function") {
+      const raw = (obj as { getRaw: () => { toText: () => string } }).getRaw();
+      if (typeof raw?.toText === "function") return raw.toText();
     }
+
+    // Try structured extraction
+    const body = typeof obj["getBody"] === "function"
+      ? ((obj as { getBody: () => { toText: () => string } | undefined }).getBody()?.toText() ?? "")
+      : "";
+
+    if (key === "request" && typeof obj["getMethod"] === "function" && typeof obj["getUrl"] === "function") {
+      const method = (obj as { getMethod: () => string }).getMethod();
+      const url = (obj as { getUrl: () => string }).getUrl();
+      return `${method} ${url}\n${body}`;
+    }
+    if (key === "response" && typeof obj["getCode"] === "function") {
+      return `HTTP ${(obj as { getCode: () => number }).getCode()}\n\n${body}`;
+    }
+
+    // Try plain .raw string
+    if (typeof obj["raw"] === "string") return obj["raw"] as string;
     return JSON.stringify(ctx);
   } catch {
     return String(ctx);
@@ -117,7 +95,7 @@ export const init = (sdk: FrontendSDK) => {
   sdk.commands.register(CMD.analyzeRequest, {
     name: "Analyze Request",
     run: (ctx: unknown) => {
-      const raw = extractRequestText(ctx);
+      const raw = extractCaidoText(ctx, "request");
       setPendingContext(
         `Analyze the following HTTP request for security issues, misconfigurations, and potential vulnerabilities. Look for: injection points, authentication issues, sensitive data exposure, IDOR, SSRF, and other OWASP Top 10 issues.\n\n${raw}`
       );
@@ -129,7 +107,7 @@ export const init = (sdk: FrontendSDK) => {
   sdk.commands.register(CMD.analyzeResponse, {
     name: "Analyze Response",
     run: (ctx: unknown) => {
-      const raw = extractResponseText(ctx);
+      const raw = extractCaidoText(ctx, "response");
       setPendingContext(
         `Analyze the following HTTP response for security issues. Look for: information disclosure, security headers missing, sensitive data in response, error messages leaking internals, and potential vulnerabilities.\n\n${raw}`
       );
@@ -141,7 +119,7 @@ export const init = (sdk: FrontendSDK) => {
   sdk.commands.register(CMD.findVulns, {
     name: "Find Vulnerabilities",
     run: (ctx: unknown) => {
-      const raw = extractRequestText(ctx);
+      const raw = extractCaidoText(ctx, "request");
       setPendingContext(
         `Perform a thorough security analysis of this HTTP request. For each potential vulnerability found:\n1. Identify the vulnerability type\n2. Explain the attack vector\n3. Suggest a test payload\n4. Rate the severity (Critical/High/Medium/Low)\n\nRequest:\n${raw}`
       );
@@ -153,7 +131,7 @@ export const init = (sdk: FrontendSDK) => {
   sdk.commands.register(CMD.analyzeJS, {
     name: "Analyze JavaScript",
     run: (ctx: unknown) => {
-      const raw = extractResponseText(ctx);
+      const raw = extractCaidoText(ctx, "response");
       setPendingContext(
         `Analyze the following JavaScript/response for security issues. Look for: API endpoints, hardcoded secrets, tokens, credentials, internal URLs, debug information, DOM XSS sinks/sources, and sensitive data.\n\n${raw}`
       );

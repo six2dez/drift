@@ -103,7 +103,7 @@ async function handleSend(text: string) {
       sessionId: sid,
       chatId,
       text,
-      history: chatStore.activeMessages.slice(-10),
+      history: chatStore.activeMessages,
     });
 
     if (result.kind === "Error") {

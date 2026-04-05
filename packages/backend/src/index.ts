@@ -333,6 +333,9 @@ async function sendCliMessage(
     const resolved = await resolveCommand(config.command);
     if (resolved === undefined) return err(`CLI not found: ${config.command}`);
 
+    // Check if first message BEFORE setting session (for system prompt injection)
+    const isFirstMsg = !cliSessions.has(input.chatId);
+
     // ── Build args per provider ──
     const args: string[] = [];
 
@@ -350,12 +353,12 @@ async function sendCliMessage(
           cliSessions.set(input.chatId, sid);
         }
 
-        // MCP config - pass --mcp-config so Claude Code discovers Caido tools
+        // MCP config (write once per chat, reuse on subsequent messages)
         if (mcpTempDir !== undefined) {
           const mcpScript = path.join(assetsPath, "mcp-server.mjs");
-          sdk.console.log(`[drift] MCP script path: ${mcpScript}, exists: ${await fileExists(mcpScript)}`);
-          if (await fileExists(mcpScript)) {
-            const mcpCfg = {
+          const cfgFile = path.join(mcpTempDir, `mcp-${input.chatId}.json`);
+          if (!(await fileExists(cfgFile)) && await fileExists(mcpScript)) {
+            await writeTemp(mcpTempDir, `mcp-${input.chatId}.json`, JSON.stringify({
               mcpServers: {
                 drift: {
                   type: "stdio",
@@ -367,13 +370,10 @@ async function sendCliMessage(
                   },
                 },
               },
-            };
-            const mcpCfgPath = await writeTemp(
-              mcpTempDir,
-              `mcp-${input.chatId}.json`,
-              JSON.stringify(mcpCfg, null, 2)
-            );
-            args.push("--mcp-config", mcpCfgPath);
+            }, null, 2));
+          }
+          if (await fileExists(cfgFile)) {
+            args.push("--mcp-config", cfgFile);
           }
         }
         break;
@@ -392,8 +392,7 @@ async function sendCliMessage(
     // ── Build prompt with context ──
     let prompt = "";
 
-    // Add provider-specific system prompt for first message
-    const isFirstMsg = !cliSessions.has(input.chatId);
+    // Add provider-specific system prompt (first message or stateless providers)
     if (isFirstMsg || providerId !== "claude-cli") {
       switch (providerId) {
         case "claude-cli":
@@ -441,7 +440,6 @@ async function sendCliMessage(
     prompt += input.text;
 
     // ── Spawn process ──
-    sdk.console.log(`[drift] spawn: ${resolved} ${args.join(" ")}`);
     sessionStates.set(input.sessionId, "running");
     return new Promise<Result<string>>((resolve) => {
       const proc = spawn(resolved, args, {
