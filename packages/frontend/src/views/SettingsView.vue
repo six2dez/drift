@@ -168,11 +168,15 @@ function getStatus(pid: string) {
             @click="store.toggleMcp().then(e => { mcpError = e; })"
           />
         </div>
-        <p v-if="mcpError !== undefined && mcpError !== ''" class="text-xs text-red-400 mt-2">
+        <p v-if="mcpError" class="text-xs text-red-400 mt-2">
           {{ mcpError }}
         </p>
-        <p class="text-xs text-surface-400 mt-2">
-          Exposes Caido tools to CLI agents via MCP: history, replay, findings, scope, environment, intercept.
+        <p v-if="store.mcpStatus?.running" class="text-xs text-green-400 mt-2">
+          <i class="fas fa-check-circle mr-1" />
+          Claude Code will have access to 14 Caido tools when chatting. Make sure Caido API token is set above.
+        </p>
+        <p v-else class="text-xs text-surface-400 mt-2">
+          Start to give Claude Code access to Caido tools (search history, replay requests, create findings, etc.). Requires Caido API token.
         </p>
       </template>
     </Card>

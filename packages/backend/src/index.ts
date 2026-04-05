@@ -404,6 +404,25 @@ async function sendCliMessage(
       prompt += `[Current HTTP Request/Response]\n${input.httpContext}\n\n`;
     }
 
+    // For stateless providers, prepend truncated conversation history
+    if (providerId !== "claude-cli" && input.history !== undefined && input.history.length > 0) {
+      const maxMsgs = currentSettings.maxHistoryMessages;
+      const maxChars = currentSettings.maxHistoryChars;
+      const recent = input.history.slice(-maxMsgs);
+      let historyText = "";
+      let totalChars = 0;
+      for (let i = recent.length - 1; i >= 0; i--) {
+        const m = recent[i]!;
+        const line = `${m.role}: ${m.content}\n`;
+        if (totalChars + line.length > maxChars && historyText.length > 0) break;
+        historyText = line + historyText;
+        totalChars += line.length;
+      }
+      if (historyText.length > 0) {
+        prompt += `[Conversation History]\n${historyText}\n`;
+      }
+    }
+
     prompt += input.text;
 
     // ── Spawn process ──
@@ -437,7 +456,14 @@ async function sendCliMessage(
       });
 
       proc.stderr?.on("data", (chunk: Buffer) => {
-        stderr += chunk.toString();
+        const text = chunk.toString();
+        stderr += text;
+        // Stream stderr too so user sees warnings/errors in real-time
+        sdk.api.send("cli-output-chunk", {
+          sessionId: input.sessionId,
+          delta: text,
+          stream: "stderr",
+        });
       });
 
       proc.stdin?.write(prompt + "\n");
@@ -479,9 +505,17 @@ function cancelCliMessage(sdk: BackendSDK, sessionId: string): Result<void> {
 }
 
 function closeCliSession(
-  _sdk: BackendSDK,
-  _input: { sessionId: string }
+  sdk: BackendSDK,
+  input: { sessionId: string }
 ): Result<void> {
+  // Kill process if still running
+  const proc = activeProcesses.get(input.sessionId);
+  if (proc !== undefined) {
+    try { proc.kill("SIGTERM"); } catch { /* already dead */ }
+    activeProcesses.delete(input.sessionId);
+  }
+  sessionStates.delete(input.sessionId);
+  sdk.console.log(`[drift] closed session ${input.sessionId}`);
   return ok(undefined);
 }
 

@@ -58,9 +58,8 @@ function handleOutputChunk(event: CliOutputChunkEvent) {
     ? chatStore.getSessionId(chatStore.activeChatId)
     : undefined;
   if (sid === undefined || event.sessionId !== sid) return;
-  if (event.stream === "stdout") {
-    streamingContent.value += event.delta;
-  }
+  // Show both stdout and stderr in streaming view
+  streamingContent.value += event.delta;
 }
 
 async function handleSend(text: string) {
