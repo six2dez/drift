@@ -31,6 +31,8 @@ function formatTime(ts: number): string {
         icon="fas fa-plus"
         class="w-full"
         size="small"
+        severity="secondary"
+        outlined
         @click="emit('create')"
       />
     </div>

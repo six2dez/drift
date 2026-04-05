@@ -316,7 +316,7 @@ async function sendCliMessage(
     const config = currentSettings.providers[providerId];
     if (!config?.command) return err("Provider not configured");
 
-    const resolved = resolveCommand(config.command);
+    const resolved = await resolveCommand(config.command);
     if (resolved === undefined) return err(`CLI not found: ${config.command}`);
 
     // ── Build args per provider ──

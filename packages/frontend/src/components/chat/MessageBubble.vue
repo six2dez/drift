@@ -32,8 +32,9 @@ async function copyContent() {
   <div
     class="group relative max-w-[85%] px-3 py-2 rounded-lg text-sm"
     :class="message.role === 'user'
-      ? 'ml-auto bg-primary-600 text-white'
+      ? 'ml-auto text-white'
       : 'mr-auto bg-surface-700 text-surface-100'"
+    :style="message.role === 'user' ? { background: '#4f46e5' } : {}"
   >
     <div v-if="message.role === 'user'" class="whitespace-pre-wrap">
       {{ message.content }}

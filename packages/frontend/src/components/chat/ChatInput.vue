@@ -75,14 +75,15 @@ function handleKeydown(e: KeyboardEvent) {
         size="small"
         @click="emit('cancel')"
       />
-      <Button
+      <button
         v-else
-        label="Send"
-        icon="fas fa-paper-plane"
-        size="small"
+        class="px-3 py-1.5 text-sm rounded flex items-center gap-1.5 text-white"
+        :style="{ background: input.trim() === '' || !settingsStore.isProviderAvailable(provider) ? '#374151' : '#4f46e5', cursor: input.trim() === '' ? 'not-allowed' : 'pointer' }"
         :disabled="input.trim() === '' || !settingsStore.isProviderAvailable(provider)"
         @click="handleSend"
-      />
+      >
+        <i class="fas fa-paper-plane" /> Send
+      </button>
     </div>
   </div>
 </template>

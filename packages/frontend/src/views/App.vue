@@ -5,7 +5,6 @@ import { useChatStore } from "../stores/chat";
 import { CliProvider } from "shared";
 import ChatView from "./ChatView.vue";
 import SettingsView from "./SettingsView.vue";
-import Button from "primevue/button";
 
 const activeTab = ref<"chat" | "settings">("chat");
 const settingsStore = useSettingsStore();
@@ -40,22 +39,24 @@ onMounted(async () => {
       <span class="text-base font-bold text-surface-100">Drift</span>
       <span class="text-xs text-surface-500">CLI AI Agent</span>
       <div class="flex-1" />
-      <Button
-        label="Chat"
-        icon="fas fa-comments"
-        :severity="activeTab === 'chat' ? undefined : 'secondary'"
-        :text="activeTab !== 'chat'"
-        size="small"
+      <button
+        class="px-3 py-1.5 text-sm rounded flex items-center gap-1.5"
+        :style="activeTab === 'chat'
+          ? { background: '#4f46e5', color: '#fff' }
+          : { background: 'transparent', color: '#9ca3af' }"
         @click="activeTab = 'chat'"
-      />
-      <Button
-        label="Settings"
-        icon="fas fa-cog"
-        :severity="activeTab === 'settings' ? undefined : 'secondary'"
-        :text="activeTab !== 'settings'"
-        size="small"
+      >
+        <i class="fas fa-comments" /> Chat
+      </button>
+      <button
+        class="px-3 py-1.5 text-sm rounded flex items-center gap-1.5"
+        :style="activeTab === 'settings'
+          ? { background: '#4f46e5', color: '#fff' }
+          : { background: 'transparent', color: '#9ca3af' }"
         @click="activeTab = 'settings'"
-      />
+      >
+        <i class="fas fa-cog" /> Settings
+      </button>
     </div>
 
     <!-- Init error -->
