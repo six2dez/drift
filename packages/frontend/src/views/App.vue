@@ -61,7 +61,7 @@ onMounted(async () => {
 
     <!-- Init error -->
     <div
-      v-if="initError !== undefined"
+      v-if="initError !== undefined && initError !== ''"
       class="mx-4 mt-2 px-3 py-2 text-xs text-red-400 bg-red-950 border border-red-800 rounded"
     >
       {{ initError }}

@@ -3,7 +3,6 @@ import { computed, ref } from "vue";
 import MarkdownIt from "markdown-it";
 import DOMPurify from "dompurify";
 import type { ChatMessage } from "shared";
-import Button from "primevue/button";
 
 const props = defineProps<{
   message: ChatMessage;
@@ -30,27 +29,27 @@ async function copyContent() {
 
 <template>
   <div
-    class="group relative max-w-[85%] px-3 py-2 rounded-lg text-sm"
-    :class="message.role === 'user'
-      ? 'ml-auto text-white'
-      : 'mr-auto bg-surface-700 text-surface-100'"
-    :style="message.role === 'user' ? { background: '#4f46e5' } : {}"
+    class="group relative max-w-[85%] px-3 py-2 rounded-lg text-sm leading-relaxed"
+    :class="message.role === 'user' ? 'ml-auto' : 'mr-auto'"
+    :style="{
+      background: message.role === 'user' ? '#4f46e5' : '#1e293b',
+      color: message.role === 'user' ? '#fff' : '#e2e8f0',
+    }"
   >
     <div v-if="message.role === 'user'" class="whitespace-pre-wrap">
       {{ message.content }}
     </div>
     <div
       v-else
-      class="prose prose-sm prose-invert max-w-none [&_pre]:bg-surface-800 [&_pre]:p-2 [&_pre]:rounded [&_pre]:overflow-x-auto [&_code]:text-xs [&_a]:text-primary-400"
+      class="prose prose-sm prose-invert max-w-none [&_pre]:bg-surface-800 [&_pre]:p-2 [&_pre]:rounded [&_pre]:overflow-x-auto [&_code]:text-xs"
       v-html="renderedHtml"
     />
-    <Button
-      :icon="copied ? 'fas fa-check' : 'fas fa-copy'"
-      text
-      rounded
-      size="small"
-      class="absolute top-1 right-1 opacity-0 group-hover:opacity-100"
+    <button
+      class="absolute top-1 right-1 opacity-0 group-hover:opacity-100 text-xs px-1.5 py-0.5 rounded transition-opacity"
+      style="background: #334155; color: #94a3b8;"
       @click="copyContent"
-    />
+    >
+      {{ copied ? 'Copied' : 'Copy' }}
+    </button>
   </div>
 </template>

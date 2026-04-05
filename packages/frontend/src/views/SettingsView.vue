@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted } from "vue";
+import { onMounted, ref } from "vue";
 import { useSettingsStore } from "../stores/settings";
 import { useSDK } from "../plugins/sdk";
 import { CliProvider, CLI_PROVIDER_DISPLAY_NAMES } from "shared";
@@ -11,6 +11,7 @@ import Tag from "primevue/tag";
 
 const store = useSettingsStore();
 const sdk = useSDK();
+const mcpError = ref<string | undefined>(undefined);
 
 const allProviders = [
   CliProvider.Claude,
@@ -54,7 +55,7 @@ function getStatus(pid: string) {
   <div class="p-4 overflow-y-auto h-full" style="max-width: 700px;">
     <!-- Init error -->
     <div
-      v-if="store.initError !== undefined"
+      v-if="store.initError !== undefined && store.initError !== ''"
       class="mb-4 px-3 py-2 text-xs text-red-400 bg-red-950 border border-red-800 rounded"
     >
       {{ store.initError }}
@@ -164,9 +165,12 @@ function getStatus(pid: string) {
             :icon="store.mcpStatus?.running ? 'fas fa-stop' : 'fas fa-play'"
             :severity="store.mcpStatus?.running ? 'danger' : 'success'"
             size="small"
-            @click="store.toggleMcp()"
+            @click="store.toggleMcp().then(e => { mcpError = e; })"
           />
         </div>
+        <p v-if="mcpError !== undefined && mcpError !== ''" class="text-xs text-red-400 mt-2">
+          {{ mcpError }}
+        </p>
         <p class="text-xs text-surface-400 mt-2">
           Exposes Caido tools to CLI agents via MCP: history, replay, findings, scope, environment, intercept.
         </p>

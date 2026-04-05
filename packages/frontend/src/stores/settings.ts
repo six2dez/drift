@@ -93,16 +93,21 @@ export const useSettingsStore = defineStore("settings", () => {
     } catch {}
   }
 
-  async function toggleMcp() {
+  async function toggleMcp(): Promise<string | undefined> {
     try {
       if (mcpStatus.value?.running) {
-        await sdk.backend.stopMcpServer();
+        const stopResult = await sdk.backend.stopMcpServer();
+        if (stopResult.kind === "Error") return stopResult.error;
       } else {
-        await sdk.backend.startMcpServer();
+        const startResult = await sdk.backend.startMcpServer();
+        if (startResult.kind === "Error") return startResult.error;
       }
       const result = await sdk.backend.getMcpStatus();
       if (result.kind === "Ok") mcpStatus.value = result.value;
-    } catch {}
+      return undefined;
+    } catch (e) {
+      return String(e);
+    }
   }
 
   function isProviderAvailable(providerId: string): boolean {

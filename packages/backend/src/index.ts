@@ -121,8 +121,22 @@ async function writeTemp(dir: string, name: string, content: string): Promise<st
   return fp;
 }
 
-function genId(): string {
-  return Math.random().toString(36).slice(2) + Date.now().toString(36);
+/** Generate UUID v4 without crypto module */
+function genUUID(): string {
+  const hex = "0123456789abcdef";
+  let uuid = "";
+  for (let i = 0; i < 36; i++) {
+    if (i === 8 || i === 13 || i === 18 || i === 23) {
+      uuid += "-";
+    } else if (i === 14) {
+      uuid += "4"; // version 4
+    } else if (i === 19) {
+      uuid += hex[(Math.random() * 4 | 8)]; // variant
+    } else {
+      uuid += hex[(Math.random() * 16 | 0)];
+    }
+  }
+  return uuid;
 }
 
 // ── CLI resolution (async via `which`) ──────────────────────────────
@@ -230,7 +244,7 @@ async function startMcpServer(sdk: BackendSDK): Promise<Result<McpServerInfo>> {
   }
 
   // Create temp dir for MCP configs
-  mcpTempDir = path.join(pluginPath, "mcp-tmp-" + genId());
+  mcpTempDir = path.join(pluginPath, "mcp-tmp-" + genUUID());
   await mkdir(mcpTempDir, { recursive: true });
 
   sdk.console.log(`[drift] MCP ready. Script: ${mcpScript}, temp: ${mcpTempDir}`);
@@ -331,7 +345,7 @@ async function sendCliMessage(
         if (sid !== undefined) {
           args.push("--resume", sid);
         } else {
-          sid = genId();
+          sid = genUUID();
           args.push("--session-id", sid);
           cliSessions.set(input.chatId, sid);
         }
