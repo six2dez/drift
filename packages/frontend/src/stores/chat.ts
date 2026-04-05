@@ -76,6 +76,13 @@ export const useChatStore = defineStore("chat", () => {
     }
   }
 
+  function updateProvider(chatId: string, providerId: string) {
+    const chat = chats.value.find((c) => c.id === chatId);
+    if (chat !== undefined) {
+      chat.providerId = providerId;
+    }
+  }
+
   function setSessionId(chatId: string, sid: string) {
     sessionIds.value[chatId] = sid;
   }
@@ -102,6 +109,7 @@ export const useChatStore = defineStore("chat", () => {
     addMessage,
     saveActiveChat,
     deleteChat,
+    updateProvider,
     setSessionId,
     getSessionId,
     clearSession,

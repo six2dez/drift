@@ -10,6 +10,7 @@ import ChatSidebar from "../components/chat/ChatSidebar.vue";
 import { useSDK } from "../plugins/sdk";
 import { useChatStore } from "../stores/chat";
 import { useSettingsStore } from "../stores/settings";
+import { getPendingContext } from "../index";
 import { CliProvider, type ChatMessage, type CliOutputChunkEvent } from "shared";
 
 const sdk = useSDK();
@@ -30,6 +31,13 @@ const currentProvider = computed(() =>
 
 onMounted(() => {
   eventUnsub = sdk.backend.onEvent("cli-output-chunk", handleOutputChunk);
+
+  // Auto-send if navigated from context menu with pending context
+  const pending = getPendingContext();
+  if (pending !== undefined) {
+    // Small delay to let the component fully mount
+    setTimeout(() => handleSend(pending), 100);
+  }
 });
 
 onUnmounted(() => {
@@ -161,6 +169,7 @@ function handleProviderChange(provider: string) {
   if (chatStore.activeChatId === null) return;
   if (provider !== currentProvider.value) {
     chatStore.clearSession(chatStore.activeChatId);
+    chatStore.updateProvider(chatStore.activeChatId, provider);
   }
 }
 </script>

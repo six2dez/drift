@@ -84,9 +84,9 @@ let pluginPath = "";
 let assetsPath = "";
 let currentSettings: Settings = { ...DEFAULT_SETTINGS };
 let currentChats: StoredChat[] = [];
-// Session resume tracking: chatId → cliSessionId
-const cliSessions = new Map<string, string>();
-// MCP temp config cleanup
+const cliSessions = new Map<string, string>();        // chatId → cliSessionId (resume)
+const activeProcesses = new Map<string, { kill: (s?: string) => boolean }>(); // sessionId → ChildProcess
+const sessionStates = new Map<string, "starting" | "running" | "stopped" | "error">();
 let mcpTempDir: string | undefined;
 
 // ── Persistence ─────────────────────────────────────────────────────
@@ -395,17 +395,22 @@ async function sendCliMessage(
     }
 
     // ── Spawn process ──
+    sessionStates.set(input.sessionId, "running");
     return new Promise<Result<string>>((resolve) => {
-      // Spawn inheriting Caido's environment (no process.env access)
       const proc = spawn(resolved, args, {
         stdio: ["pipe", "pipe", "pipe"],
       });
+
+      // Track for cancellation
+      activeProcesses.set(input.sessionId, proc);
 
       let stdout = "";
       let stderr = "";
 
       const timeout = setTimeout(() => {
         proc.kill("SIGKILL");
+        activeProcesses.delete(input.sessionId);
+        sessionStates.set(input.sessionId, "error");
         resolve(err("Process timed out"));
       }, currentSettings.processTimeoutSeconds * 1000);
 
@@ -428,6 +433,8 @@ async function sendCliMessage(
 
       proc.on("close", (code) => {
         clearTimeout(timeout);
+        activeProcesses.delete(input.sessionId);
+        sessionStates.set(input.sessionId, "stopped");
         const output =
           stdout.trim() || stderr.trim() || `(exit code: ${code})`;
         resolve(ok(output));
@@ -435,6 +442,8 @@ async function sendCliMessage(
 
       proc.on("error", (e) => {
         clearTimeout(timeout);
+        activeProcesses.delete(input.sessionId);
+        sessionStates.set(input.sessionId, "error");
         resolve(err(`Spawn error: ${e.message}`));
       });
     });
@@ -443,7 +452,17 @@ async function sendCliMessage(
   }
 }
 
-function cancelCliMessage(_sdk: BackendSDK, _sessionId: string): Result<void> {
+function cancelCliMessage(sdk: BackendSDK, sessionId: string): Result<void> {
+  const proc = activeProcesses.get(sessionId);
+  if (proc !== undefined) {
+    try { proc.kill("SIGTERM"); } catch { /* already dead */ }
+    setTimeout(() => {
+      try { proc.kill("SIGKILL"); } catch { /* already dead */ }
+    }, 3000);
+    activeProcesses.delete(sessionId);
+    sessionStates.set(sessionId, "stopped");
+    sdk.console.log(`[drift] cancelled session ${sessionId}`);
+  }
   return ok(undefined);
 }
 
@@ -458,7 +477,8 @@ function getCliSessionState(
   _sdk: BackendSDK,
   sessionId: string
 ): Result<{ sessionId: string; state: string }> {
-  return ok({ sessionId, state: "running" });
+  const state = sessionStates.get(sessionId) ?? "stopped";
+  return ok({ sessionId, state });
 }
 
 // ── API type + init ─────────────────────────────────────────────────

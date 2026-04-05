@@ -97,6 +97,29 @@ const TOOLS = [
     },
   },
   {
+    name: "check_scope",
+    description: "Check if a URL is within any defined scope.",
+    inputSchema: { type: "object", properties: { url: { type: "string" } }, required: ["url"] },
+    execute: async (args) => {
+      const data = await graphql(`query{scopes{id name allowlist denylist}}`);
+      const results = data.scopes.map((s) => {
+        const inAllow = s.allowlist.some((p) => { try { return new RegExp(p).test(args.url); } catch { return args.url.includes(p); } });
+        const inDeny = s.denylist.some((p) => { try { return new RegExp(p).test(args.url); } catch { return args.url.includes(p); } });
+        return { scope: s.name, inScope: inAllow && !inDeny };
+      });
+      return JSON.stringify({ url: args.url, results }, null, 2);
+    },
+  },
+  {
+    name: "create_replay_session",
+    description: "Create a Caido replay session from an existing request ID.",
+    inputSchema: { type: "object", properties: { requestId: { type: "string" } }, required: ["requestId"] },
+    execute: async (args) => {
+      const data = await graphql(`mutation($input:CreateReplaySessionInput!){createReplaySession(input:$input){session{id name}}}`, { input: { requestSource: { id: args.requestId } } });
+      return JSON.stringify(data.createReplaySession.session, null, 2);
+    },
+  },
+  {
     name: "get_environment",
     description: "List all environments and variables.",
     inputSchema: { type: "object", properties: {} },
@@ -146,7 +169,7 @@ const TOOLS = [
     description: "Execute a Caido convert workflow.",
     inputSchema: { type: "object", properties: { id: { type: "string" }, input: { type: "string" } }, required: ["id", "input"] },
     execute: async (args) => {
-      const data = await graphql(`mutation($id:ID!,$input:Blob!){runConvertWorkflow(id:$id,input:$input){output error}}`);
+      const data = await graphql(`mutation($id:ID!,$input:Blob!){runConvertWorkflow(id:$id,input:$input){output error}}`, { id: args.id, input: args.input });
       if (data.runConvertWorkflow.error) return `Error: ${data.runConvertWorkflow.error}`;
       return data.runConvertWorkflow.output;
     },

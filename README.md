@@ -1,53 +1,57 @@
 # Drift - CLI AI Agent for Caido
 
-Drift is a Caido plugin that lets you use locally-installed AI CLI tools (Claude Code, Gemini CLI, Codex CLI, Copilot CLI) directly inside Caido, with MCP integration for full access to Caido's capabilities.
+Drift lets you use locally-installed AI CLI tools (Claude Code, Gemini CLI, Codex CLI, Copilot CLI) directly inside Caido, with MCP integration for full access to Caido's security testing capabilities.
 
-**No API keys needed** - Drift uses the CLI tools already authenticated on your machine.
+**No API keys needed** - uses CLI tools already authenticated on your machine.
 
 ## Features
 
-- **4 CLI backends**: Claude Code, Gemini CLI, Codex CLI, Copilot CLI (experimental)
-- **MCP server**: Exposes 12 Caido tools to CLI agents (search history, replay requests, create findings, manage scope, environments, workflows, intercept)
-- **Session resume**: Claude Code maintains multi-turn context via `--resume`
-- **Chat persistence**: Conversations are saved and restored across sessions
-- **Streaming output**: See CLI responses in real-time
-- **Isolated config**: Never modifies your global CLI configuration
+- **4 CLI backends**: Claude Code (with session resume), Gemini CLI, Codex CLI, Copilot CLI (experimental)
+- **MCP tools**: 14 Caido tools exposed to CLI agents via stdio MCP transport
+- **Caido integration**: command palette, context menus on requests/responses, "Send to Drift" and "Ask Drift about this request"
+- **Chat persistence**: conversations saved across sessions
+- **Streaming output**: real-time CLI response display
+- **Process management**: real cancellation, timeout handling
 
 ## Installation
 
-1. Build the plugin:
-   ```bash
-   pnpm install
-   pnpm build
-   ```
+```bash
+pnpm install
+pnpm build
+```
 
-2. Install `dist/plugin_package.zip` in Caido via the plugin manager
+Install `dist/plugin_package.zip` in Caido via Plugins > Install from file.
 
 ## Configuration
 
 ### CLI Providers
 
-In Drift Settings, configure the command path for each CLI tool. Drift will auto-detect which tools are installed.
+In Settings, set the command path for each CLI tool. Use full paths (e.g., `/Users/you/.local/bin/claude`) if the tool isn't in Caido's inherited PATH.
 
-### Caido API (for MCP)
+**Provider support:**
 
-To enable MCP tools, you need a Caido Personal Access Token (PAT):
+| Provider | Resume | MCP | Status |
+|----------|--------|-----|--------|
+| Claude Code | Yes (`--session-id`/`--resume`) | Yes (stdio) | Stable |
+| Gemini CLI | No | No | Basic |
+| Codex CLI | No | No | Basic |
+| Copilot CLI | No | No | Experimental |
 
-1. Go to Caido Settings > API Keys
-2. Generate a new token
-3. Enter the token in Drift Settings > Caido API > Token
+### MCP Server (for Claude Code)
 
-### MCP Server
+To give Claude access to Caido tools:
 
-Click "Start" in Drift Settings > MCP Server to enable CLI tools to interact with Caido. The server runs on `localhost:9877` by default.
+1. Set your Caido PAT in Settings > Caido API > Token
+2. Click Settings > MCP Server > Start
+3. Chat with Claude - it will have access to 14 Caido tools
 
-## MCP Tools
+### MCP Tools
 
 | Tool | Description |
 |------|-------------|
 | `search_history` | Search HTTP history with HTTPQL filters |
 | `get_request` | Get full raw request/response by ID |
-| `send_request` | Send an HTTP request via Caido replay |
+| `send_request` | Send HTTP request via Caido replay |
 | `create_replay_session` | Create replay session from request ID |
 | `create_finding` | Create a security finding |
 | `list_findings` | List all findings |
@@ -56,7 +60,23 @@ Click "Start" in Drift Settings > MCP Server to enable CLI tools to interact wit
 | `get_environment` | List environments and variables |
 | `set_environment` | Set environment variables |
 | `run_workflow` | Execute a convert workflow |
-| `intercept_control` | Pause/resume/status of intercept |
+| `intercept_status` | Get intercept proxy status |
+| `intercept_pause` | Pause HTTP intercept |
+| `intercept_resume` | Resume HTTP intercept |
+
+## Caido Integration
+
+- **Command Palette** (Ctrl/Cmd+Shift+P): "Open Drift"
+- **Request context menu**: "Send Request to Drift", "Ask Drift about this request"
+- **Response context menu**: "Send Response to Drift"
+- **Request row context menu**: "Send Request to Drift"
+
+## Known Limitations
+
+- Settings reset on plugin reinstall (stored in plugin directory)
+- Gemini/Codex/Copilot don't support MCP or session resume
+- MCP only works with Claude Code via stdio transport
+- Caido's QuickJS backend runtime restricts available Node.js modules
 
 ## Development
 
