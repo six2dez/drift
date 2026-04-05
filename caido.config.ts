@@ -16,7 +16,7 @@ export default defineConfig({
   version: "0.1.0",
   author: {
     name: "six2dez",
-    email: "six2dez@protonmail.com",
+    email: "six2dez@gmail.com",
     url: "https://github.com/six2dez",
   },
   plugins: [
