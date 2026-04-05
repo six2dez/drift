@@ -391,11 +391,25 @@ async function sendCliMessage(
     // ── Build prompt with context ──
     let prompt = "";
 
-    // Add system context for first message
-    if (!cliSessions.has(input.chatId) || providerId !== "claude-cli") {
-      prompt += "You are a security assistant integrated with Caido (a web security proxy). ";
-      if (mcpTempDir !== undefined && providerId === "claude-cli") {
-        prompt += "You have access to Caido MCP tools: search_history, get_request, send_request, create_finding, list_findings, get_scope, check_scope, get_environment, set_environment, create_replay_session, intercept_status, intercept_pause, intercept_resume, run_workflow. Use them to answer questions about HTTP traffic, create findings, and interact with Caido. ";
+    // Add provider-specific system prompt for first message
+    const isFirstMsg = !cliSessions.has(input.chatId);
+    if (isFirstMsg || providerId !== "claude-cli") {
+      switch (providerId) {
+        case "claude-cli":
+          prompt += "You are a security assistant integrated with Caido (a web security proxy). ";
+          if (mcpTempDir !== undefined) {
+            prompt += "You have access to Caido MCP tools: search_history, get_request, send_request, create_finding, list_findings, get_scope, check_scope, get_environment, set_environment, create_replay_session, intercept_status, intercept_pause, intercept_resume, run_workflow. Use them to answer questions about HTTP traffic, create findings, and interact with Caido. ";
+          }
+          break;
+        case "gemini-cli":
+          prompt += "You are a security assistant. The user is working with Caido, a web security proxy. Help them analyze HTTP requests/responses, identify vulnerabilities, and suggest security improvements. ";
+          break;
+        case "codex-cli":
+          prompt += "You are a security code assistant. The user is working with Caido for web security testing. Help them analyze requests, write exploit code, and identify vulnerabilities. ";
+          break;
+        case "copilot-cli":
+          prompt += "You are a security assistant helping with web application security testing via Caido proxy. ";
+          break;
       }
       prompt += "\n\n";
     }

@@ -8,7 +8,7 @@ defineProps<{
 </script>
 
 <template>
-  <div class="flex items-center gap-2 px-4 py-1.5 border-b border-surface-700 text-xs text-surface-400">
+  <div class="flex items-center gap-2 px-4 py-1.5 text-xs text-surface-400">
     <i
       class="fas fa-circle"
       style="font-size: 6px;"

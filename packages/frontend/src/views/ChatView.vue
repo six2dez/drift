@@ -11,7 +11,7 @@ import { useSDK } from "../plugins/sdk";
 import { useChatStore } from "../stores/chat";
 import { useSettingsStore } from "../stores/settings";
 import { getPendingContext } from "../index";
-import { CliProvider, type ChatMessage, type CliOutputChunkEvent } from "shared";
+import { CliProvider, CLI_PROVIDER_DISPLAY_NAMES, type ChatMessage, type CliOutputChunkEvent } from "shared";
 
 const sdk = useSDK();
 const chatStore = useChatStore();
@@ -27,6 +27,10 @@ let eventUnsub: (() => void) | undefined;
 
 const currentProvider = computed(() =>
   chatStore.activeChat?.providerId ?? CliProvider.Claude
+);
+
+const currentProviderName = computed(() =>
+  CLI_PROVIDER_DISPLAY_NAMES[currentProvider.value as CliProvider] ?? currentProvider.value
 );
 
 onMounted(() => {
@@ -164,6 +168,27 @@ async function handleDeleteChat(chatId: string) {
   if (chatStore.chats.length === 0) handleNewChat();
 }
 
+function handleExportChat() {
+  const chat = chatStore.activeChat;
+  if (chat === null) return;
+  const lines = [
+    `# ${chat.title}`,
+    `Provider: ${CLI_PROVIDER_DISPLAY_NAMES[chat.providerId as CliProvider] ?? chat.providerId}`,
+    `Date: ${new Date(chat.createdAt).toLocaleString()}`,
+    "",
+    ...chat.messages.map((m) =>
+      `## ${m.role === "user" ? "User" : "Assistant"}\n\n${m.content}`
+    ),
+  ];
+  const blob = new Blob([lines.join("\n\n")], { type: "text/markdown" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `drift-${chat.id}.md`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 function handleProviderChange(provider: string) {
   if (chatStore.activeChatId === null) return;
   if (provider !== currentProvider.value) {
@@ -187,7 +212,19 @@ function handleProviderChange(provider: string) {
 
     <SplitterPanel :size="80" class="overflow-hidden">
       <div class="flex flex-col h-full">
-        <CliStatus :provider-id="currentProvider" :is-streaming="isStreaming" />
+        <div class="flex items-center border-b border-surface-700">
+          <CliStatus :provider-id="currentProvider" :is-streaming="isStreaming" class="flex-1" />
+          <Button
+            v-if="chatStore.activeMessages.length > 0"
+            icon="fas fa-download"
+            text
+            rounded
+            size="small"
+            severity="secondary"
+            class="mr-2"
+            @click="handleExportChat"
+          />
+        </div>
 
         <!-- Error -->
         <div
@@ -210,13 +247,17 @@ function handleProviderChange(provider: string) {
           <div v-if="isStreaming" class="px-4 pb-2">
             <div
               v-if="streamingContent !== ''"
-              class="max-w-[85%] px-3 py-2 rounded-lg text-sm whitespace-pre-wrap bg-surface-700 text-surface-100 opacity-70"
+              class="max-w-[85%] px-3 py-2 rounded-lg text-sm whitespace-pre-wrap bg-surface-700 text-surface-100 border border-surface-600"
             >
-              {{ streamingContent }}<span class="animate-pulse">|</span>
+              {{ streamingContent }}<span class="animate-pulse text-primary-400">|</span>
             </div>
-            <div v-else class="flex items-center gap-2 text-xs text-surface-400 py-2">
-              <i class="fas fa-spinner fa-spin" />
-              Waiting for response...
+            <div v-else class="flex items-center gap-2 text-xs text-surface-400 py-3 px-1">
+              <span class="flex gap-1">
+                <span class="w-1.5 h-1.5 rounded-full bg-primary-500 animate-bounce" style="animation-delay: 0ms;" />
+                <span class="w-1.5 h-1.5 rounded-full bg-primary-500 animate-bounce" style="animation-delay: 150ms;" />
+                <span class="w-1.5 h-1.5 rounded-full bg-primary-500 animate-bounce" style="animation-delay: 300ms;" />
+              </span>
+              Waiting for {{ currentProviderName }}...
             </div>
           </div>
         </div>
