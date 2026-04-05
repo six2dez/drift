@@ -30,12 +30,9 @@ async function copyContent() {
 <template>
   <div
     class="group relative max-w-[85%] px-3 py-2 rounded-lg text-sm leading-relaxed"
-    :class="message.role === 'user' ? 'ml-auto' : 'mr-auto'"
-    :style="{
-      background: message.role === 'user' ? '#4f46e5' : '#2d2d2d',
-      color: message.role === 'user' ? '#fff' : '#d4d4d4',
-      border: message.role === 'user' ? 'none' : '1px solid #404040',
-    }"
+    :class="message.role === 'user'
+      ? 'ml-auto bg-primary-600 text-white'
+      : 'mr-auto bg-surface-700 text-surface-100 border border-surface-600'"
   >
     <div v-if="message.role === 'user'" class="whitespace-pre-wrap">
       {{ message.content }}
@@ -46,8 +43,7 @@ async function copyContent() {
       v-html="renderedHtml"
     />
     <button
-      class="absolute top-1 right-1 opacity-0 group-hover:opacity-100 text-xs px-1.5 py-0.5 rounded transition-opacity"
-      style="background: #334155; color: #94a3b8;"
+      class="absolute top-1 right-1 opacity-0 group-hover:opacity-100 text-xs px-1.5 py-0.5 rounded transition-opacity bg-surface-600 text-surface-300 hover:text-surface-100"
       @click="copyContent"
     >
       {{ copied ? 'Copied' : 'Copy' }}

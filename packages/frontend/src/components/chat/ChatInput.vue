@@ -23,7 +23,6 @@ const input = ref("");
 const providerOptions = Object.values(CliProvider).map((p) => ({
   value: p,
   label: CLI_PROVIDER_DISPLAY_NAMES[p],
-  available: settingsStore.isProviderAvailable(p),
 }));
 
 function handleSend() {
@@ -75,15 +74,15 @@ function handleKeydown(e: KeyboardEvent) {
         size="small"
         @click="emit('cancel')"
       />
-      <button
+      <Button
         v-else
-        class="px-3 py-1.5 text-sm rounded flex items-center gap-1.5 text-white"
-        :style="{ background: input.trim() === '' || !settingsStore.isProviderAvailable(provider) ? '#374151' : '#4f46e5', cursor: input.trim() === '' ? 'not-allowed' : 'pointer' }"
+        label="Send"
+        icon="fas fa-paper-plane"
+        severity="secondary"
+        size="small"
         :disabled="input.trim() === '' || !settingsStore.isProviderAvailable(provider)"
         @click="handleSend"
-      >
-        <i class="fas fa-paper-plane" /> Send
-      </button>
+      />
     </div>
   </div>
 </template>

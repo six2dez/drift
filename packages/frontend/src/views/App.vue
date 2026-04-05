@@ -41,18 +41,18 @@ onMounted(async () => {
       <div class="flex-1" />
       <button
         class="px-3 py-1.5 text-sm rounded flex items-center gap-1.5"
-        :style="activeTab === 'chat'
-          ? { background: '#4f46e5', color: '#fff' }
-          : { background: 'transparent', color: '#9ca3af' }"
+        :class="activeTab === 'chat'
+          ? 'bg-primary-600 text-white'
+          : 'text-surface-400 hover:text-surface-200'"
         @click="activeTab = 'chat'"
       >
         <i class="fas fa-comments" /> Chat
       </button>
       <button
         class="px-3 py-1.5 text-sm rounded flex items-center gap-1.5"
-        :style="activeTab === 'settings'
-          ? { background: '#4f46e5', color: '#fff' }
-          : { background: 'transparent', color: '#9ca3af' }"
+        :class="activeTab === 'settings'
+          ? 'bg-primary-600 text-white'
+          : 'text-surface-400 hover:text-surface-200'"
         @click="activeTab = 'settings'"
       >
         <i class="fas fa-cog" /> Settings
