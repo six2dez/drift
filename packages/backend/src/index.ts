@@ -231,6 +231,59 @@ function getMcpStatus(_sdk: BackendSDK): Result<McpServerInfo> {
   });
 }
 
+// ── MCP registration helpers for Gemini/Codex ───────────────────────
+
+function spawnAndWait(cmd: string, args: string[]): Promise<{ code: number; stdout: string; stderr: string }> {
+  return new Promise((resolve) => {
+    const proc = spawn(cmd, args, { stdio: ["pipe", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    proc.stdout?.on("data", (d: Buffer) => { stdout += d.toString(); });
+    proc.stderr?.on("data", (d: Buffer) => { stderr += d.toString(); });
+    proc.on("close", (code) => resolve({ code: code ?? 1, stdout, stderr }));
+    proc.on("error", () => resolve({ code: 1, stdout, stderr }));
+  });
+}
+
+async function registerMcpWithCli(cli: "gemini" | "codex", mcpScript: string, sdk: BackendSDK): Promise<void> {
+  const url = currentSettings.caidoApi.url;
+  const token = currentSettings.caidoApi.token;
+
+  if (cli === "gemini") {
+    // gemini mcp add drift -- node <script> --env CAIDO_URL=... CAIDO_TOKEN=...
+    // First remove any stale registration
+    await spawnAndWait("gemini", ["mcp", "remove", "drift"]);
+    // Gemini MCP add uses: gemini mcp add <name> <command> [args...]
+    // Environment vars need to be passed via a wrapper script approach
+    // For now, register with the script directly - env will be set via MCP config
+    const result = await spawnAndWait("gemini", [
+      "mcp", "add", "drift", "--", "node", mcpScript,
+    ]);
+    sdk.console.log(`[drift] gemini mcp add: code=${result.code} ${result.stderr.trim()}`);
+  }
+
+  if (cli === "codex") {
+    // codex mcp add - interactive, so we need to use the config approach
+    // Try: codex mcp add with name and command
+    await spawnAndWait("codex", ["mcp", "remove", "drift"]);
+    const result = await spawnAndWait("codex", [
+      "mcp", "add", "drift", "--", "node", mcpScript,
+    ]);
+    sdk.console.log(`[drift] codex mcp add: code=${result.code} ${result.stderr.trim()}`);
+  }
+}
+
+async function unregisterMcpFromCli(cli: "gemini" | "codex", sdk: BackendSDK): Promise<void> {
+  if (cli === "gemini") {
+    const result = await spawnAndWait("gemini", ["mcp", "remove", "drift"]);
+    sdk.console.log(`[drift] gemini mcp remove: code=${result.code}`);
+  }
+  if (cli === "codex") {
+    const result = await spawnAndWait("codex", ["mcp", "remove", "drift"]);
+    sdk.console.log(`[drift] codex mcp remove: code=${result.code}`);
+  }
+}
+
 async function startMcpServer(sdk: BackendSDK): Promise<Result<McpServerInfo>> {
   // Check prerequisites
   if (!currentSettings.caidoApi.token) {
@@ -248,6 +301,11 @@ async function startMcpServer(sdk: BackendSDK): Promise<Result<McpServerInfo>> {
   await mkdir(mcpTempDir, { recursive: true });
 
   sdk.console.log(`[drift] MCP ready. Script: ${mcpScript}, temp: ${mcpTempDir}`);
+
+  // Register MCP with Gemini and Codex (persistent config)
+  await registerMcpWithCli("gemini", mcpScript, sdk);
+  await registerMcpWithCli("codex", mcpScript, sdk);
+
   sdk.api.send("mcp-status", { running: true, port: 0, toolCount: 14 });
 
   return ok({
@@ -261,6 +319,10 @@ async function startMcpServer(sdk: BackendSDK): Promise<Result<McpServerInfo>> {
 }
 
 async function stopMcpServer(sdk: BackendSDK): Promise<Result<void>> {
+  // Unregister MCP from Gemini and Codex
+  await unregisterMcpFromCli("gemini", sdk);
+  await unregisterMcpFromCli("codex", sdk);
+
   if (mcpTempDir !== undefined) {
     try { await rm(mcpTempDir, { recursive: true, force: true }); } catch { /* silent */ }
     mcpTempDir = undefined;
@@ -379,14 +441,45 @@ async function sendCliMessage(
         break;
       }
       case "gemini-cli":
-        args.push("--output-format", "text", "-p", ".");
+        args.push("--output-format", "text");
+        // MCP: Gemini uses pre-registered server + allowed names filter
+        if (mcpTempDir !== undefined) {
+          args.push("--allowed-mcp-server-names", "drift");
+        }
+        args.push("-p", ".");
         break;
       case "codex-cli":
-        args.push("exec", "--color", "never", "-");
+        args.push("exec", "--color", "never");
+        // Codex uses pre-registered MCP (via codex mcp add), no per-invocation flag needed
+        args.push("-");
         break;
-      case "copilot-cli":
+      case "copilot-cli": {
         args.push("-p", "--quiet");
+        // MCP: Copilot supports --additional-mcp-config @<path>
+        if (mcpTempDir !== undefined) {
+          const mcpScript = path.join(assetsPath, "mcp-server.mjs");
+          const cfgFile = path.join(mcpTempDir, `copilot-mcp-${input.chatId}.json`);
+          if (!(await fileExists(cfgFile)) && await fileExists(mcpScript)) {
+            await writeTemp(mcpTempDir, `copilot-mcp-${input.chatId}.json`, JSON.stringify({
+              mcpServers: {
+                drift: {
+                  type: "stdio",
+                  command: "node",
+                  args: [mcpScript],
+                  env: {
+                    CAIDO_URL: currentSettings.caidoApi.url,
+                    CAIDO_TOKEN: currentSettings.caidoApi.token,
+                  },
+                },
+              },
+            }, null, 2));
+          }
+          if (await fileExists(cfgFile)) {
+            args.push("--additional-mcp-config", `@${cfgFile}`);
+          }
+        }
         break;
+      }
     }
 
     // ── Build prompt with context ──
@@ -402,13 +495,22 @@ async function sendCliMessage(
           }
           break;
         case "gemini-cli":
-          prompt += "You are a security assistant. The user is working with Caido, a web security proxy. Help them analyze HTTP requests/responses, identify vulnerabilities, and suggest security improvements. ";
+          prompt += "You are a security assistant integrated with Caido (a web security proxy). ";
+          if (mcpTempDir !== undefined) {
+            prompt += "You have MCP tools (server name: drift) to interact with Caido. Use them to search HTTP history, get requests, create findings, check scope, and more. ";
+          }
           break;
         case "codex-cli":
-          prompt += "You are a security code assistant. The user is working with Caido for web security testing. Help them analyze requests, write exploit code, and identify vulnerabilities. ";
+          prompt += "You are a security code assistant integrated with Caido (a web security proxy). ";
+          if (mcpTempDir !== undefined) {
+            prompt += "You have MCP tools (server name: drift) to interact with Caido. Use them to search HTTP history, replay requests, and create findings. ";
+          }
           break;
         case "copilot-cli":
-          prompt += "You are a security assistant helping with web application security testing via Caido proxy. ";
+          prompt += "You are a security assistant integrated with Caido (a web security proxy). ";
+          if (mcpTempDir !== undefined) {
+            prompt += "You have MCP tools (server name: drift) to interact with Caido. Use them to search HTTP history, get requests, create findings, and more. ";
+          }
           break;
       }
       prompt += "\n\n";
