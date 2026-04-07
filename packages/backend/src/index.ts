@@ -423,7 +423,6 @@ async function sendCliMessage(
             await writeTemp(mcpTempDir, `mcp-${input.chatId}.json`, JSON.stringify({
               mcpServers: {
                 drift: {
-                  type: "stdio",
                   command: "node",
                   args: [mcpScript],
                   env: {
@@ -436,7 +435,10 @@ async function sendCliMessage(
           }
           if (await fileExists(cfgFile)) {
             args.push("--mcp-config", cfgFile);
+            sdk.console.log(`[drift] MCP config passed to Claude: ${cfgFile}`);
           }
+        } else {
+          sdk.console.log("[drift] MCP not active (mcpTempDir is undefined). Start MCP in Settings.");
         }
         break;
       }
@@ -463,7 +465,6 @@ async function sendCliMessage(
             await writeTemp(mcpTempDir, `copilot-mcp-${input.chatId}.json`, JSON.stringify({
               mcpServers: {
                 drift: {
-                  type: "stdio",
                   command: "node",
                   args: [mcpScript],
                   env: {
