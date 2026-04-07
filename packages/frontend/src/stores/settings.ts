@@ -8,9 +8,10 @@ import {
 } from "shared";
 import { useSDK } from "../plugins/sdk";
 
+type StoredData = { settings: Settings };
+
 export const useSettingsStore = defineStore("settings", () => {
   const sdk = useSDK();
-  // Start with default settings so UI is always usable
   const settings = ref<Settings>(DEFAULT_SETTINGS);
   const providerStatuses = ref<ProviderStatus[]>([]);
   const mcpStatus = ref<McpServerInfo | null>(null);
@@ -22,42 +23,37 @@ export const useSettingsStore = defineStore("settings", () => {
     initError.value = null;
 
     try {
+      // Load settings from frontend storage (persists across reinstalls)
+      const stored = await sdk.storage.get() as StoredData | undefined;
+      if (stored?.settings !== undefined) {
+        settings.value = { ...DEFAULT_SETTINGS, ...stored.settings };
+      }
+
+      // Sync settings to backend (backend loses its data on reinstall)
+      await sdk.backend.updateSettings(settings.value);
+
+      // Fetch provider statuses and MCP status
       const results = await Promise.allSettled([
-        sdk.backend.getSettings(),
         sdk.backend.getProviderStatuses(),
         sdk.backend.getMcpStatus(),
       ]);
 
-      const sResult =
-        results[0]?.status === "fulfilled" ? results[0].value : null;
-      const pResult =
-        results[1]?.status === "fulfilled" ? results[1].value : null;
-      const mResult =
-        results[2]?.status === "fulfilled" ? results[2].value : null;
+      const pResult = results[0]?.status === "fulfilled" ? results[0].value : null;
+      const mResult = results[1]?.status === "fulfilled" ? results[1].value : null;
 
-      if (sResult?.kind === "Ok") settings.value = sResult.value;
       if (pResult?.kind === "Ok") providerStatuses.value = pResult.value;
       if (mResult?.kind === "Ok") mcpStatus.value = mResult.value;
 
-      // Collect errors for debugging (only real errors, not empty ones)
       const errors: string[] = [];
       if (results[0]?.status === "rejected")
-        errors.push(`settings: ${String(results[0].reason)}`);
-      if (sResult?.kind === "Error" && sResult.error !== "")
-        errors.push(`settings: ${sResult.error}`);
-      if (results[1]?.status === "rejected")
-        errors.push(`providers: ${String(results[1].reason)}`);
+        errors.push(`providers: ${String(results[0].reason)}`);
       if (pResult?.kind === "Error" && pResult.error !== "")
         errors.push(`providers: ${pResult.error}`);
-      if (results[2]?.status === "rejected")
-        errors.push(`mcp: ${String(results[2].reason)}`);
-      if (mResult?.kind === "Error" && mResult.error !== "")
-        errors.push(`mcp: ${mResult.error}`);
+      if (results[1]?.status === "rejected")
+        errors.push(`mcp: ${String(results[1].reason)}`);
 
       const msg = errors.join("; ").trim();
-      if (msg.length > 0) {
-        initError.value = msg;
-      }
+      if (msg.length > 0) initError.value = msg;
     } catch (err) {
       initError.value = (err as Error).message;
     }
@@ -82,8 +78,14 @@ export const useSettingsStore = defineStore("settings", () => {
 
   async function updateSettings(input: Partial<Settings>) {
     try {
-      const result = await sdk.backend.updateSettings(input);
-      if (result.kind === "Ok") settings.value = result.value;
+      // Update local state
+      settings.value = { ...settings.value, ...input };
+
+      // Persist to frontend storage (survives reinstalls)
+      await sdk.storage.set({ settings: settings.value } as StoredData);
+
+      // Sync to backend
+      await sdk.backend.updateSettings(settings.value);
     } catch {}
   }
 
