@@ -251,24 +251,18 @@ async function registerMcpWithCli(cli: "gemini" | "codex", mcpScript: string, sd
   const token = currentSettings.caidoApi.token;
 
   if (cli === "gemini") {
-    // gemini mcp add drift -- node <script> --env CAIDO_URL=... CAIDO_TOKEN=...
-    // First remove any stale registration
     await spawnAndWait("gemini", ["mcp", "remove", "drift"]);
-    // Gemini MCP add uses: gemini mcp add <name> <command> [args...]
-    // Environment vars need to be passed via a wrapper script approach
-    // For now, register with the script directly - env will be set via MCP config
+    // Register wrapper script (has env vars baked in)
     const result = await spawnAndWait("gemini", [
-      "mcp", "add", "drift", "--", "node", mcpScript,
+      "mcp", "add", "drift", "--", mcpScript,
     ]);
     sdk.console.log(`[drift] gemini mcp add: code=${result.code} ${result.stderr.trim()}`);
   }
 
   if (cli === "codex") {
-    // codex mcp add - interactive, so we need to use the config approach
-    // Try: codex mcp add with name and command
     await spawnAndWait("codex", ["mcp", "remove", "drift"]);
     const result = await spawnAndWait("codex", [
-      "mcp", "add", "drift", "--", "node", mcpScript,
+      "mcp", "add", "drift", "--", mcpScript,
     ]);
     sdk.console.log(`[drift] codex mcp add: code=${result.code} ${result.stderr.trim()}`);
   }
@@ -297,18 +291,26 @@ async function startMcpServer(sdk: BackendSDK): Promise<Result<McpServerInfo>> {
     return err("MCP server script not found in plugin assets.");
   }
 
-  // Use /tmp to avoid spaces in paths (Caido plugin path has "Application Support")
-  mcpTempDir = `/tmp/drift-mcp-${genUUID()}`;
+  // Create temp dir for MCP configs
+  mcpTempDir = path.join(pluginPath, "mcp-tmp-" + genUUID());
   await mkdir(mcpTempDir, { recursive: true });
 
-  // Copy MCP script to temp dir (no spaces in path)
-  const mcpScriptCopy = path.join(mcpTempDir, "mcp-server.mjs");
-  const scriptContent = await readFile(mcpScript, "utf-8");
-  await writeFile(mcpScriptCopy, scriptContent);
+  // Create wrapper script that sets env vars and runs the MCP server
+  // This is needed for Gemini/Codex which use persistent MCP registration
+  // and can't pass env vars through `mcp add`
+  const wrapperPath = path.join(mcpTempDir, "mcp-wrapper.sh");
+  await writeFile(wrapperPath, [
+    "#!/bin/bash",
+    `export CAIDO_URL="${currentSettings.caidoApi.url}"`,
+    `export CAIDO_TOKEN="${currentSettings.caidoApi.token}"`,
+    `exec node "${mcpScript}"`,
+  ].join("\n"));
+  // Make wrapper executable
+  await spawnAndWait("chmod", ["+x", wrapperPath]);
 
-  // Register MCP with Gemini and Codex (persistent config)
-  await registerMcpWithCli("gemini", mcpScriptCopy, sdk);
-  await registerMcpWithCli("codex", mcpScriptCopy, sdk);
+  // Register MCP with Gemini and Codex using the wrapper
+  await registerMcpWithCli("gemini", wrapperPath, sdk);
+  await registerMcpWithCli("codex", wrapperPath, sdk);
 
   sdk.api.send("mcp-status", { running: true, port: 0, toolCount: 14 });
 
@@ -421,14 +423,14 @@ async function sendCliMessage(
 
         // MCP config (write once per chat, reuse on subsequent messages)
         if (mcpTempDir !== undefined) {
-          const mcpScriptLocal = path.join(mcpTempDir, "mcp-server.mjs");
+          const mcpScriptPath = path.join(assetsPath, "mcp-server.mjs");
           const cfgFile = path.join(mcpTempDir, `mcp-${input.chatId}.json`);
-          if (!(await fileExists(cfgFile)) && await fileExists(mcpScriptLocal)) {
+          if (!(await fileExists(cfgFile)) && await fileExists(mcpScriptPath)) {
             await writeTemp(mcpTempDir, `mcp-${input.chatId}.json`, JSON.stringify({
               mcpServers: {
                 drift: {
                   command: "node",
-                  args: [mcpScriptLocal],
+                  args: [mcpScriptPath],
                   env: {
                     CAIDO_URL: currentSettings.caidoApi.url,
                     CAIDO_TOKEN: currentSettings.caidoApi.token,
@@ -462,13 +464,14 @@ async function sendCliMessage(
         if (mcpTempDir !== undefined) {
           const mcpScript = path.join(assetsPath, "mcp-server.mjs");
           const mcpScriptLocal = path.join(mcpTempDir, "mcp-server.mjs");
+          const mcpScriptPath = path.join(assetsPath, "mcp-server.mjs");
           const cfgFile = path.join(mcpTempDir, `copilot-mcp-${input.chatId}.json`);
-          if (!(await fileExists(cfgFile)) && await fileExists(mcpScriptLocal)) {
+          if (!(await fileExists(cfgFile)) && await fileExists(mcpScriptPath)) {
             await writeTemp(mcpTempDir, `copilot-mcp-${input.chatId}.json`, JSON.stringify({
               mcpServers: {
                 drift: {
                   command: "node",
-                  args: [mcpScriptLocal],
+                  args: [mcpScriptPath],
                   env: {
                     CAIDO_URL: currentSettings.caidoApi.url,
                     CAIDO_TOKEN: currentSettings.caidoApi.token,
