@@ -300,7 +300,7 @@ async function startMcpServer(sdk: BackendSDK): Promise<Result<McpServerInfo>> {
   mcpTempDir = path.join(pluginPath, "mcp-tmp-" + genUUID());
   await mkdir(mcpTempDir, { recursive: true });
 
-  sdk.console.log(`[drift] MCP ready. Script: ${mcpScript}, temp: ${mcpTempDir}`);
+  sdk.console.log(`[drift] MCP ready. assetsPath=${assetsPath}, script=${mcpScript}, temp=${mcpTempDir}`);
 
   // Register MCP with Gemini and Codex (persistent config)
   await registerMcpWithCli("gemini", mcpScript, sdk);
@@ -435,10 +435,14 @@ async function sendCliMessage(
           }
           if (await fileExists(cfgFile)) {
             args.push("--mcp-config", cfgFile);
-            sdk.console.log(`[drift] MCP config passed to Claude: ${cfgFile}`);
+            // Log the config content for debugging
+            try {
+              const cfgContent = await readFile(cfgFile, "utf-8");
+              sdk.console.log(`[drift] MCP config: ${cfgContent}`);
+            } catch {}
           }
         } else {
-          sdk.console.log("[drift] MCP not active (mcpTempDir is undefined). Start MCP in Settings.");
+          sdk.console.log("[drift] MCP not active. Start MCP in Settings.");
         }
         break;
       }
