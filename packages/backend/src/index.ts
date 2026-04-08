@@ -435,14 +435,7 @@ async function sendCliMessage(
           }
           if (await fileExists(cfgFile)) {
             args.push("--mcp-config", cfgFile);
-            // Log the config content for debugging
-            try {
-              const cfgContent = await readFile(cfgFile, "utf-8");
-              sdk.console.log(`[drift] MCP config: ${cfgContent}`);
-            } catch {}
           }
-        } else {
-          sdk.console.log("[drift] MCP not active. Start MCP in Settings.");
         }
         break;
       }
@@ -545,6 +538,9 @@ async function sendCliMessage(
     }
 
     prompt += input.text;
+
+    // DEBUG: add spawn info to prompt so we can see what's happening
+    prompt += `\n\n[DEBUG - remove later] spawn args: ${JSON.stringify(args)}, mcpTempDir: ${mcpTempDir ?? "null"}, assetsPath: ${assetsPath}`;
 
     // ── Spawn process ──
     sessionStates.set(input.sessionId, "running");
