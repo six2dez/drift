@@ -407,7 +407,7 @@ async function sendCliMessage(
 
     switch (providerId) {
       case "claude-cli": {
-        args.push("-p");
+        args.push("-p", "--allowedTools", "mcp__drift__*");
 
         // Session resume
         let sid = cliSessions.get(input.chatId);
