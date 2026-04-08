@@ -446,7 +446,9 @@ async function sendCliMessage(
 
     switch (providerId) {
       case "claude-cli": {
-        args.push("-p", "--allowedTools", "mcp__drift__*");
+        args.push("-p", "--allowedTools",
+          "mcp__drift__search_history,mcp__drift__get_request,mcp__drift__send_request,mcp__drift__create_finding,mcp__drift__list_findings,mcp__drift__get_scope,mcp__drift__check_scope,mcp__drift__get_environment,mcp__drift__set_environment,mcp__drift__create_replay_session,mcp__drift__intercept_status,mcp__drift__intercept_pause,mcp__drift__intercept_resume,mcp__drift__run_workflow"
+        );
 
         // Session resume
         let sid = cliSessions.get(input.chatId);
