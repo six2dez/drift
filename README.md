@@ -32,10 +32,10 @@ In Settings, set the command path for each CLI tool. Use full paths (e.g., `/Use
 
 | Provider | Resume | MCP | Status |
 |----------|--------|-----|--------|
-| Claude Code | Yes (`--session-id`/`--resume`) | Yes (stdio) | Stable |
-| Gemini CLI | No | No | Basic |
-| Codex CLI | No | No | Basic |
-| Copilot CLI | No | No | Experimental |
+| Claude Code | Yes (`--session-id`/`--resume`) | Yes (per-invocation stdio config) | Stable |
+| Gemini CLI | No | Experimental (registered wrapper) | Experimental |
+| Codex CLI | No | Experimental (registered wrapper) | Experimental |
+| Copilot CLI | No | Experimental (`--additional-mcp-config`) | Experimental |
 
 ### MCP Server (for Claude Code)
 
@@ -74,8 +74,8 @@ To give Claude access to Caido tools:
 ## Known Limitations
 
 - Settings reset on plugin reinstall (stored in plugin directory)
-- Gemini/Codex/Copilot don't support MCP or session resume
-- MCP only works with Claude Code via stdio transport
+- Session resume only works with Claude Code
+- Non-Claude MCP integrations are experimental
 - Caido's QuickJS backend runtime restricts available Node.js modules
 
 ## Development

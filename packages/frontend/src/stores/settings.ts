@@ -24,19 +24,20 @@ export const useSettingsStore = defineStore("settings", () => {
 
     try {
       // Load settings from frontend storage (persists across reinstalls)
-      let storageWorking = false;
       try {
         const stored = await sdk.storage.get() as StoredData | undefined;
         if (stored?.settings !== undefined) {
           settings.value = { ...DEFAULT_SETTINGS, ...stored.settings };
-          storageWorking = true;
         }
       } catch (storageErr) {
         initError.value = `Storage load failed: ${String(storageErr)}`;
       }
 
       // Sync settings to backend
-      await sdk.backend.updateSettings(settings.value);
+      const syncResult = await sdk.backend.updateSettings(settings.value);
+      if (syncResult.kind === "Error") {
+        initError.value = syncResult.error;
+      }
 
       // Fetch provider statuses and MCP status
       const results = await Promise.allSettled([
@@ -67,7 +68,7 @@ export const useSettingsStore = defineStore("settings", () => {
     loading.value = false;
 
     try {
-      sdk.backend.onEvent("mcp-status", (event) => {
+      sdk.backend.onEvent("mcp-status", (event: { running: boolean; port: number; toolCount: number }) => {
         mcpStatus.value = {
           running: event.running,
           port: event.port,
@@ -95,8 +96,13 @@ export const useSettingsStore = defineStore("settings", () => {
 
     // Sync to backend
     try {
-      await sdk.backend.updateSettings(settings.value);
-    } catch {}
+      const result = await sdk.backend.updateSettings(settings.value);
+      if (result.kind === "Error") {
+        sdk.window.showToast(result.error, { variant: "error" });
+      }
+    } catch (e) {
+      sdk.window.showToast(`Failed to sync settings: ${String(e)}`, { variant: "error" });
+    }
   }
 
   async function refreshProviders() {

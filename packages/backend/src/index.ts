@@ -1,6 +1,7 @@
 import type { DefineAPI, SDK, DefineEvents } from "caido:plugin";
-import { readFile, writeFile, stat, mkdir, rm } from "fs/promises";
-import { spawn } from "child_process";
+import { readFile, writeFile, stat, mkdir, rm, rename } from "fs/promises";
+import { spawn, type ChildProcessWithoutNullStreams } from "child_process";
+import { Buffer } from "buffer";
 import path from "path";
 
 // ── Types (inline to avoid Zod which crashes QuickJS) ──────────────
@@ -86,7 +87,7 @@ let currentSettings: Settings = { ...DEFAULT_SETTINGS };
 let currentChats: StoredChat[] = [];
 const cliSessions = new Map<string, string>();        // chatId → cliSessionId (resume)
 let lastSpawnArgs: string[] = [];                     // for diagnostics
-const activeProcesses = new Map<string, { kill: (s?: string) => boolean }>(); // sessionId → ChildProcess
+const activeProcesses = new Map<string, ChildProcessWithoutNullStreams>(); // sessionId → ChildProcess
 const sessionStates = new Map<string, "starting" | "running" | "stopped" | "error">();
 let mcpTempDir: string | undefined;
 
@@ -160,6 +161,51 @@ async function writeTemp(dir: string, name: string, content: string): Promise<st
   return fp;
 }
 
+function getTempMcpScriptPath(): string | undefined {
+  if (mcpTempDir === undefined) return undefined;
+  return path.join(mcpTempDir, "mcp-server.mjs");
+}
+
+async function writeChatMcpConfig(name: string, mcpScriptPath: string): Promise<string | undefined> {
+  if (mcpTempDir === undefined) return undefined;
+  if (!(await fileExists(mcpScriptPath))) return undefined;
+  return writeTemp(mcpTempDir, name, JSON.stringify({
+    mcpServers: {
+      drift: {
+        command: "node",
+        args: [mcpScriptPath],
+        env: {
+          CAIDO_URL: currentSettings.caidoApi.url,
+          CAIDO_TOKEN: currentSettings.caidoApi.token,
+        },
+      },
+    },
+  }, null, 2));
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, "'\"'\"'")}'`;
+}
+
+async function writeMcpWrapper(mcpScriptPath: string): Promise<string | undefined> {
+  if (mcpTempDir === undefined) return undefined;
+  const wrapperPath = path.join(mcpTempDir, "mcp-wrapper.sh");
+  const tempWrapperPath = `${wrapperPath}.tmp`;
+  await writeFile(tempWrapperPath, [
+    "#!/bin/bash",
+    `export CAIDO_URL=${shellQuote(currentSettings.caidoApi.url)}`,
+    `export CAIDO_TOKEN=${shellQuote(currentSettings.caidoApi.token)}`,
+    `exec node ${shellQuote(mcpScriptPath)}`,
+  ].join("\n"));
+  const chmodResult = await spawnAndWait("chmod", ["+x", tempWrapperPath]);
+  if (chmodResult.code !== 0) {
+    await rm(tempWrapperPath, { force: true });
+    return undefined;
+  }
+  await rename(tempWrapperPath, wrapperPath);
+  return wrapperPath;
+}
+
 /** Generate UUID v4 without crypto module */
 function genUUID(): string {
   const hex = "0123456789abcdef";
@@ -206,7 +252,7 @@ async function checkProvider(id: string): Promise<ProviderStatus> {
 
 // ── Events ──────────────────────────────────────────────────────────
 
-type BackendEvents = DefineEvents<{
+export type BackendEvents = DefineEvents<{
   "cli-output-chunk": (data: {
     sessionId: string;
     delta: string;
@@ -233,11 +279,35 @@ function getSettings(_sdk: BackendSDK): Result<Settings> {
 }
 
 async function updateSettings(
-  _sdk: BackendSDK,
+  sdk: BackendSDK,
   input: Partial<Settings>
 ): Promise<Result<Settings>> {
+  const resetCliSessions =
+    input.caidoApi !== undefined ||
+    input.mcp !== undefined;
+  let syncError: string | undefined;
   currentSettings = { ...currentSettings, ...input };
+  if (input.caidoApi !== undefined && mcpTempDir !== undefined) {
+    try {
+      const mcpScriptPath = getTempMcpScriptPath();
+      if (mcpScriptPath !== undefined) {
+        const wrapperPath = await writeMcpWrapper(mcpScriptPath);
+        if (wrapperPath !== undefined) {
+          await registerMcpWithCli("gemini", wrapperPath, sdk);
+          await registerMcpWithCli("codex", wrapperPath, sdk);
+        } else {
+          syncError = "Settings were saved, but Drift failed to refresh the MCP wrapper. Restart the MCP server.";
+        }
+      }
+    } catch (e) {
+      syncError =
+        `Settings were saved, but Drift failed to refresh the MCP wrapper: ${String(e)}`;
+      sdk.console.error(`[drift] ${syncError}`);
+    }
+  }
+  if (resetCliSessions) cliSessions.clear();
   await saveJson("settings", currentSettings);
+  if (syncError !== undefined) return err(syncError);
   return ok(currentSettings);
 }
 
@@ -260,13 +330,14 @@ async function checkProviderAvailability(
 
 function getMcpStatus(_sdk: BackendSDK): Result<McpServerInfo> {
   const ready = mcpTempDir !== undefined;
+  const mcpScriptPath = getTempMcpScriptPath();
   return ok({
     running: ready,
     host: currentSettings.mcp.host,
     port: currentSettings.mcp.port,
     token: "",
     toolCount: ready ? 14 : 0,
-    url: ready ? `stdio://${assetsPath}/mcp-server.mjs` : "",
+    url: ready && mcpScriptPath !== undefined ? `stdio://${mcpScriptPath}` : "",
   });
 }
 
@@ -285,9 +356,6 @@ function spawnAndWait(cmd: string, args: string[]): Promise<{ code: number; stdo
 }
 
 async function registerMcpWithCli(cli: "gemini" | "codex", mcpScript: string, sdk: BackendSDK): Promise<void> {
-  const url = currentSettings.caidoApi.url;
-  const token = currentSettings.caidoApi.token;
-
   if (cli === "gemini") {
     await spawnAndWait("gemini", ["mcp", "remove", "drift"]);
     // Register wrapper script (has env vars baked in)
@@ -334,20 +402,18 @@ async function startMcpServer(sdk: BackendSDK): Promise<Result<McpServerInfo>> {
   mcpTempDir = `/tmp/drift-mcp-${genUUID()}`;
   await mkdir(mcpTempDir, { recursive: true });
 
-  // Create wrapper script with env vars for Gemini/Codex
-  const wrapperPath = path.join(mcpTempDir, "mcp-wrapper.sh");
-  await writeFile(wrapperPath, [
-    "#!/bin/bash",
-    `export CAIDO_URL="${currentSettings.caidoApi.url}"`,
-    `export CAIDO_TOKEN="${currentSettings.caidoApi.token}"`,
-    `exec node "${mcpScript}"`,
-  ].join("\n"));
-  // Make wrapper executable
-  await spawnAndWait("chmod", ["+x", wrapperPath]);
+  const mcpScriptLocal = path.join(mcpTempDir, "mcp-server.mjs");
+  await writeFile(mcpScriptLocal, await readFile(mcpScript, "utf-8"));
+
+  const wrapperPath = await writeMcpWrapper(mcpScriptLocal);
+  if (wrapperPath === undefined) {
+    return err("Failed to create MCP wrapper script.");
+  }
 
   // Register MCP with Gemini and Codex using the wrapper
   await registerMcpWithCli("gemini", wrapperPath, sdk);
   await registerMcpWithCli("codex", wrapperPath, sdk);
+  cliSessions.clear();
 
   sdk.api.send("mcp-status", { running: true, port: 0, toolCount: 14 });
 
@@ -357,7 +423,7 @@ async function startMcpServer(sdk: BackendSDK): Promise<Result<McpServerInfo>> {
     port: 0,
     token: "",
     toolCount: 14,
-    url: `stdio://${mcpScript}`,
+    url: `stdio://${mcpScriptLocal}`,
   });
 }
 
@@ -370,6 +436,7 @@ async function stopMcpServer(sdk: BackendSDK): Promise<Result<void>> {
     try { await rm(mcpTempDir, { recursive: true, force: true }); } catch { /* silent */ }
     mcpTempDir = undefined;
   }
+  cliSessions.clear();
   sdk.api.send("mcp-status", { running: false, port: 0, toolCount: 0 });
   return ok(undefined);
 }
@@ -460,26 +527,12 @@ async function sendCliMessage(
           cliSessions.set(input.chatId, sid);
         }
 
-        // MCP config (write once per chat, reuse on subsequent messages)
-        if (mcpTempDir !== undefined) {
-          const mcpScriptPath = path.join(assetsPath, "mcp-server.mjs");
-          const cfgFile = path.join(mcpTempDir, `mcp-${input.chatId}.json`);
-          if (!(await fileExists(cfgFile)) && await fileExists(mcpScriptPath)) {
-            await writeTemp(mcpTempDir, `mcp-${input.chatId}.json`, JSON.stringify({
-              mcpServers: {
-                drift: {
-                  command: "node",
-                  args: [mcpScriptPath],
-                  env: {
-                    CAIDO_URL: currentSettings.caidoApi.url,
-                    CAIDO_TOKEN: currentSettings.caidoApi.token,
-                  },
-                },
-              },
-            }, null, 2));
-          }
-          if (await fileExists(cfgFile)) {
-            args.push("--mcp-config", cfgFile);
+        // Rewrite MCP config on each send so token/url/script path cannot go stale.
+        const mcpScriptPath = getTempMcpScriptPath();
+        if (mcpScriptPath !== undefined) {
+          const cfgFile = await writeChatMcpConfig(`mcp-${input.chatId}.json`, mcpScriptPath);
+          if (cfgFile !== undefined) {
+            args.push("--strict-mcp-config", "--mcp-config", cfgFile);
           }
         }
         break;
@@ -500,26 +553,10 @@ async function sendCliMessage(
       case "copilot-cli": {
         args.push("-p", "--quiet");
         // MCP: Copilot supports --additional-mcp-config @<path>
-        if (mcpTempDir !== undefined) {
-          const mcpScript = path.join(assetsPath, "mcp-server.mjs");
-          const mcpScriptLocal = path.join(mcpTempDir, "mcp-server.mjs");
-          const mcpScriptPath = path.join(assetsPath, "mcp-server.mjs");
-          const cfgFile = path.join(mcpTempDir, `copilot-mcp-${input.chatId}.json`);
-          if (!(await fileExists(cfgFile)) && await fileExists(mcpScriptPath)) {
-            await writeTemp(mcpTempDir, `copilot-mcp-${input.chatId}.json`, JSON.stringify({
-              mcpServers: {
-                drift: {
-                  command: "node",
-                  args: [mcpScriptPath],
-                  env: {
-                    CAIDO_URL: currentSettings.caidoApi.url,
-                    CAIDO_TOKEN: currentSettings.caidoApi.token,
-                  },
-                },
-              },
-            }, null, 2));
-          }
-          if (await fileExists(cfgFile)) {
+        const mcpScriptPath = getTempMcpScriptPath();
+        if (mcpScriptPath !== undefined) {
+          const cfgFile = await writeChatMcpConfig(`copilot-mcp-${input.chatId}.json`, mcpScriptPath);
+          if (cfgFile !== undefined) {
             args.push("--additional-mcp-config", `@${cfgFile}`);
           }
         }
@@ -694,20 +731,25 @@ function getCliSessionState(
 async function getDiagnostics(_sdk: BackendSDK): Promise<Result<Record<string, string>>> {
   const mcpScript = path.join(assetsPath, "mcp-server.mjs");
   const mcpScriptExists = await fileExists(mcpScript);
+  const mcpTempScript = getTempMcpScriptPath();
   const info: Record<string, string> = {
     pluginPath,
     assetsPath,
     mcpScript,
     mcpScriptExists: String(mcpScriptExists),
     mcpTempDir: mcpTempDir ?? "not set (MCP not started)",
+    mcpTempScript: mcpTempScript ?? "not set (MCP not started)",
     caidoApiUrl: currentSettings.caidoApi.url,
     caidoApiTokenSet: currentSettings.caidoApi.token.length > 0 ? "yes" : "no",
+    activeProvider: currentSettings.activeProvider,
     activeSessions: String(activeProcesses.size),
     cliSessionsCount: String(cliSessions.size),
     lastSpawnCommand: lastSpawnArgs.join(" "),
   };
 
   if (mcpTempDir !== undefined) {
+    info["mcpTempScriptExists"] =
+      String(mcpTempScript !== undefined && await fileExists(mcpTempScript));
     const testCfg = path.join(mcpTempDir, "test-diag.json");
     try {
       await writeTemp(mcpTempDir, "test-diag.json", "test");
@@ -742,8 +784,6 @@ export type API = DefineAPI<{
   getCliSessionState: typeof getCliSessionState;
   getDiagnostics: typeof getDiagnostics;
 }>;
-
-export type BackendEventsExport = BackendEvents;
 
 export function init(sdk: SDK<API, BackendEvents>) {
   pluginPath = sdk.meta.path();

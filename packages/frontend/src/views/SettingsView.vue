@@ -179,10 +179,10 @@ function getStatus(pid: string) {
         </p>
         <p v-if="store.mcpStatus?.running" class="text-xs text-green-400 mt-2">
           <i class="fas fa-check-circle mr-1" />
-          Claude Code will have access to 14 Caido tools when chatting. Make sure Caido API token is set above.
+          Drift will expose 14 Caido tools to supported CLI providers when chatting. Make sure the Caido API token is set above.
         </p>
         <p v-else class="text-xs text-surface-400 mt-2">
-          Start to give Claude Code access to Caido tools (search history, replay requests, create findings, etc.). Requires Caido API token.
+          Start to expose Caido tools (search history, replay requests, create findings, etc.) to supported CLI providers. Requires a Caido API token.
         </p>
       </template>
     </Card>

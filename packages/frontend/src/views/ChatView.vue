@@ -23,7 +23,7 @@ const errorMessage = ref<string | undefined>(undefined);
 const messagesContainer = ref<HTMLElement | undefined>(undefined);
 
 let messageCounter = Date.now();
-let eventUnsub: (() => void) | undefined;
+let eventUnsub: { stop: () => void } | undefined;
 
 const currentProvider = computed(() =>
   chatStore.activeChat?.providerId ?? CliProvider.Claude
@@ -45,7 +45,7 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
-  eventUnsub?.();
+  eventUnsub?.stop();
 });
 
 watch(() => chatStore.activeMessages.length, () => nextTick(scrollToBottom));
