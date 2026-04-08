@@ -85,6 +85,7 @@ let assetsPath = "";
 let currentSettings: Settings = { ...DEFAULT_SETTINGS };
 let currentChats: StoredChat[] = [];
 const cliSessions = new Map<string, string>();        // chatId → cliSessionId (resume)
+let lastSpawnArgs: string[] = [];                     // for diagnostics
 const activeProcesses = new Map<string, { kill: (s?: string) => boolean }>(); // sessionId → ChildProcess
 const sessionStates = new Map<string, "starting" | "running" | "stopped" | "error">();
 let mcpTempDir: string | undefined;
@@ -544,6 +545,7 @@ async function sendCliMessage(
     prompt += input.text;
 
     // ── Spawn process ──
+    lastSpawnArgs = [resolved, ...args];
     sessionStates.set(input.sessionId, "running");
     return new Promise<Result<string>>((resolve) => {
       const proc = spawn(resolved, args, {
@@ -660,6 +662,7 @@ async function getDiagnostics(_sdk: BackendSDK): Promise<Result<Record<string, s
     caidoApiTokenSet: currentSettings.caidoApi.token.length > 0 ? "yes" : "no",
     activeSessions: String(activeProcesses.size),
     cliSessionsCount: String(cliSessions.size),
+    lastSpawnCommand: lastSpawnArgs.join(" "),
   };
 
   if (mcpTempDir !== undefined) {
