@@ -24,12 +24,18 @@ export const useSettingsStore = defineStore("settings", () => {
 
     try {
       // Load settings from frontend storage (persists across reinstalls)
-      const stored = await sdk.storage.get() as StoredData | undefined;
-      if (stored?.settings !== undefined) {
-        settings.value = { ...DEFAULT_SETTINGS, ...stored.settings };
+      let storageWorking = false;
+      try {
+        const stored = await sdk.storage.get() as StoredData | undefined;
+        if (stored?.settings !== undefined) {
+          settings.value = { ...DEFAULT_SETTINGS, ...stored.settings };
+          storageWorking = true;
+        }
+      } catch (storageErr) {
+        initError.value = `Storage load failed: ${String(storageErr)}`;
       }
 
-      // Sync settings to backend (backend loses its data on reinstall)
+      // Sync settings to backend
       await sdk.backend.updateSettings(settings.value);
 
       // Fetch provider statuses and MCP status
@@ -77,14 +83,18 @@ export const useSettingsStore = defineStore("settings", () => {
   }
 
   async function updateSettings(input: Partial<Settings>) {
+    // Update local state
+    settings.value = { ...settings.value, ...input };
+
+    // Persist to frontend storage (survives reinstalls)
     try {
-      // Update local state
-      settings.value = { ...settings.value, ...input };
-
-      // Persist to frontend storage (survives reinstalls)
       await sdk.storage.set({ settings: settings.value } as StoredData);
+    } catch (e) {
+      sdk.window.showToast(`Failed to persist settings: ${String(e)}`, { variant: "error" });
+    }
 
-      // Sync to backend
+    // Sync to backend
+    try {
       await sdk.backend.updateSettings(settings.value);
     } catch {}
   }
