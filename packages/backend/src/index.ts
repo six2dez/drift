@@ -92,7 +92,41 @@ let mcpTempDir: string | undefined;
 
 // ── Persistence ─────────────────────────────────────────────────────
 
+// Use SQLite (project-scoped, survives plugin reinstalls)
+let db: { execute: (sql: string) => Promise<void>; query: (sql: string) => Promise<unknown[]> } | undefined;
+
+function initDb(sdk: { meta: { db: () => unknown } }) {
+  db = sdk.meta.db() as typeof db;
+}
+
+async function loadSetting(key: string): Promise<string | undefined> {
+  if (db === undefined) return undefined;
+  try {
+    await db.execute("CREATE TABLE IF NOT EXISTS drift_settings (key TEXT PRIMARY KEY, value TEXT)");
+    const rows = await db.query(`SELECT value FROM drift_settings WHERE key = '${key}'`) as Array<{ value: string }>;
+    return rows[0]?.value;
+  } catch {
+    return undefined;
+  }
+}
+
+async function saveSetting(key: string, value: string): Promise<void> {
+  if (db === undefined) return;
+  try {
+    await db.execute("CREATE TABLE IF NOT EXISTS drift_settings (key TEXT PRIMARY KEY, value TEXT)");
+    await db.execute(`INSERT OR REPLACE INTO drift_settings (key, value) VALUES ('${key}', '${value.replace(/'/g, "''")}')`);
+  } catch {
+    // silent
+  }
+}
+
 async function loadJson<T>(filename: string, fallback: T): Promise<T> {
+  // Try SQLite first (survives reinstalls)
+  const dbData = await loadSetting(filename);
+  if (dbData !== undefined) {
+    try { return JSON.parse(dbData) as T; } catch { /* fallback */ }
+  }
+  // Fallback to JSON file
   try {
     const data = await readFile(path.join(pluginPath, `${filename}.json`), "utf-8");
     return JSON.parse(data) as T;
@@ -102,6 +136,10 @@ async function loadJson<T>(filename: string, fallback: T): Promise<T> {
 }
 
 async function saveJson(filename: string, data: unknown): Promise<void> {
+  const json = JSON.stringify(data);
+  // Save to SQLite (survives reinstalls)
+  await saveSetting(filename, json);
+  // Also save to file (backup)
   try {
     await writeFile(path.join(pluginPath, `${filename}.json`), JSON.stringify(data, null, 2));
   } catch {
@@ -291,13 +329,12 @@ async function startMcpServer(sdk: BackendSDK): Promise<Result<McpServerInfo>> {
     return err("MCP server script not found in plugin assets.");
   }
 
-  // Create temp dir for MCP configs
-  mcpTempDir = path.join(pluginPath, "mcp-tmp-" + genUUID());
+  // Use /tmp for MCP configs - Caido plugin path has spaces ("Application Support")
+  // which breaks Claude Code's --mcp-config path parsing
+  mcpTempDir = `/tmp/drift-mcp-${genUUID()}`;
   await mkdir(mcpTempDir, { recursive: true });
 
-  // Create wrapper script that sets env vars and runs the MCP server
-  // This is needed for Gemini/Codex which use persistent MCP registration
-  // and can't pass env vars through `mcp add`
+  // Create wrapper script with env vars for Gemini/Codex
   const wrapperPath = path.join(mcpTempDir, "mcp-wrapper.sh");
   await writeFile(wrapperPath, [
     "#!/bin/bash",
@@ -709,6 +746,7 @@ export type BackendEventsExport = BackendEvents;
 export function init(sdk: SDK<API, BackendEvents>) {
   pluginPath = sdk.meta.path();
   assetsPath = sdk.meta.assetsPath();
+  initDb(sdk);
   sdk.console.log(`[drift] init — plugin: ${pluginPath}, assets: ${assetsPath}`);
 
   // Load persisted data
