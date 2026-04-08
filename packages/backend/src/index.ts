@@ -539,9 +539,6 @@ async function sendCliMessage(
 
     prompt += input.text;
 
-    // DEBUG: add spawn info to prompt so we can see what's happening
-    prompt += `\n\n[DEBUG - remove later] spawn args: ${JSON.stringify(args)}, mcpTempDir: ${mcpTempDir ?? "null"}, assetsPath: ${assetsPath}`;
-
     // ── Spawn process ──
     sessionStates.set(input.sessionId, "running");
     return new Promise<Result<string>>((resolve) => {
@@ -644,6 +641,37 @@ function getCliSessionState(
   return ok({ sessionId, state });
 }
 
+// ── Diagnostic ──────────────────────────────────────────────────────
+
+async function getDiagnostics(_sdk: BackendSDK): Promise<Result<Record<string, string>>> {
+  const mcpScript = path.join(assetsPath, "mcp-server.mjs");
+  const mcpScriptExists = await fileExists(mcpScript);
+  const info: Record<string, string> = {
+    pluginPath,
+    assetsPath,
+    mcpScript,
+    mcpScriptExists: String(mcpScriptExists),
+    mcpTempDir: mcpTempDir ?? "not set (MCP not started)",
+    caidoApiUrl: currentSettings.caidoApi.url,
+    caidoApiTokenSet: currentSettings.caidoApi.token.length > 0 ? "yes" : "no",
+    activeSessions: String(activeProcesses.size),
+    cliSessionsCount: String(cliSessions.size),
+  };
+
+  if (mcpTempDir !== undefined) {
+    const testCfg = path.join(mcpTempDir, "test-diag.json");
+    try {
+      await writeTemp(mcpTempDir, "test-diag.json", "test");
+      info["tempDirWritable"] = "yes";
+      await rm(testCfg);
+    } catch (e) {
+      info["tempDirWritable"] = `no: ${String(e)}`;
+    }
+  }
+
+  return ok(info);
+}
+
 // ── API type + init ─────────────────────────────────────────────────
 
 export type API = DefineAPI<{
@@ -663,6 +691,7 @@ export type API = DefineAPI<{
   cancelCliMessage: typeof cancelCliMessage;
   closeCliSession: typeof closeCliSession;
   getCliSessionState: typeof getCliSessionState;
+  getDiagnostics: typeof getDiagnostics;
 }>;
 
 export type BackendEventsExport = BackendEvents;
@@ -699,4 +728,5 @@ export function init(sdk: SDK<API, BackendEvents>) {
   sdk.api.register("cancelCliMessage", cancelCliMessage);
   sdk.api.register("closeCliSession", closeCliSession);
   sdk.api.register("getCliSessionState", getCliSessionState);
+  sdk.api.register("getDiagnostics", getDiagnostics);
 }

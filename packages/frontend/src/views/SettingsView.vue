@@ -12,6 +12,12 @@ import Tag from "primevue/tag";
 const store = useSettingsStore();
 const sdk = useSDK();
 const mcpError = ref<string | undefined>(undefined);
+const diagnostics = ref<Record<string, string> | undefined>(undefined);
+
+async function runDiagnostics() {
+  const result = await sdk.backend.getDiagnostics();
+  if (result.kind === "Ok") diagnostics.value = result.value;
+}
 
 const allProviders = [
   CliProvider.Claude,
@@ -207,6 +213,26 @@ function getStatus(pid: string) {
               inputClass="p-inputtext-sm"
               @update:modelValue="(v: number) => updateNumber('maxHistoryMessages', v)"
             />
+          </div>
+        </div>
+      </template>
+    </Card>
+
+    <!-- Diagnostics -->
+    <h2 class="text-lg font-semibold text-surface-100 mb-3">Diagnostics</h2>
+    <Card :pt="{ body: { class: 'p-3' }, content: { class: 'p-0' } }">
+      <template #content>
+        <Button
+          label="Run Diagnostics"
+          icon="fas fa-stethoscope"
+          severity="secondary"
+          size="small"
+          @click="runDiagnostics"
+        />
+        <div v-if="diagnostics !== undefined" class="mt-3 text-xs font-mono" style="color: #9ca3b0;">
+          <div v-for="(value, key) in diagnostics" :key="key" class="flex gap-2 py-0.5">
+            <span style="color: #6b7280; min-width: 160px;">{{ key }}:</span>
+            <span style="color: #d1d5db; word-break: break-all;">{{ value }}</span>
           </div>
         </div>
       </template>
