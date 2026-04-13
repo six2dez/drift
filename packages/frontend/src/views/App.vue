@@ -1,16 +1,72 @@
 <script setup lang="ts">
-import { ref, onMounted } from "vue";
+import { computed, ref, onMounted, watch } from "vue";
 import { useSettingsStore } from "../stores/settings";
 import { useChatStore } from "../stores/chat";
 import { CliProvider } from "shared";
 import ChatView from "./ChatView.vue";
 import SettingsView from "./SettingsView.vue";
+import HelpView from "./HelpView.vue";
+import { pendingChatInputQueue } from "../chat-context";
 
-const activeTab = ref<"chat" | "settings">("chat");
+const activeTab = ref<"chat" | "settings" | "help">("chat");
 const settingsStore = useSettingsStore();
 const chatStore = useChatStore();
 const ready = ref(false);
 const initError = ref<string | undefined>(undefined);
+
+// Force-switch to the chat tab whenever a context-menu command enqueues
+// a pending payload. Without this, a click on "Analyze Request" while
+// the user is currently looking at Settings or Help would deposit the
+// prompt into ChatView but leave it invisible behind the active tab.
+watch(
+  () => pendingChatInputQueue.value.length,
+  (length) => {
+    if (length > 0) activeTab.value = "chat";
+  },
+);
+
+const mcpBadgeLabel = computed(() => {
+  if (!settingsStore.settings.mcp.enabled) return "MCP Disabled";
+  if (settingsStore.mcpStatus?.running) {
+    return `MCP ${settingsStore.mcpStatus.toolCount}/${settingsStore.mcpStatus.supportedToolCount}`;
+  }
+  if (
+    settingsStore.mcpStatus?.authState === "invalid" ||
+    settingsStore.mcpStatus?.authState === "error"
+  ) {
+    return "MCP Auth Error";
+  }
+  if (settingsStore.loading) return "MCP Checking";
+  return "MCP Stopped";
+});
+
+const mcpBadgeClass = computed(() => {
+  if (!settingsStore.settings.mcp.enabled) {
+    return "border-surface-600 text-surface-500 hover:text-surface-300";
+  }
+  if (settingsStore.mcpStatus?.running) {
+    return "border-green-700 text-green-300 hover:text-green-200";
+  }
+  if (
+    settingsStore.mcpStatus?.authState === "invalid" ||
+    settingsStore.mcpStatus?.authState === "error"
+  ) {
+    return "border-red-800 text-red-300 hover:text-red-200";
+  }
+  return "border-amber-700 text-amber-300 hover:text-amber-200";
+});
+
+const mcpDotClass = computed(() => {
+  if (!settingsStore.settings.mcp.enabled) return "bg-surface-500";
+  if (settingsStore.mcpStatus?.running) return "bg-green-400";
+  if (
+    settingsStore.mcpStatus?.authState === "invalid" ||
+    settingsStore.mcpStatus?.authState === "error"
+  ) {
+    return "bg-red-400";
+  }
+  return "bg-amber-400";
+});
 
 onMounted(async () => {
   try {
@@ -38,6 +94,14 @@ onMounted(async () => {
     <div class="flex items-center px-4 py-2 border-b border-surface-700 gap-3">
       <span class="text-base font-bold text-surface-100">Drift</span>
       <span class="text-xs text-surface-500">CLI AI Agent</span>
+      <button
+        class="ml-2 inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-[11px] transition-colors"
+        :class="mcpBadgeClass"
+        @click="activeTab = 'settings'"
+      >
+        <span class="h-1.5 w-1.5 rounded-full" :class="mcpDotClass" />
+        {{ mcpBadgeLabel }}
+      </button>
       <div class="flex-1" />
       <button
         class="px-3 py-1.5 text-sm rounded flex items-center gap-1.5"
@@ -57,14 +121,23 @@ onMounted(async () => {
       >
         <i class="fas fa-cog" /> Settings
       </button>
+      <button
+        class="px-3 py-1.5 text-sm rounded flex items-center gap-1.5"
+        :class="activeTab === 'help'
+          ? 'bg-primary-600 text-white'
+          : 'text-surface-400 hover:text-surface-200'"
+        @click="activeTab = 'help'"
+      >
+        <i class="fas fa-circle-question" /> Help
+      </button>
     </div>
 
     <!-- Init error -->
     <div
-      v-if="initError"
+      v-if="initError || chatStore.initError || (activeTab === 'chat' && settingsStore.initError)"
       class="mx-4 mt-2 px-3 py-2 text-xs text-red-400 bg-red-950 border border-red-800 rounded"
     >
-      {{ initError }}
+      {{ initError || chatStore.initError || settingsStore.initError }}
     </div>
 
     <!-- Content -->
@@ -72,8 +145,15 @@ onMounted(async () => {
       <i class="fas fa-spinner fa-spin mr-2" /> Loading...
     </div>
     <div v-else class="flex-1 overflow-hidden">
-      <ChatView v-if="activeTab === 'chat'" />
-      <SettingsView v-else />
+      <div v-show="activeTab === 'chat'" class="h-full">
+        <ChatView />
+      </div>
+      <div v-show="activeTab === 'settings'" class="h-full overflow-y-auto">
+        <SettingsView />
+      </div>
+      <div v-show="activeTab === 'help'" class="h-full overflow-y-auto">
+        <HelpView />
+      </div>
     </div>
   </div>
 </template>

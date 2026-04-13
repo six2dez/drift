@@ -3,5 +3,6 @@
   "compilerOptions": {
     "types": ["@caido/sdk-backend"]
   },
-  "include": ["./src/**/*.ts"]
+  "include": ["./src/**/*.ts"],
+  "exclude": ["./src/**/*.test.ts"]
 }

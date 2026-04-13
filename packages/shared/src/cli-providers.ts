@@ -11,7 +11,7 @@ export const CLI_PROVIDER_DISPLAY_NAMES: Record<CliProvider, string> = {
   [CliProvider.Claude]: "Claude Code",
   [CliProvider.Gemini]: "Gemini CLI",
   [CliProvider.Codex]: "Codex CLI",
-  [CliProvider.Copilot]: "Copilot CLI (experimental)",
+  [CliProvider.Copilot]: "Copilot CLI",
 };
 
 export const CLI_PROVIDER_DEFAULT_COMMANDS: Record<CliProvider, string> = {

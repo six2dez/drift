@@ -26,12 +26,15 @@ const providerOptions = Object.values(CliProvider).map((p) => ({
 }));
 
 const quickActions = [
+  { label: "Last 5 Requests", icon: "fas fa-clock-rotate-left", template: "Show me the last 5 requests in the active Caido context and summarize anything interesting." },
+  { label: "Show Context", icon: "fas fa-compass", template: "Use get_current_context and explain the current project, filter, scope, and whether an override is active." },
   { label: "List Findings", icon: "fas fa-flag", template: "List all findings with details (title, reporter, host, path, severity)" },
   { label: "Analyze Finding", icon: "fas fa-search", template: "Explain finding [FINDING_ID_OR_TITLE] in detail: root cause, exploitability, real-world impact, and suggested fix" },
   { label: "Generate PoC", icon: "fas fa-code", template: "Take finding [FINDING_ID_OR_TITLE] and generate a working proof-of-concept exploit with step-by-step reproduction instructions" },
   { label: "Write Report", icon: "fas fa-file-alt", template: "Write a bug bounty report for finding [FINDING_ID_OR_TITLE]. Include: title, severity (CVSS), description, impact, steps to reproduce, PoC, and remediation" },
   { label: "Find Vulns", icon: "fas fa-bug", template: "Search the last 20 HTTP requests and identify potential security vulnerabilities. For each, explain the issue and suggest a test" },
   { label: "Scan Scope", icon: "fas fa-crosshairs", template: "List the current scope and check which hosts have requests in history. Identify high-value targets for testing" },
+  { label: "Recovery Help", icon: "fas fa-life-ring", template: "I'm not seeing the expected Caido tools or context. Summarize the current MCP/session state and tell me the next recovery step." },
 ];
 
 function fillTemplate(template: string) {

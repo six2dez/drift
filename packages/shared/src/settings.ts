@@ -1,8 +1,11 @@
 import { CliProvider } from "./cli-providers";
+import {
+  DEFAULT_MCP_PERMISSION_SETTINGS,
+  type McpPermissionSettings,
+} from "./mcp";
 
 export type CaidoApiConfig = {
   url: string;
-  token: string;
 };
 
 export type McpConfig = {
@@ -16,9 +19,11 @@ export type Settings = {
   activeProvider: string;
   caidoApi: CaidoApiConfig;
   mcp: McpConfig;
+  mcpPermissions: McpPermissionSettings;
   maxHistoryMessages: number;
   maxHistoryChars: number;
   processTimeoutSeconds: number;
+  debugLogging: boolean;
 };
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -29,9 +34,14 @@ export const DEFAULT_SETTINGS: Settings = {
     [CliProvider.Copilot]: { command: "copilot", enabled: true },
   },
   activeProvider: CliProvider.Claude,
-  caidoApi: { url: "http://localhost:8080", token: "" },
+  caidoApi: { url: "http://localhost:8080" },
   mcp: { enabled: true, port: 9877, host: "127.0.0.1" },
+  mcpPermissions: {
+    enabledGroups: { ...DEFAULT_MCP_PERMISSION_SETTINGS.enabledGroups },
+    confirmSensitiveActions: DEFAULT_MCP_PERMISSION_SETTINGS.confirmSensitiveActions,
+  },
   maxHistoryMessages: 10,
   maxHistoryChars: 20000,
   processTimeoutSeconds: 120,
+  debugLogging: false,
 };

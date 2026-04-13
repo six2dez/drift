@@ -7,55 +7,11 @@ import { SDKPlugin } from "./plugins/sdk";
 import "./styles/index.css";
 import type { FrontendSDK } from "./types";
 import App from "./views/App.vue";
-
-// Shared state for context passing between commands and the chat
-let pendingContext: string | undefined;
-
-export function getPendingContext(): string | undefined {
-  const ctx = pendingContext;
-  pendingContext = undefined;
-  return ctx;
-}
-
-export function setPendingContext(ctx: string) {
-  pendingContext = ctx;
-}
-
-// ── Extract raw text from Caido context objects ─────────────────────
-
-function extractCaidoText(ctx: unknown, key: "request" | "response"): string {
-  try {
-    const c = ctx as Record<string, unknown>;
-    const obj = c[key] as Record<string, unknown> | undefined;
-    if (obj === undefined) return JSON.stringify(ctx);
-
-    // Try getRaw().toText() (Caido SDK object)
-    if (typeof obj["getRaw"] === "function") {
-      const raw = (obj as { getRaw: () => { toText: () => string } }).getRaw();
-      if (typeof raw?.toText === "function") return raw.toText();
-    }
-
-    // Try structured extraction
-    const body = typeof obj["getBody"] === "function"
-      ? ((obj as { getBody: () => { toText: () => string } | undefined }).getBody()?.toText() ?? "")
-      : "";
-
-    if (key === "request" && typeof obj["getMethod"] === "function" && typeof obj["getUrl"] === "function") {
-      const method = (obj as { getMethod: () => string }).getMethod();
-      const url = (obj as { getUrl: () => string }).getUrl();
-      return `${method} ${url}\n${body}`;
-    }
-    if (key === "response" && typeof obj["getCode"] === "function") {
-      return `HTTP ${(obj as { getCode: () => number }).getCode()}\n\n${body}`;
-    }
-
-    // Try plain .raw string
-    if (typeof obj["raw"] === "string") return obj["raw"] as string;
-    return JSON.stringify(ctx);
-  } catch {
-    return String(ctx);
-  }
-}
+import {
+  buildPendingChatInput,
+  extractCaidoText,
+  enqueuePendingChatInput,
+} from "./chat-context";
 
 // ── Command IDs ─────────────────────────────────────────────────────
 
@@ -96,9 +52,12 @@ export const init = (sdk: FrontendSDK) => {
     name: "Analyze Request",
     run: (ctx: unknown) => {
       const raw = extractCaidoText(ctx, "request");
-      setPendingContext(
-        `Analyze the following HTTP request for security issues, misconfigurations, and potential vulnerabilities. Look for: injection points, authentication issues, sensitive data exposure, IDOR, SSRF, and other OWASP Top 10 issues.\n\n${raw}`
-      );
+      enqueuePendingChatInput(buildPendingChatInput({
+        text: "Analyze this HTTP request for security issues, misconfigurations, and potential vulnerabilities. Focus on injection points, authentication issues, sensitive data exposure, IDOR, SSRF, and other OWASP Top 10 issues.",
+        source: "request",
+        label: "HTTP request",
+        rawContext: raw,
+      }));
       sdk.navigation.goTo("/drift");
     },
     group: "Drift",
@@ -108,9 +67,12 @@ export const init = (sdk: FrontendSDK) => {
     name: "Analyze Response",
     run: (ctx: unknown) => {
       const raw = extractCaidoText(ctx, "response");
-      setPendingContext(
-        `Analyze the following HTTP response for security issues. Look for: information disclosure, security headers missing, sensitive data in response, error messages leaking internals, and potential vulnerabilities.\n\n${raw}`
-      );
+      enqueuePendingChatInput(buildPendingChatInput({
+        text: "Analyze this HTTP response for security issues. Look for information disclosure, missing security headers, sensitive data exposure, internal error leakage, and likely vulnerabilities.",
+        source: "response",
+        label: "HTTP response",
+        rawContext: raw,
+      }));
       sdk.navigation.goTo("/drift");
     },
     group: "Drift",
@@ -120,9 +82,12 @@ export const init = (sdk: FrontendSDK) => {
     name: "Find Vulnerabilities",
     run: (ctx: unknown) => {
       const raw = extractCaidoText(ctx, "request");
-      setPendingContext(
-        `Perform a thorough security analysis of this HTTP request. For each potential vulnerability found:\n1. Identify the vulnerability type\n2. Explain the attack vector\n3. Suggest a test payload\n4. Rate the severity (Critical/High/Medium/Low)\n\nRequest:\n${raw}`
-      );
+      enqueuePendingChatInput(buildPendingChatInput({
+        text: "Perform a thorough security analysis of this HTTP request. For each potential vulnerability, identify the type, explain the attack vector, suggest a test payload, and rate the severity.",
+        source: "request-row",
+        label: "HTTP request",
+        rawContext: raw,
+      }));
       sdk.navigation.goTo("/drift");
     },
     group: "Drift",
@@ -132,9 +97,12 @@ export const init = (sdk: FrontendSDK) => {
     name: "Analyze JavaScript",
     run: (ctx: unknown) => {
       const raw = extractCaidoText(ctx, "response");
-      setPendingContext(
-        `Analyze the following JavaScript/response for security issues. Look for: API endpoints, hardcoded secrets, tokens, credentials, internal URLs, debug information, DOM XSS sinks/sources, and sensitive data.\n\n${raw}`
-      );
+      enqueuePendingChatInput(buildPendingChatInput({
+        text: "Analyze this JavaScript or HTTP response for security issues. Look for API endpoints, hardcoded secrets, tokens, credentials, internal URLs, debug information, DOM XSS sinks and sources, and sensitive data.",
+        source: "response",
+        label: "JavaScript or HTTP response",
+        rawContext: raw,
+      }));
       sdk.navigation.goTo("/drift");
     },
     group: "Drift",

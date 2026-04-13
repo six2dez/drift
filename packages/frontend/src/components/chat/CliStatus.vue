@@ -1,21 +1,103 @@
 <script setup lang="ts">
-import { CLI_PROVIDER_DISPLAY_NAMES, type CliProvider } from "shared";
+import { computed } from "vue";
+import {
+  CLI_PROVIDER_DISPLAY_NAMES,
+  type CliProvider,
+  type CliSessionStateEvent,
+  type McpServerInfo,
+} from "shared";
 
-defineProps<{
+const props = defineProps<{
   providerId: string;
   isStreaming: boolean;
+  mcpStatus?: McpServerInfo | null;
+  sessionState?: CliSessionStateEvent | null;
 }>();
+
+const contextSummary = computed(() => {
+  const effective = props.mcpStatus?.effectiveContext;
+  if (effective === undefined) return "Caido context unavailable";
+
+  const parts = [
+    effective.projectId !== "" ? `Project: ${effective.projectId}` : "Project: none",
+    effective.filterName !== "" ? `Filter: ${effective.filterName}` : "",
+    effective.historyScopeId !== "" ? `Scope: ${effective.historyScopeId}` : "Scope: none",
+  ].filter((part) => part !== "");
+
+  return parts.join(" | ");
+});
+
+const toolPolicySummary = computed(() => {
+  const status = props.mcpStatus;
+  if (status === undefined || status === null) return "Tool policy unavailable";
+  const confirmation = status.toolPolicy.confirmSensitiveActions
+    ? "confirm sensitive"
+    : "no confirmations";
+  return `Tools: ${status.toolCount}/${status.supportedToolCount} | ${confirmation}`;
+});
+
+const sessionSummary = computed(() => {
+  const session = props.sessionState;
+  if (session === undefined || session === null) {
+    return "Session: idle";
+  }
+
+  const labels: Record<CliSessionStateEvent["state"], string> = {
+    starting: "starting",
+    running: "running",
+    stopped: "stopped",
+    error: "error",
+  };
+  const summaryLabel =
+    session.reasonCode === "completed_without_result"
+      ? "recovered"
+      : labels[session.state];
+  return `Session: ${summaryLabel}${session.mcpAttached ? " | MCP attached" : " | no MCP"}`;
+});
+
+const sessionReason = computed(() => {
+  const session = props.sessionState;
+  if (session === undefined || session === null) {
+    return "No provider session has been created for this chat yet.";
+  }
+  if (session.reasonCode === "completed_without_result") {
+    return "Claude finished with visible output but missed the final result event. Drift recovered the turn automatically.";
+  }
+  return session.reason;
+});
 </script>
 
 <template>
-  <div class="flex items-center gap-2 px-4 py-1.5 text-xs text-surface-400">
-    <i
-      class="fas fa-circle"
-      style="font-size: 6px;"
-      :class="isStreaming ? 'text-yellow-500' : 'text-green-500'"
-    />
-    <span class="text-surface-200">{{ CLI_PROVIDER_DISPLAY_NAMES[providerId as CliProvider] ?? providerId }}</span>
-    <span v-if="isStreaming" class="text-yellow-500">Streaming...</span>
-    <span v-else>Ready</span>
+  <div class="flex flex-col gap-0.5 px-4 py-1.5 text-xs text-surface-400">
+    <div class="flex items-center gap-2">
+      <i
+        class="fas fa-circle"
+        style="font-size: 6px;"
+        :class="isStreaming ? 'text-yellow-500' : 'text-green-500'"
+      />
+      <span class="text-surface-200">
+        {{ CLI_PROVIDER_DISPLAY_NAMES[providerId as CliProvider] ?? providerId }}
+      </span>
+      <span v-if="isStreaming" class="text-yellow-500">Streaming...</span>
+      <span v-else>Ready</span>
+      <span
+        v-if="mcpStatus?.effectiveContext.overrideActive"
+        class="text-amber-400"
+      >
+        Override active
+      </span>
+    </div>
+    <div class="truncate text-[11px] text-surface-500">
+      {{ contextSummary }}
+    </div>
+    <div class="truncate text-[11px] text-surface-500">
+      {{ toolPolicySummary }}
+    </div>
+    <div class="truncate text-[11px] text-surface-500">
+      {{ sessionSummary }}
+    </div>
+    <div class="truncate text-[11px] text-surface-500">
+      {{ sessionReason }}
+    </div>
   </div>
 </template>

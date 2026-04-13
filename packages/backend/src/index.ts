@@ -1,58 +1,67 @@
 import type { DefineAPI, SDK, DefineEvents } from "caido:plugin";
-import { readFile, writeFile, stat, mkdir, rm, rename } from "fs/promises";
+import { readFile, writeFile, open as openFile, stat, mkdir, rm, rename } from "fs/promises";
 import { spawn, type ChildProcessWithoutNullStreams } from "child_process";
 import { Buffer } from "buffer";
 import path from "path";
+import {
+  type CliSessionReasonCode,
+  type CliSessionStateEvent,
+  DEFAULT_SETTINGS,
+  type CaidoContextOverride,
+  type CaidoContextSnapshot,
+  type ChatMessage,
+  type HttpContextPayload,
+  type McpAuthState,
+  type McpToolActivity,
+  type McpToolActivityState,
+  type McpToolApprovalRequest,
+  type McpToolPermissionGroup,
+  type McpToolPolicy,
+  type McpSelfTestCheck,
+  type McpSelfTestResults,
+  type McpServerInfo,
+  type ProviderStatus,
+  type SendCliMessageOutput,
+  type Settings,
+  type StoredChat,
+  type StoredMcpContext,
+  type SupportBundleOutput,
+} from "shared";
+import {
+  MCP_SELF_TEST_CHECKS,
+  MCP_TOOL_NAMES,
+  buildMcpToolPolicy,
+  buildMcpServerInfo,
+  buildSelfTestResult,
+  createEmptyCaidoContextOverride,
+  createEmptyCaidoContextSnapshot,
+  createEmptySelfTestResults,
+  createIdleSelfTestResult,
+  hasCaidoContextChanged,
+  mergeCaidoContextSnapshot,
+  parseMcpRuntimeContext,
+  serializeMcpRuntimeContext,
+  trimToString,
+} from "./mcp-runtime";
+import {
+  extractHomeDir,
+  getCommandExecutableCandidates,
+  getNodeExecutableCandidates,
+} from "./command-resolution";
+import {
+  consumeClaudePrintChunk,
+  createClaudePrintState,
+  didClaudeStopWithoutResult,
+  finalizeClaudePrintOutput,
+  getClaudePrintRecoveryMode,
+} from "./claude-print";
+import { getPersistenceDbHandle, type PersistenceDbHandle } from "./persistence";
 
 // ── Types (inline to avoid Zod which crashes QuickJS) ──────────────
 
-type ProviderConfig = { command: string; enabled: boolean };
-type CaidoApiConfig = { url: string; token: string };
-type McpConfig = { enabled: boolean; port: number; host: string };
-
-type Settings = {
-  providers: Record<string, ProviderConfig>;
-  activeProvider: string;
-  caidoApi: CaidoApiConfig;
-  mcp: McpConfig;
-  maxHistoryMessages: number;
-  maxHistoryChars: number;
-  processTimeoutSeconds: number;
-};
-
-type ProviderStatus = {
-  id: string;
-  available: boolean;
-  resolvedPath?: string;
-  error?: string;
-};
-
-type McpServerInfo = {
-  running: boolean;
-  host: string;
-  port: number;
-  token: string;
-  toolCount: number;
-  url: string;
-};
-
-type ChatMessage = {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-  timestamp: number;
-  providerId: string;
-};
-
-type StoredChat = {
-  id: string;
-  title: string;
-  messages: ChatMessage[];
-  providerId: string;
-  cliSessionId: string | null;
-  createdAt: number;
-  updatedAt: number;
-};
+type CaidoValidationResult =
+  | { ok: true; authState: "valid"; message: "" }
+  | { ok: false; authState: "invalid" | "error"; message: string };
 
 type Result<T> = { kind: "Ok"; value: T } | { kind: "Error"; error: string };
 function ok<T>(value: T): Result<T> {
@@ -62,22 +71,13 @@ function err<T>(error: string): Result<T> {
   return { kind: "Error", error };
 }
 
-// ── Defaults ────────────────────────────────────────────────────────
-
-const DEFAULT_SETTINGS: Settings = {
-  providers: {
-    "claude-cli": { command: "claude", enabled: true },
-    "gemini-cli": { command: "gemini", enabled: true },
-    "codex-cli": { command: "codex", enabled: true },
-    "copilot-cli": { command: "copilot", enabled: true },
-  },
-  activeProvider: "claude-cli",
-  caidoApi: { url: "http://localhost:8080", token: "" },
-  mcp: { enabled: true, port: 9877, host: "127.0.0.1" },
-  maxHistoryMessages: 10,
-  maxHistoryChars: 20000,
-  processTimeoutSeconds: 120,
-};
+const NODE_EXECUTABLE_ERROR =
+  "Drift could not locate a Node.js executable to launch the MCP server. Restart Caido from an environment where Node.js is available.";
+const CLAUDE_ASSISTANT_RECOVERY_IDLE_MS = 1500;
+const CLAUDE_STREAM_RECOVERY_IDLE_MS = 8000;
+const CLAUDE_POST_TOOL_QUIESCENCE_MS = 15000;
+const CLAUDE_POST_TOOL_ERROR_QUIESCENCE_MS = 3000;
+const DEBUG_CHUNK_PREVIEW_CHARS = 200;
 
 // ── State ───────────────────────────────────────────────────────────
 
@@ -88,16 +88,74 @@ let currentChats: StoredChat[] = [];
 const cliSessions = new Map<string, string>();        // chatId → cliSessionId (resume)
 let lastSpawnArgs: string[] = [];                     // for diagnostics
 const activeProcesses = new Map<string, ChildProcessWithoutNullStreams>(); // sessionId → ChildProcess
-const sessionStates = new Map<string, "starting" | "running" | "stopped" | "error">();
+const sessionSnapshots = new Map<string, CliSessionStateEvent>();
+const sessionWatchdogs = new Map<string, () => void | Promise<void>>();
+// Pump handler for an in-flight MCP self-test call. Only one self-test
+// can run at a time, so a single slot is enough. Called from the
+// getMcpStatus RPC handler (via a frontend keep-alive ping) to prod the
+// pending callMcpMethod promise when Caido's event loop has gone idle.
+let activeSelfTestPoll: (() => void) | undefined;
 let mcpTempDir: string | undefined;
+let mcpAuthState: McpAuthState = "unknown";
+let mcpAuthMessage = "";
+let lastNodeExecutable = "";
+let lastNodeSearchCandidates: string[] = [];
+let sessionCaidoToken = "";
+let mcpContextWriteChain: Promise<void> = Promise.resolve();
+let currentCaidoHistoryContext: CaidoContextSnapshot = createEmptyCaidoContextSnapshot();
+let currentCaidoContextOverride: CaidoContextOverride = createEmptyCaidoContextOverride();
+let lastMcpSelfTestResults: McpSelfTestResults = createEmptySelfTestResults();
+let lastPersistenceScope = "";
+let lastPersistenceMessage = "";
+let lastPersistenceTimestamp = 0;
+let pluginVersion = "unknown";
+const sessionRuntimeFiles = new Map<string, { activityFilePath: string; approvalsFilePath: string }>();
+const sessionDebugLogWriteChains = new Map<string, Promise<void>>();
+const sessionDebugLogInitialized = new Set<string>();
+
+type RuntimeActivityEvent =
+  | {
+    type: "approval-request";
+    id: string;
+    approvalId: string;
+    occurredAt: number;
+    toolName: string;
+    toolLabel: string;
+    group: McpToolPermissionGroup;
+    sensitive: boolean;
+    argumentsSummary: string;
+    message: string;
+  }
+  | {
+    type: "tool-result";
+    id: string;
+    occurredAt: number;
+    toolName: string;
+    toolLabel: string;
+    group: McpToolPermissionGroup;
+    sensitive: boolean;
+    state: McpToolActivityState;
+    durationMs: number | null;
+    argumentsSummary: string;
+    resultSummary: string;
+  };
+
+type ApprovalDecision = {
+  approved: boolean;
+  decidedAt: number;
+};
 
 // ── Persistence ─────────────────────────────────────────────────────
 
 // Use SQLite (project-scoped, survives plugin reinstalls)
-let db: { execute: (sql: string) => Promise<void>; query: (sql: string) => Promise<unknown[]> } | undefined;
+let db: PersistenceDbHandle | undefined;
 
 function initDb(sdk: { meta: { db: () => unknown } }) {
-  db = sdk.meta.db() as typeof db;
+  try {
+    db = getPersistenceDbHandle(sdk.meta.db());
+  } catch {
+    db = undefined;
+  }
 }
 
 async function loadSetting(key: string): Promise<string | undefined> {
@@ -106,18 +164,20 @@ async function loadSetting(key: string): Promise<string | undefined> {
     await db.execute("CREATE TABLE IF NOT EXISTS drift_settings (key TEXT PRIMARY KEY, value TEXT)");
     const rows = await db.query(`SELECT value FROM drift_settings WHERE key = '${key}'`) as Array<{ value: string }>;
     return rows[0]?.value;
-  } catch {
+  } catch (error) {
+    recordPersistenceIssue(`loadSetting(${key})`, error);
     return undefined;
   }
 }
 
-async function saveSetting(key: string, value: string): Promise<void> {
-  if (db === undefined) return;
+async function saveSetting(key: string, value: string): Promise<string | undefined> {
+  if (db === undefined) return undefined;
   try {
     await db.execute("CREATE TABLE IF NOT EXISTS drift_settings (key TEXT PRIMARY KEY, value TEXT)");
     await db.execute(`INSERT OR REPLACE INTO drift_settings (key, value) VALUES ('${key}', '${value.replace(/'/g, "''")}')`);
-  } catch {
-    // silent
+    return undefined;
+  } catch (error) {
+    return recordPersistenceIssue(`saveSetting(${key})`, error);
   }
 }
 
@@ -125,27 +185,37 @@ async function loadJson<T>(filename: string, fallback: T): Promise<T> {
   // Try SQLite first (survives reinstalls)
   const dbData = await loadSetting(filename);
   if (dbData !== undefined) {
-    try { return JSON.parse(dbData) as T; } catch { /* fallback */ }
+    try {
+      return JSON.parse(dbData) as T;
+    } catch (error) {
+      recordPersistenceIssue(`parseSetting(${filename})`, error);
+    }
   }
   // Fallback to JSON file
   try {
     const data = await readFile(path.join(pluginPath, `${filename}.json`), "utf-8");
     return JSON.parse(data) as T;
-  } catch {
+  } catch (error) {
+    if (!isFileNotFound(error)) {
+      recordPersistenceIssue(`loadJson(${filename})`, error);
+    }
     return fallback;
   }
 }
 
-async function saveJson(filename: string, data: unknown): Promise<void> {
+async function saveJson(filename: string, data: unknown): Promise<string | undefined> {
   const json = JSON.stringify(data);
+  const errors: string[] = [];
   // Save to SQLite (survives reinstalls)
-  await saveSetting(filename, json);
+  const sqliteError = await saveSetting(filename, json);
+  if (sqliteError !== undefined) errors.push(sqliteError);
   // Also save to file (backup)
   try {
     await writeFile(path.join(pluginPath, `${filename}.json`), JSON.stringify(data, null, 2));
-  } catch {
-    // silent
+  } catch (error) {
+    errors.push(recordPersistenceIssue(`saveJson(${filename})`, error));
   }
+  return errors.length > 0 ? errors.join("; ") : undefined;
 }
 
 // ── Async helpers ───────────────────────────────────────────────────
@@ -166,37 +236,493 @@ function getTempMcpScriptPath(): string | undefined {
   return path.join(mcpTempDir, "mcp-server.mjs");
 }
 
-async function writeChatMcpConfig(name: string, mcpScriptPath: string): Promise<string | undefined> {
+function getMcpContextFilePath(): string | undefined {
   if (mcpTempDir === undefined) return undefined;
-  if (!(await fileExists(mcpScriptPath))) return undefined;
+  return path.join(mcpTempDir, "mcp-context.json");
+}
+
+async function writeChatMcpConfig(
+  name: string,
+  server: {
+    command: string;
+    args: string[];
+    env?: Record<string, string>;
+  },
+): Promise<string | undefined> {
+  if (mcpTempDir === undefined) return undefined;
+  if (!(await fileExists(server.command))) return undefined;
   return writeTemp(mcpTempDir, name, JSON.stringify({
     mcpServers: {
-      drift: {
-        command: "node",
-        args: [mcpScriptPath],
-        env: {
-          CAIDO_URL: currentSettings.caidoApi.url,
-          CAIDO_TOKEN: currentSettings.caidoApi.token,
-        },
-      },
+      drift: server,
     },
   }, null, 2));
+}
+
+async function writeLaunchScript(
+  name: string,
+  command: string,
+  args: string[],
+  envVars: Record<string, string>,
+): Promise<string | undefined> {
+  if (mcpTempDir === undefined) return undefined;
+  const scriptPath = path.join(mcpTempDir, name);
+  const tempScriptPath = `${scriptPath}.tmp`;
+  const content = renderExportExecScript(command, args, envVars);
+  await writeFile(tempScriptPath, content);
+  const chmodResult = await spawnAndWait("chmod", ["+x", tempScriptPath]);
+  if (chmodResult.code !== 0) {
+    await rm(tempScriptPath, { force: true });
+    return undefined;
+  }
+  await rename(tempScriptPath, scriptPath);
+  return scriptPath;
+}
+
+function renderExportExecScript(
+  command: string,
+  args: string[],
+  envVars: Record<string, string>,
+  options?: {
+    passThroughArgs?: boolean;
+  },
+): string {
+  return [
+    "#!/bin/bash",
+    ...Object.entries(envVars).map(([key, value]) => `export ${key}=${shellQuote(value)}`),
+    `exec ${shellQuote(command)}${args.length > 0 ? ` ${args.map(shellQuote).join(" ")}` : ""}${options?.passThroughArgs === true ? " \"$@\"" : ""}`,
+  ].join("\n");
+}
+
+function getSessionDebugLogPath(sessionId: string): string | undefined {
+  if (!currentSettings.debugLogging) return undefined;
+  return `/tmp/drift-session-${sessionId}.log`;
+}
+
+function summarizeDebugChunk(text: string, maxChars = DEBUG_CHUNK_PREVIEW_CHARS): string {
+  const compact = text
+    .replace(/\r/g, "\\r")
+    .replace(/\n/g, "\\n")
+    .replace(/\t/g, "\\t");
+  if (compact.length <= maxChars) return compact;
+  return `${compact.slice(0, Math.max(0, maxChars - 3))}...`;
+}
+
+function redactDebugText(text: string): string {
+  return text
+    .replace(/(CAIDO_TOKEN=)'[^']*'/g, "$1'[redacted]'")
+    .replace(/("CAIDO_TOKEN"\s*:\s*)"[^"]*"/g, "$1\"[redacted]\"");
+}
+
+let debugLogErrorReported = false;
+
+function appendSessionDebugLog(logPath: string | undefined, message: string): void {
+  if (logPath === undefined) return;
+  const line = `[${new Date().toISOString()}] ${message}\n`;
+  const previous = sessionDebugLogWriteChains.get(logPath) ?? Promise.resolve();
+  const next = previous
+    .catch(() => undefined)
+    .then(async () => {
+      // Open with "a" (append) for each line so we never retain the
+      // accumulated buffer in memory. The per-path write chain serializes
+      // these so lines do not interleave.
+      const initialized = sessionDebugLogInitialized.has(logPath);
+      if (!initialized) {
+        sessionDebugLogInitialized.add(logPath);
+      }
+      const handle = await openFile(logPath, initialized ? "a" : "w");
+      try {
+        await handle.write(line);
+      } finally {
+        await handle.close();
+      }
+    })
+    .catch((error: unknown) => {
+      if (!debugLogErrorReported) {
+        debugLogErrorReported = true;
+        console.error(`[drift] session debug log write failed for ${logPath}: ${String(error)}`);
+      }
+    });
+  sessionDebugLogWriteChains.set(logPath, next);
+}
+
+async function disposeSessionDebugLog(logPath: string | undefined): Promise<void> {
+  if (logPath === undefined) return;
+  const pending = sessionDebugLogWriteChains.get(logPath);
+  if (pending !== undefined) {
+    await pending.catch(() => undefined);
+  }
+  sessionDebugLogWriteChains.delete(logPath);
+  sessionDebugLogInitialized.delete(logPath);
+  await rm(logPath, { force: true }).catch(() => undefined);
 }
 
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, "'\"'\"'")}'`;
 }
 
-async function writeMcpWrapper(mcpScriptPath: string): Promise<string | undefined> {
+function isFileNotFound(error: unknown): boolean {
+  return typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: string }).code === "ENOENT";
+}
+
+function recordPersistenceIssue(scope: string, error: unknown): string {
+  const message = `${scope}: ${String(error)}`;
+  lastPersistenceScope = scope;
+  lastPersistenceMessage = message;
+  lastPersistenceTimestamp = Date.now();
+  return message;
+}
+
+type SessionStateName = CliSessionStateEvent["state"];
+
+function getSessionSnapshot(sessionId: string): CliSessionStateEvent | undefined {
+  return sessionSnapshots.get(sessionId);
+}
+
+function publishSessionState(
+  sdk: BackendSDK,
+  update: {
+    sessionId: string;
+    chatId: string;
+    providerId: string;
+    state: SessionStateName;
+    reason: string;
+    reasonCode?: CliSessionReasonCode;
+    mcpAttached?: boolean;
+    recoveredFromPartialOutput?: boolean;
+    exitCode?: number;
+  },
+): CliSessionStateEvent {
+  const previous = sessionSnapshots.get(update.sessionId);
+  const snapshot: CliSessionStateEvent = {
+    chatId: update.chatId,
+    sessionId: update.sessionId,
+    providerId: update.providerId,
+    state: update.state,
+    reason: update.reason,
+    ...(update.reasonCode !== undefined ? { reasonCode: update.reasonCode } : {}),
+    mcpAttached: update.mcpAttached ?? previous?.mcpAttached ?? (mcpTempDir !== undefined),
+    ...(update.recoveredFromPartialOutput === true ? { recoveredFromPartialOutput: true } : {}),
+    updatedAt: Date.now(),
+    ...(update.exitCode !== undefined ? { exitCode: update.exitCode } : {}),
+  };
+  sessionSnapshots.set(update.sessionId, snapshot);
+  sdk.api.send("cli-session-state", snapshot);
+  return snapshot;
+}
+
+async function detectPluginVersion(): Promise<string> {
+  const candidates = [
+    path.join(pluginPath, "manifest.json"),
+    path.join(pluginPath, "..", "manifest.json"),
+    path.join(pluginPath, "package.json"),
+    path.join(pluginPath, "..", "..", "package.json"),
+  ];
+
+  for (const candidate of candidates) {
+    try {
+      const raw = await readFile(candidate, "utf-8");
+      const parsed = JSON.parse(raw) as { version?: string };
+      if (typeof parsed.version === "string" && parsed.version.trim() !== "") {
+        return parsed.version.trim();
+      }
+    } catch {
+      // Keep trying other candidates.
+    }
+  }
+
+  return "unknown";
+}
+
+function updateCaidoHistoryContext(input: Partial<CaidoContextSnapshot>): boolean {
+  const nextContext = mergeCaidoContextSnapshot(currentCaidoHistoryContext, input);
+  const changed = hasCaidoContextChanged(currentCaidoHistoryContext, nextContext);
+  if (changed) currentCaidoHistoryContext = nextContext;
+  return changed;
+}
+
+function getMcpWrapperPath(): string | undefined {
   if (mcpTempDir === undefined) return undefined;
-  const wrapperPath = path.join(mcpTempDir, "mcp-wrapper.sh");
+  return path.join(mcpTempDir, "mcp-wrapper.sh");
+}
+
+async function readStoredMcpContext(): Promise<StoredMcpContext> {
+  const contextFilePath = getMcpContextFilePath();
+  if (contextFilePath === undefined) {
+    return {
+      uiContext: currentCaidoHistoryContext,
+      overrideContext: currentCaidoContextOverride,
+    };
+  }
+
+  try {
+    const raw = await readFile(contextFilePath, "utf-8");
+    const parsed = parseMcpRuntimeContext(raw);
+    currentCaidoContextOverride = parsed.overrideContext;
+    return {
+      uiContext: parsed.uiContext,
+      overrideContext: parsed.overrideContext,
+    };
+  } catch {
+    return {
+      uiContext: currentCaidoHistoryContext,
+      overrideContext: currentCaidoContextOverride,
+    };
+  }
+}
+
+async function writeMcpContextFile(): Promise<string | undefined> {
+  const contextFilePath = getMcpContextFilePath();
+  if (contextFilePath === undefined) return undefined;
+  mcpContextWriteChain = mcpContextWriteChain
+    .catch(() => undefined)
+    .then(async () => {
+      try {
+        const existing = parseMcpRuntimeContext(await readFile(contextFilePath, "utf-8"));
+        currentCaidoContextOverride = existing.overrideContext;
+      } catch {
+        // Use the current in-memory override when the file does not exist yet.
+      }
+      await writeFile(
+        contextFilePath,
+        serializeMcpRuntimeContext(currentCaidoHistoryContext, currentCaidoContextOverride),
+      );
+    });
+  await mcpContextWriteChain;
+  return contextFilePath;
+}
+
+async function buildCurrentMcpStatus(): Promise<McpServerInfo> {
+  const ready = mcpTempDir !== undefined;
+  const mcpScriptPath = getTempMcpScriptPath();
+  const storedContext = await readStoredMcpContext();
+  return buildMcpServerInfo({
+    running: ready,
+    host: currentSettings.mcp.host,
+    port: ready ? currentSettings.mcp.port : 0,
+    token: "",
+    url: ready && mcpScriptPath !== undefined ? `stdio://${mcpScriptPath}` : "",
+    authState: mcpAuthState,
+    authSource: getCaidoTokenSource(),
+    authMessage: mcpAuthMessage,
+    uiContext: storedContext.uiContext,
+    overrideContext: storedContext.overrideContext,
+    selfTestResults: lastMcpSelfTestResults,
+    toolPolicy: getCurrentMcpToolPolicy(),
+  });
+}
+
+async function publishMcpStatus(sdk: BackendSDK): Promise<void> {
+  sdk.api.send("mcp-status", await buildCurrentMcpStatus());
+}
+
+function setMcpAuthStatus(state: McpAuthState, message = ""): void {
+  mcpAuthState = state;
+  mcpAuthMessage = message;
+}
+
+function getEffectiveCaidoToken(): string {
+  return sessionCaidoToken.trim();
+}
+
+function getCaidoTokenSource(): "session" | "none" {
+  return sessionCaidoToken.trim() !== "" ? "session" : "none";
+}
+
+function getCurrentMcpToolPolicy(): McpToolPolicy {
+  return buildMcpToolPolicy(currentSettings.mcpPermissions);
+}
+
+function buildMcpRuntimeEnv(input: {
+  caidoToken: string;
+  toolPolicy?: McpToolPolicy;
+  activityFilePath?: string;
+  approvalsFilePath?: string;
+}): Record<string, string> {
+  const toolPolicy = input.toolPolicy ?? getCurrentMcpToolPolicy();
+  return {
+    CAIDO_URL: currentSettings.caidoApi.url,
+    CAIDO_TOKEN: input.caidoToken,
+    ...(getMcpContextFilePath() !== undefined
+      ? { DRIFT_CONTEXT_FILE: getMcpContextFilePath()! }
+      : {}),
+    DRIFT_ALLOWED_TOOLS: toolPolicy.allowedToolNames.join(","),
+    DRIFT_CONFIRMATION_REQUIRED_TOOLS: toolPolicy.confirmationRequiredToolNames.join(","),
+    DRIFT_CONFIRM_SENSITIVE_ACTIONS: toolPolicy.confirmSensitiveActions ? "1" : "0",
+    ...(input.activityFilePath !== undefined
+      ? { DRIFT_ACTIVITY_FILE: input.activityFilePath }
+      : {}),
+    ...(input.approvalsFilePath !== undefined
+      ? { DRIFT_APPROVALS_FILE: input.approvalsFilePath }
+      : {}),
+  };
+}
+
+async function createSessionRuntimeFiles(sessionId: string): Promise<{
+  activityFilePath: string;
+  approvalsFilePath: string;
+} | undefined> {
+  if (mcpTempDir === undefined) return undefined;
+
+  await mkdir(mcpTempDir, { recursive: true });
+  const activityFilePath = path.join(mcpTempDir, `mcp-activity-${sessionId}.jsonl`);
+  const approvalsFilePath = path.join(mcpTempDir, `mcp-approvals-${sessionId}.json`);
+  await writeFile(activityFilePath, "");
+  await writeFile(approvalsFilePath, "{}\n");
+  const files = { activityFilePath, approvalsFilePath };
+  sessionRuntimeFiles.set(sessionId, files);
+  return files;
+}
+
+function parseRuntimeActivityEvents(raw: string): RuntimeActivityEvent[] {
+  return raw
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line !== "")
+    .flatMap((line) => {
+      try {
+        return [JSON.parse(line) as RuntimeActivityEvent];
+      } catch {
+        return [];
+      }
+    });
+}
+
+function toToolApprovalRequest(
+  sessionId: string,
+  event: Extract<RuntimeActivityEvent, { type: "approval-request" }>,
+): McpToolApprovalRequest {
+  return {
+    sessionId,
+    approvalId: event.approvalId,
+    toolName: event.toolName,
+    toolLabel: event.toolLabel,
+    group: event.group,
+    argumentsSummary: event.argumentsSummary,
+    message: event.message,
+    sensitive: event.sensitive,
+  };
+}
+
+function toToolActivity(
+  event: Extract<RuntimeActivityEvent, { type: "tool-result" }>,
+): McpToolActivity {
+  return {
+    id: event.id,
+    toolName: event.toolName,
+    toolLabel: event.toolLabel,
+    group: event.group,
+    sensitive: event.sensitive,
+    state: event.state,
+    occurredAt: event.occurredAt,
+    durationMs: event.durationMs,
+    argumentsSummary: event.argumentsSummary,
+    resultSummary: event.resultSummary,
+  };
+}
+
+function getClaudeToolFailureFallback(
+  activities: McpToolActivity[],
+): string {
+  for (let index = activities.length - 1; index >= 0; index -= 1) {
+    const activity = activities[index];
+    if (activity === undefined) continue;
+    if (activity.state === "success") continue;
+
+    const summary = trimToString(activity.resultSummary);
+    const prefix =
+      activity.state === "denied"
+        ? "Drift MCP action denied"
+        : "Drift MCP tool failed";
+    return summary === ""
+      ? `${prefix}: ${activity.toolLabel} (${activity.toolName}).`
+      : `${prefix}: ${activity.toolLabel} (${activity.toolName}). ${summary}`;
+  }
+
+  return "";
+}
+
+function buildClaudePostToolStallFallback(
+  activities: McpToolActivity[],
+): string {
+  const header =
+    "Claude Code stopped responding while waiting for tool results, even though the MCP tools completed. Drift force-finalized the turn. Ask again and the next turn will reuse this session.";
+  if (activities.length === 0) return header;
+  const lines = activities.map((activity) => {
+    const duration = activity.durationMs !== null ? `${String(activity.durationMs)}ms` : "n/a";
+    const summary = trimToString(activity.resultSummary);
+    const suffix = summary === "" ? "" : ` — ${summary}`;
+    return `- ${activity.toolLabel} (${activity.toolName}) · ${activity.state} · ${duration}${suffix}`;
+  });
+  return `${header}\n\nTools that ran during this turn:\n${lines.join("\n")}`;
+}
+
+async function writeApprovalDecision(
+  approvalsFilePath: string,
+  approvalId: string,
+  approved: boolean,
+): Promise<void> {
+  let current: Record<string, ApprovalDecision> = {};
+  try {
+    const raw = await readFile(approvalsFilePath, "utf-8");
+    current = JSON.parse(raw) as Record<string, ApprovalDecision>;
+  } catch {
+    current = {};
+  }
+  current[approvalId] = {
+    approved,
+    decidedAt: Date.now(),
+  };
+  await writeFile(approvalsFilePath, `${JSON.stringify(current, null, 2)}\n`);
+}
+
+function renderHttpContextAttachment(httpContext: HttpContextPayload | undefined): string {
+  if (httpContext === undefined) return "";
+  const raw = trimToString(httpContext.raw);
+  if (raw === "") return "";
+
+  const label = trimToString(httpContext.label) || "HTTP context";
+  const source = trimToString(httpContext.source);
+  const headerLines = [
+    `[Attached ${label}]`,
+    ...(source !== "" ? [`Source: ${source}`] : []),
+    "Treat the attached HTTP material as the primary artifact for analysis. Use it directly instead of asking the user to paste the request or response again.",
+    "",
+    raw,
+    "",
+  ];
+
+  return `${headerLines.join("\n")}\n`;
+}
+
+async function writeMcpWrapper(
+  mcpScriptPath: string,
+  nodeExecutable: string,
+  caidoToken: string,
+  options?: {
+    name?: string;
+    toolPolicy?: McpToolPolicy;
+    activityFilePath?: string;
+    approvalsFilePath?: string;
+  },
+): Promise<string | undefined> {
+  if (mcpTempDir === undefined) return undefined;
+  const wrapperPath = path.join(mcpTempDir, options?.name ?? "mcp-wrapper.sh");
   const tempWrapperPath = `${wrapperPath}.tmp`;
-  await writeFile(tempWrapperPath, [
-    "#!/bin/bash",
-    `export CAIDO_URL=${shellQuote(currentSettings.caidoApi.url)}`,
-    `export CAIDO_TOKEN=${shellQuote(currentSettings.caidoApi.token)}`,
-    `exec node ${shellQuote(mcpScriptPath)}`,
-  ].join("\n"));
+  const runtimeEnv = buildMcpRuntimeEnv({
+    caidoToken,
+    toolPolicy: options?.toolPolicy,
+    activityFilePath: options?.activityFilePath,
+    approvalsFilePath: options?.approvalsFilePath,
+  });
+  await writeFile(
+    tempWrapperPath,
+    renderExportExecScript(nodeExecutable, [mcpScriptPath], runtimeEnv, {
+      passThroughArgs: true,
+    }),
+  );
   const chmodResult = await spawnAndWait("chmod", ["+x", tempWrapperPath]);
   if (chmodResult.code !== 0) {
     await rm(tempWrapperPath, { force: true });
@@ -204,6 +730,54 @@ async function writeMcpWrapper(mcpScriptPath: string): Promise<string | undefine
   }
   await rename(tempWrapperPath, wrapperPath);
   return wrapperPath;
+}
+
+async function validateCaidoAuth(wrapperPath: string): Promise<CaidoValidationResult> {
+  const result = await spawnAndWait(wrapperPath, ["--validate-auth"]);
+  const output = result.stdout.trim() || result.stderr.trim();
+
+  try {
+    const parsed = JSON.parse(output) as {
+      ok?: boolean;
+      message?: string;
+      caidoCode?: string;
+      caidoReason?: string;
+    };
+
+    if (parsed.ok === true) {
+      return { ok: true, authState: "valid", message: "" };
+    }
+
+    if (parsed.ok === false) {
+      const authState =
+        parsed.caidoCode === "AUTHORIZATION" || parsed.caidoReason === "INVALID_TOKEN"
+          ? "invalid"
+          : "error";
+      return {
+        ok: false,
+        authState,
+        message: parsed.message ?? "Caido API validation failed.",
+      };
+    }
+  } catch {
+    // Fall through to generic error handling.
+  }
+
+  if (result.code !== 0 && result.code !== 1) {
+    return {
+      ok: false,
+      authState: "error",
+      message:
+        output || `Caido API validation helper exited unexpectedly with code ${String(result.code)}.`,
+    };
+  }
+
+  return {
+    ok: false,
+    authState: "error",
+    message:
+      output || "Caido API validation failed before Drift could confirm authentication.",
+  };
 }
 
 /** Generate UUID v4 without crypto module */
@@ -224,18 +798,60 @@ function genUUID(): string {
   return uuid;
 }
 
-// ── CLI resolution (async via `which`) ──────────────────────────────
+// ── CLI resolution ──────────────────────────────────────────────────
 
-function resolveCommand(command: string): Promise<string | undefined> {
-  return new Promise((resolve) => {
+async function resolveCommand(command: string): Promise<string | undefined> {
+  if (path.isAbsolute(command)) {
+    return await fileExists(command) ? command : undefined;
+  }
+  const pathResolution = await new Promise<string | undefined>((resolve) => {
     const child = spawn("which", [command]);
     let out = "";
+    let settled = false;
+    const timeout = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      try { child.kill("SIGKILL"); } catch { /* ignore */ }
+      resolve(undefined);
+    }, 1000);
     child.stdout?.on("data", (d: Buffer) => { out += d.toString(); });
     child.on("close", (code) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
       resolve(code === 0 && out.trim() !== "" ? out.trim() : undefined);
     });
-    child.on("error", () => resolve(undefined));
+    child.on("error", () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      resolve(undefined);
+    });
   });
+
+  const candidates = await getCommandExecutableCandidates({
+    command,
+    pathResolution,
+    homeDirs: getKnownHomeDirs(),
+  });
+
+  for (const candidate of candidates) {
+    if (await fileExists(candidate)) return candidate;
+  }
+
+  return undefined;
+}
+
+function getKnownHomeDirs(): string[] {
+  const processRef = globalThis as typeof globalThis & {
+    process?: { env?: Record<string, string | undefined> };
+  };
+
+  return [
+    processRef.process?.env?.HOME,
+    extractHomeDir(pluginPath),
+    ...Object.values(currentSettings.providers).map((provider) => extractHomeDir(provider.command)),
+  ].filter((value): value is string => typeof value === "string" && value.trim() !== "");
 }
 
 async function checkProvider(id: string): Promise<ProviderStatus> {
@@ -245,9 +861,15 @@ async function checkProvider(id: string): Promise<ProviderStatus> {
   }
   const resolved = await resolveCommand(config.command);
   if (resolved === undefined) {
-    return { id, available: false, error: `"${config.command}" not found in PATH` };
-  }
-  return { id, available: true, resolvedPath: resolved };
+      return {
+        id,
+        available: false,
+        error: path.isAbsolute(config.command)
+          ? `"${config.command}" does not exist`
+          : `"${config.command}" not found in PATH or common install locations`,
+      };
+    }
+    return { id, available: true, resolvedPath: resolved };
 }
 
 // ── Events ──────────────────────────────────────────────────────────
@@ -258,19 +880,41 @@ export type BackendEvents = DefineEvents<{
     delta: string;
     stream: "stdout" | "stderr";
   }) => void;
-  "cli-session-state": (data: {
+  "cli-session-state": (data: CliSessionStateEvent) => void;
+  "mcp-status": (data: McpServerInfo) => void;
+  "mcp-tool-activity": (data: {
     sessionId: string;
-    state: string;
-    error?: string;
+    activity: McpToolActivity;
   }) => void;
-  "mcp-status": (data: {
-    running: boolean;
-    port: number;
-    toolCount: number;
-  }) => void;
+  "mcp-tool-approval": (data: McpToolApprovalRequest) => void;
 }>;
 
 type BackendSDK = SDK<API, BackendEvents>;
+
+type ProjectSelection = { getId(): string } | null | undefined;
+
+async function syncProjectContext(sdk: BackendSDK, project: ProjectSelection): Promise<void> {
+  const changed = updateCaidoHistoryContext({
+    projectId: project === null || project === undefined ? "" : project.getId(),
+  });
+  if (!changed || mcpTempDir === undefined) return;
+  try {
+    await writeMcpContextFile();
+    await publishMcpStatus(sdk);
+  } catch (error) {
+    sdk.console.error(`[drift] Failed to refresh MCP context after project change: ${String(error)}`);
+  }
+}
+
+async function refreshProjectContext(sdk: BackendSDK): Promise<void> {
+  try {
+    const project = await sdk.projects.getCurrent();
+    await syncProjectContext(sdk, project as ProjectSelection);
+    if (mcpTempDir === undefined) await publishMcpStatus(sdk);
+  } catch (error) {
+    sdk.console.error(`[drift] Failed to read current Caido project: ${String(error)}`);
+  }
+}
 
 // ── API: Settings ───────────────────────────────────────────────────
 
@@ -287,28 +931,120 @@ async function updateSettings(
     input.mcp !== undefined;
   let syncError: string | undefined;
   currentSettings = { ...currentSettings, ...input };
+  if (input.caidoApi !== undefined && mcpTempDir === undefined) {
+    setMcpAuthStatus("unknown", "");
+    await publishMcpStatus(sdk);
+  }
   if (input.caidoApi !== undefined && mcpTempDir !== undefined) {
     try {
-      const mcpScriptPath = getTempMcpScriptPath();
-      if (mcpScriptPath !== undefined) {
-        const wrapperPath = await writeMcpWrapper(mcpScriptPath);
-        if (wrapperPath !== undefined) {
-          await registerMcpWithCli("gemini", wrapperPath, sdk);
-          await registerMcpWithCli("codex", wrapperPath, sdk);
-        } else {
-          syncError = "Settings were saved, but Drift failed to refresh the MCP wrapper. Restart the MCP server.";
-        }
-      }
+      syncError = await refreshActiveMcpRuntime(sdk);
     } catch (e) {
       syncError =
         `Settings were saved, but Drift failed to refresh the MCP wrapper: ${String(e)}`;
       sdk.console.error(`[drift] ${syncError}`);
+      await cleanupMcpRuntime(sdk, "error", syncError);
     }
   }
   if (resetCliSessions) cliSessions.clear();
-  await saveJson("settings", currentSettings);
+  const persistenceError = await saveJson("settings", currentSettings);
+  if (syncError !== undefined && persistenceError !== undefined) {
+    return err(`${syncError}; Settings persistence also failed: ${persistenceError}`);
+  }
   if (syncError !== undefined) return err(syncError);
+  if (persistenceError !== undefined) {
+    return err(`Settings were applied, but persistence failed: ${persistenceError}`);
+  }
   return ok(currentSettings);
+}
+
+async function refreshActiveMcpRuntime(sdk: BackendSDK): Promise<string | undefined> {
+  const mcpScriptPath = getTempMcpScriptPath();
+  if (mcpScriptPath === undefined) return undefined;
+
+  const caidoToken = getEffectiveCaidoToken();
+  if (caidoToken === "") {
+    const message = "No Caido access token is available. Open any Caido page (or reauthenticate) so Drift can pick up your session, then retry.";
+    await cleanupMcpRuntime(sdk, "invalid", message);
+    return message;
+  }
+
+  const nodeExecutable = await requireNodeExecutable();
+  if (nodeExecutable.kind === "Error") {
+    await cleanupMcpRuntime(sdk, "error", nodeExecutable.error);
+    return nodeExecutable.error;
+  }
+
+  if ((await writeMcpContextFile()) === undefined) {
+    const message = "Settings were saved, but Drift failed to refresh the MCP context file. Restart the MCP server.";
+    await cleanupMcpRuntime(sdk, "error", message);
+    return message;
+  }
+
+  const wrapperPath = await writeMcpWrapper(mcpScriptPath, nodeExecutable.value, caidoToken);
+  if (wrapperPath === undefined) {
+    const message = "Settings were saved, but Drift failed to refresh the MCP wrapper. Restart the MCP server.";
+    await cleanupMcpRuntime(sdk, "error", message);
+    return message;
+  }
+
+  const validation = await validateCaidoAuth(wrapperPath);
+  if (!validation.ok) {
+    await cleanupMcpRuntime(sdk, validation.authState, validation.message);
+    return validation.message;
+  }
+
+  setMcpAuthStatus("valid", "");
+  await registerMcpWithCli("gemini", wrapperPath, sdk);
+  await registerMcpWithCli("codex", wrapperPath, sdk);
+  await publishMcpStatus(sdk);
+  return undefined;
+}
+
+async function syncCaidoSessionToken(
+  sdk: BackendSDK,
+  token: string,
+): Promise<Result<void>> {
+  const previousEffectiveToken = getEffectiveCaidoToken();
+  sessionCaidoToken = token.trim();
+  const nextEffectiveToken = getEffectiveCaidoToken();
+
+  if (previousEffectiveToken !== nextEffectiveToken) {
+    if (mcpTempDir === undefined) {
+      setMcpAuthStatus("unknown", "");
+      await publishMcpStatus(sdk);
+    } else {
+      const refreshError = await refreshActiveMcpRuntime(sdk);
+      if (refreshError !== undefined) return err(refreshError);
+    }
+  }
+  return ok(undefined);
+}
+
+async function syncCaidoHistoryContext(
+  sdk: BackendSDK,
+  input: {
+    filterId: string;
+    filterName: string;
+    filterQuery: string;
+    historyQuery: string;
+    historyScopeId: string;
+  },
+): Promise<Result<void>> {
+  const changed = updateCaidoHistoryContext(input);
+  if (!changed) return ok(undefined);
+  if (mcpTempDir === undefined) {
+    await publishMcpStatus(sdk);
+    return ok(undefined);
+  }
+  try {
+    await writeMcpContextFile();
+    await publishMcpStatus(sdk);
+    return ok(undefined);
+  } catch (error) {
+    const message = `Drift failed to refresh the current Caido history context: ${String(error)}`;
+    sdk.console.error(`[drift] ${message}`);
+    return err(message);
+  }
 }
 
 // ── API: Providers ──────────────────────────────────────────────────
@@ -328,17 +1064,408 @@ async function checkProviderAvailability(
 
 // ── API: MCP ────────────────────────────────────────────────────────
 
-function getMcpStatus(_sdk: BackendSDK): Result<McpServerInfo> {
-  const ready = mcpTempDir !== undefined;
-  const mcpScriptPath = getTempMcpScriptPath();
-  return ok({
-    running: ready,
-    host: currentSettings.mcp.host,
-    port: currentSettings.mcp.port,
-    token: "",
-    toolCount: ready ? 14 : 0,
-    url: ready && mcpScriptPath !== undefined ? `stdio://${mcpScriptPath}` : "",
+async function getMcpStatus(_sdk: BackendSDK): Promise<Result<McpServerInfo>> {
+  // If a self-test is in flight, pump its poll handler from inside this
+  // RPC context. Caido's runtime does not reliably run child_process
+  // callbacks while another RPC is awaiting, so the frontend relies on
+  // pinging this RPC every ~1.5s to let the self-test observe process
+  // exit and finalize its promise.
+  if (activeSelfTestPoll !== undefined) {
+    try {
+      activeSelfTestPoll();
+    } catch {
+      // Best-effort only.
+    }
+  }
+  return ok(await buildCurrentMcpStatus());
+}
+
+type JsonRpcResponse = {
+  id?: number;
+  result?: {
+    tools?: Array<{ name?: string }>;
+    content?: Array<{ text?: string }>;
+    isError?: boolean;
+  };
+  error?: { message?: string };
+};
+
+function createFailedSelfTestChecks(message: string): McpSelfTestCheck[] {
+  return MCP_SELF_TEST_CHECKS.map((check) => ({
+    name: check.name,
+    label: check.label,
+    ok: false,
+    message,
+    durationMs: null,
+  }));
+}
+
+function cloneSelfTestChecks(checks: McpSelfTestCheck[]): McpSelfTestCheck[] {
+  return checks.map((check) => ({ ...check }));
+}
+
+function extractToolText(result: JsonRpcResponse["result"]): string {
+  if (result?.content === undefined) return "";
+  return result.content
+    .map((part) => trimToString(part.text))
+    .filter((part) => part !== "")
+    .join("\n")
+    .trim();
+}
+
+function getJsonRpcErrorMessage(response: JsonRpcResponse): string {
+  const toolText = extractToolText(response.result);
+  if (toolText !== "") return toolText;
+  return trimToString(response.error?.message) || "MCP request failed.";
+}
+
+async function callMcpMethod(
+  wrapperPath: string,
+  request: Record<string, unknown>,
+  envVars: Record<string, string> | undefined = undefined,
+): Promise<{ response: JsonRpcResponse; durationMs: number }> {
+  const requestId = typeof request.id === "number" ? request.id : 2;
+  const methodName = typeof request.method === "string" ? request.method : "unknown";
+  let launchPath = wrapperPath;
+  if (envVars !== undefined && Object.keys(envVars).length > 0) {
+    const script = await writeLaunchScript(
+      `mcp-self-test-${requestId}.sh`,
+      wrapperPath,
+      [],
+      envVars,
+    );
+    if (script === undefined) {
+      throw new Error("Drift could not prepare the MCP self-test launcher.");
+    }
+    launchPath = script;
+  }
+
+  return new Promise((resolve, reject) => {
+    activeSelfTestPoll = undefined;
+    const proc = spawn(launchPath, [], {
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    const cleanupLaunchScript = () => {
+      if (launchPath !== wrapperPath) {
+        void rm(launchPath, { force: true }).catch(() => undefined);
+      }
+    };
+
+    let stdoutBuffer = "";
+    let stderr = "";
+    let settled = false;
+    const startedAt = Date.now();
+    const timeout = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      try { proc.kill("SIGKILL"); } catch { /* ignore */ }
+      cleanupLaunchScript();
+      activeSelfTestPoll = undefined;
+      reject(new Error(`Timed out waiting for MCP response: ${methodName}`));
+    }, Math.min(currentSettings.processTimeoutSeconds * 1000, 10000));
+    // Expose a pump handler so the frontend's keep-alive ping
+    // (getMcpStatus) can force-check this pending self-test from inside
+    // an RPC handler. Caido's plugin runtime does not reliably deliver
+    // child_process data/close events while an outer RPC is awaiting,
+    // so we manually consult proc.exitCode/signalCode on each tick and
+    // synthesize a failure if the subprocess died without responding.
+    activeSelfTestPoll = () => {
+      if (settled) return;
+      const procRef = proc as unknown as {
+        exitCode: number | null | undefined;
+        signalCode: string | null | undefined;
+      };
+      const hasExit = typeof procRef.exitCode === "number";
+      const hasSignal =
+        typeof procRef.signalCode === "string" && procRef.signalCode !== "";
+      if (!hasExit && !hasSignal) return;
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      cleanupLaunchScript();
+      activeSelfTestPoll = undefined;
+      const trimmedStdout = stdoutBuffer.trim();
+      if (trimmedStdout !== "") {
+        for (const line of trimmedStdout.split("\n").map((l) => l.trim())) {
+          if (line === "") continue;
+          try {
+            const parsed = JSON.parse(line) as JsonRpcResponse;
+            if (parsed.id === requestId) {
+              resolve({ response: parsed, durationMs: Date.now() - startedAt });
+              return;
+            }
+          } catch { /* ignore malformed line */ }
+        }
+      }
+      reject(
+        new Error(
+          stderr.trim() ||
+          `MCP helper exited (code ${String(procRef.exitCode ?? "n/a")}${hasSignal ? `, signal ${String(procRef.signalCode)}` : ""}) before responding to ${methodName}.`,
+        ),
+      );
+    };
+
+    const finish = (callback: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      activeSelfTestPoll = undefined;
+      callback();
+      proc.stdin?.end();
+      cleanupLaunchScript();
+      setTimeout(() => {
+        try { proc.kill("SIGTERM"); } catch { /* ignore */ }
+      }, 0);
+    };
+
+    proc.stdout?.on("data", (chunk: Buffer) => {
+      stdoutBuffer += chunk.toString();
+      let newlineIndex = stdoutBuffer.indexOf("\n");
+      while (newlineIndex !== -1) {
+        const line = stdoutBuffer.slice(0, newlineIndex).trim();
+        stdoutBuffer = stdoutBuffer.slice(newlineIndex + 1);
+        newlineIndex = stdoutBuffer.indexOf("\n");
+        if (line === "") continue;
+
+        let parsed: JsonRpcResponse;
+        try {
+          parsed = JSON.parse(line) as JsonRpcResponse;
+        } catch {
+          continue;
+        }
+
+        if (parsed.id === requestId) {
+          finish(() => {
+            resolve({
+              response: parsed,
+              durationMs: Date.now() - startedAt,
+            });
+          });
+        }
+      }
+    });
+
+    proc.stderr?.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString();
+    });
+
+    proc.on("error", (error: Error) => {
+      finish(() => reject(error));
+    });
+
+    proc.on("close", () => {
+      if (settled) return;
+      finish(() =>
+        reject(
+          new Error(stderr.trim() || stdoutBuffer.trim() || "MCP helper exited before responding."),
+        ),
+      );
+    });
+
+    proc.stdin?.write(`${JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: {
+        protocolVersion: "2024-11-05",
+        capabilities: {},
+        clientInfo: { name: "drift-self-test", version: "1.0.0" },
+      },
+    })}\n`);
+    proc.stdin?.write(`${JSON.stringify({
+      jsonrpc: "2.0",
+      method: "notifications/initialized",
+      params: {},
+    })}\n`);
+    proc.stdin?.write(`${JSON.stringify(request)}\n`);
+    proc.stdin?.end();
   });
+}
+
+async function runSharedMcpSelfTest(): Promise<{
+  checks: McpSelfTestCheck[];
+  error: string;
+}> {
+  const wrapperPath = getMcpWrapperPath();
+  if (wrapperPath === undefined || !(await fileExists(wrapperPath))) {
+    const message = "Drift MCP runtime is not running.";
+    return { checks: createFailedSelfTestChecks(message), error: message };
+  }
+
+  const checks: McpSelfTestCheck[] = [];
+  let combinedError = "";
+  const selfTestEnv = buildMcpRuntimeEnv({
+    caidoToken: getEffectiveCaidoToken(),
+    toolPolicy: buildMcpToolPolicy({
+      enabledGroups: {
+        read: true,
+        replay: true,
+        findings: true,
+        environment: true,
+        intercept: true,
+        workflow: true,
+      },
+      confirmSensitiveActions: false,
+    }),
+  });
+
+  try {
+    const toolsList = await callMcpMethod(wrapperPath, {
+      jsonrpc: "2.0",
+      id: 2,
+      method: "tools/list",
+      params: {},
+    }, selfTestEnv);
+    const toolNames = toolsList.response.result?.tools
+      ?.map((tool) => trimToString(tool.name))
+      .filter((name) => name !== "") ?? [];
+    const missingTools = MCP_TOOL_NAMES.filter((tool) => !toolNames.includes(tool));
+    checks.push({
+      name: "tools/list",
+      label: "Tool discovery",
+      ok: missingTools.length === 0,
+      message:
+        missingTools.length === 0
+          ? `${toolNames.length} tools discovered`
+          : `Missing tools: ${missingTools.join(", ")}`,
+      durationMs: toolsList.durationMs,
+    });
+  } catch (error) {
+    const message = String(error);
+    checks.push({
+      name: "tools/list",
+      label: "Tool discovery",
+      ok: false,
+      message,
+      durationMs: null,
+    });
+    combinedError = message;
+  }
+
+  for (const [offset, toolName] of ["get_environment", "search_history"].entries()) {
+    try {
+      const response = await callMcpMethod(wrapperPath, {
+        jsonrpc: "2.0",
+        id: 3 + offset,
+        method: "tools/call",
+        params: {
+          name: toolName,
+          arguments: toolName === "search_history" ? { limit: 1 } : {},
+        },
+      }, selfTestEnv);
+      const ok =
+        response.response.error === undefined &&
+        response.response.result?.isError !== true;
+      const message = ok
+        ? extractToolText(response.response.result) || `${toolName} succeeded`
+        : getJsonRpcErrorMessage(response.response);
+      checks.push({
+        name: toolName,
+        label: toolName === "get_environment" ? "Environment read" : "History search",
+        ok,
+        message,
+        durationMs: response.durationMs,
+      });
+      if (!ok && combinedError === "") combinedError = `${toolName}: ${message}`;
+    } catch (error) {
+      const message = String(error);
+      checks.push({
+        name: toolName,
+        label: toolName === "get_environment" ? "Environment read" : "History search",
+        ok: false,
+        message,
+        durationMs: null,
+      });
+      if (combinedError === "") combinedError = `${toolName}: ${message}`;
+    }
+  }
+
+  return { checks, error: combinedError };
+}
+
+async function runMcpSelfTest(
+  sdk: BackendSDK,
+  providerId?: string,
+): Promise<Result<McpSelfTestResults>> {
+  const candidateProviderIds =
+    providerId !== undefined && providerId.trim() !== ""
+      ? [providerId]
+      : Object.entries(currentSettings.providers)
+        .filter(([, config]) => config.enabled)
+        .map(([id]) => id);
+
+  const providerStatuses = await Promise.all(candidateProviderIds.map((id) => checkProvider(id)));
+  const targetProviderIds = candidateProviderIds.filter((_, index) => providerStatuses[index]?.available);
+
+  if (candidateProviderIds.length === 0) {
+    return err("No provider is enabled. Enable at least one CLI provider before running the live MCP test.");
+  }
+  if (targetProviderIds.length === 0) {
+    return err(
+      providerId !== undefined && providerId.trim() !== ""
+        ? providerStatuses[0]?.error ?? "The selected provider is unavailable."
+        : "No enabled CLI provider is currently available for the live MCP test.",
+    );
+  }
+
+  const alreadyRunning = targetProviderIds.some(
+    (targetProviderId) => lastMcpSelfTestResults[targetProviderId]?.state === "running",
+  );
+  if (alreadyRunning) {
+    return err("An MCP self-test is already running. Wait for it to finish before starting another one.");
+  }
+
+  const startedAt = Date.now();
+  const runningResults: McpSelfTestResults = { ...lastMcpSelfTestResults };
+  for (const targetProviderId of targetProviderIds) {
+    const running = createIdleSelfTestResult(targetProviderId);
+    running.state = "running";
+    running.startedAt = startedAt;
+    runningResults[targetProviderId] = running;
+  }
+  lastMcpSelfTestResults = runningResults;
+  await publishMcpStatus(sdk);
+
+  const sharedCheckResult = await runSharedMcpSelfTest();
+  const finishedAt = Date.now();
+
+  const nextResults: McpSelfTestResults = { ...lastMcpSelfTestResults };
+  candidateProviderIds.forEach((targetProviderId, index) => {
+    const providerStatus = providerStatuses[index];
+    const cliReady = providerStatus?.available ?? false;
+    const cliMessage =
+      providerStatus === undefined
+        ? "Provider status unavailable"
+        : cliReady
+          ? providerStatus.resolvedPath ?? "CLI available"
+          : providerStatus.error ?? "CLI unavailable";
+
+    if (!cliReady) {
+      const idle = createIdleSelfTestResult(targetProviderId);
+      idle.cliMessage = cliMessage;
+      nextResults[targetProviderId] = idle;
+      return;
+    }
+
+    const errors = [
+      cliReady ? "" : cliMessage,
+      sharedCheckResult.error,
+    ].filter((value) => value !== "");
+
+    nextResults[targetProviderId] = buildSelfTestResult({
+      providerId: targetProviderId,
+      startedAt,
+      finishedAt,
+      cliReady,
+      cliMessage,
+      checks: cloneSelfTestChecks(sharedCheckResult.checks),
+      error: errors.join("; "),
+    });
+  });
+
+  lastMcpSelfTestResults = nextResults;
+  await publishMcpStatus(sdk);
+  return ok(nextResults);
 }
 
 // ── MCP registration helpers for Gemini/Codex ───────────────────────
@@ -353,6 +1480,39 @@ function spawnAndWait(cmd: string, args: string[]): Promise<{ code: number; stdo
     proc.on("close", (code) => resolve({ code: code ?? 1, stdout, stderr }));
     proc.on("error", () => resolve({ code: 1, stdout, stderr }));
   });
+}
+
+async function getNodeExecutable(): Promise<string | undefined> {
+  const processRef = globalThis as typeof globalThis & {
+    process?: { execPath?: string; env?: Record<string, string | undefined> };
+  };
+  const candidates = await getNodeExecutableCandidates({
+    execPath: processRef.process?.execPath,
+    pathResolution: await resolveCommand("node"),
+    homeDirs: getKnownHomeDirs(),
+    absoluteProviderCommands: Object.values(currentSettings.providers)
+      .map((provider) => provider.command)
+      .filter((command): command is string => path.isAbsolute(command)),
+  });
+  lastNodeSearchCandidates = candidates;
+
+  for (const candidate of candidates) {
+    if (!(await fileExists(candidate))) continue;
+    const result = await spawnAndWait(candidate, ["--version"]);
+    if (result.code === 0) {
+      lastNodeExecutable = candidate;
+      return candidate;
+    }
+  }
+
+  lastNodeExecutable = "";
+  return undefined;
+}
+
+async function requireNodeExecutable(): Promise<Result<string>> {
+  const nodeExecutable = lastNodeExecutable || await getNodeExecutable();
+  if (nodeExecutable === undefined) return err(NODE_EXECUTABLE_ERROR);
+  return ok(nodeExecutable);
 }
 
 async function registerMcpWithCli(cli: "gemini" | "codex", mcpScript: string, sdk: BackendSDK): Promise<void> {
@@ -385,10 +1545,35 @@ async function unregisterMcpFromCli(cli: "gemini" | "codex", sdk: BackendSDK): P
   }
 }
 
+async function cleanupMcpRuntime(
+  sdk: BackendSDK,
+  authState: McpAuthState = "unknown",
+  authMessage = "",
+): Promise<void> {
+  await unregisterMcpFromCli("gemini", sdk);
+  await unregisterMcpFromCli("codex", sdk);
+
+  if (mcpTempDir !== undefined) {
+    try {
+      await rm(mcpTempDir, { recursive: true, force: true });
+    } catch (error) {
+      sdk.console.error(`[drift] Failed to remove MCP temp dir ${mcpTempDir}: ${String(error)}`);
+    }
+    mcpTempDir = undefined;
+  }
+  cliSessions.clear();
+  setMcpAuthStatus(authState, authMessage);
+  await publishMcpStatus(sdk);
+}
+
 async function startMcpServer(sdk: BackendSDK): Promise<Result<McpServerInfo>> {
   // Check prerequisites
-  if (!currentSettings.caidoApi.token) {
-    return err("Caido API token not configured. Set it in Settings > Caido API.");
+  const caidoToken = getEffectiveCaidoToken();
+  if (caidoToken === "") {
+    const message = "No Caido access token is available. Open any Caido page (or reauthenticate) so Drift can pick up your session, then retry.";
+    setMcpAuthStatus("invalid", message);
+    await publishMcpStatus(sdk);
+    return err(message);
   }
 
   // Check if MCP server asset exists
@@ -405,39 +1590,47 @@ async function startMcpServer(sdk: BackendSDK): Promise<Result<McpServerInfo>> {
   const mcpScriptLocal = path.join(mcpTempDir, "mcp-server.mjs");
   await writeFile(mcpScriptLocal, await readFile(mcpScript, "utf-8"));
 
-  const wrapperPath = await writeMcpWrapper(mcpScriptLocal);
-  if (wrapperPath === undefined) {
-    return err("Failed to create MCP wrapper script.");
+  await refreshProjectContext(sdk);
+
+  const nodeExecutable = await requireNodeExecutable();
+  if (nodeExecutable.kind === "Error") {
+    await cleanupMcpRuntime(sdk, "error", nodeExecutable.error);
+    return err(nodeExecutable.error);
   }
+
+  if ((await writeMcpContextFile()) === undefined) {
+    const message = "Failed to create MCP context file.";
+    await cleanupMcpRuntime(sdk, "error", message);
+    return err(message);
+  }
+
+  const wrapperPath = await writeMcpWrapper(mcpScriptLocal, nodeExecutable.value, caidoToken);
+  if (wrapperPath === undefined) {
+    const message = "Failed to create MCP wrapper script.";
+    await cleanupMcpRuntime(sdk, "error", message);
+    return err(message);
+  }
+
+  const validation = await validateCaidoAuth(wrapperPath);
+  if (!validation.ok) {
+    await cleanupMcpRuntime(sdk, validation.authState, validation.message);
+    return err(validation.message);
+  }
+
+  setMcpAuthStatus("valid", "");
 
   // Register MCP with Gemini and Codex using the wrapper
   await registerMcpWithCli("gemini", wrapperPath, sdk);
   await registerMcpWithCli("codex", wrapperPath, sdk);
   cliSessions.clear();
 
-  sdk.api.send("mcp-status", { running: true, port: 0, toolCount: 14 });
+  await publishMcpStatus(sdk);
 
-  return ok({
-    running: true,
-    host: currentSettings.mcp.host,
-    port: 0,
-    token: "",
-    toolCount: 14,
-    url: `stdio://${mcpScriptLocal}`,
-  });
+  return ok(await buildCurrentMcpStatus());
 }
 
 async function stopMcpServer(sdk: BackendSDK): Promise<Result<void>> {
-  // Unregister MCP from Gemini and Codex
-  await unregisterMcpFromCli("gemini", sdk);
-  await unregisterMcpFromCli("codex", sdk);
-
-  if (mcpTempDir !== undefined) {
-    try { await rm(mcpTempDir, { recursive: true, force: true }); } catch { /* silent */ }
-    mcpTempDir = undefined;
-  }
-  cliSessions.clear();
-  sdk.api.send("mcp-status", { running: false, port: 0, toolCount: 0 });
+  await cleanupMcpRuntime(sdk);
   return ok(undefined);
 }
 
@@ -458,14 +1651,31 @@ async function saveChat(_sdk: BackendSDK, chat: StoredChat): Promise<Result<void
   } else {
     currentChats.push(chat);
   }
-  await saveJson("chats", currentChats);
+  const persistenceError = await saveJson("chats", currentChats);
+  if (persistenceError !== undefined) return err(persistenceError);
   return ok(undefined);
 }
 
 async function deleteChat(_sdk: BackendSDK, chatId: string): Promise<Result<void>> {
   currentChats = currentChats.filter((c) => c.id !== chatId);
   cliSessions.delete(chatId);
-  await saveJson("chats", currentChats);
+  for (const [sessionId, snapshot] of sessionSnapshots.entries()) {
+    if (snapshot.chatId !== chatId) continue;
+    const proc = activeProcesses.get(sessionId);
+    if (proc !== undefined) {
+      try { proc.kill("SIGTERM"); } catch { /* already dead */ }
+      activeProcesses.delete(sessionId);
+    }
+    const runtimeFiles = sessionRuntimeFiles.get(sessionId);
+    if (runtimeFiles !== undefined) {
+      sessionRuntimeFiles.delete(sessionId);
+      void rm(runtimeFiles.activityFilePath, { force: true }).catch(() => undefined);
+      void rm(runtimeFiles.approvalsFilePath, { force: true }).catch(() => undefined);
+    }
+    sessionSnapshots.delete(sessionId);
+  }
+  const persistenceError = await saveJson("chats", currentChats);
+  if (persistenceError !== undefined) return err(persistenceError);
   return ok(undefined);
 }
 
@@ -481,6 +1691,19 @@ async function createCliSession(
   }
 
   const sessionId = `drift-${Date.now()}`;
+  for (const [existingSessionId, snapshot] of sessionSnapshots.entries()) {
+    if (snapshot.chatId === input.chatId) {
+      sessionSnapshots.delete(existingSessionId);
+    }
+  }
+  publishSessionState(sdk, {
+    sessionId,
+    chatId: input.chatId,
+    providerId: input.providerId,
+    state: "starting",
+    reason: "Session created. Send a message to start the provider turn.",
+    reasonCode: "starting",
+  });
   sdk.console.log(`[drift] session created: ${sessionId} for ${input.providerId}`);
   return ok(sessionId);
 }
@@ -492,48 +1715,142 @@ async function sendCliMessage(
     chatId: string;
     text: string;
     history?: ChatMessage[];
-    httpContext?: string;
+    httpContext?: HttpContextPayload;
   }
-): Promise<Result<string>> {
+): Promise<Result<SendCliMessageOutput>> {
   try {
+    await refreshProjectContext(sdk);
+
     const chat = currentChats.find((c) => c.id === input.chatId);
     const providerId =
       chat?.providerId ?? currentSettings.activeProvider;
+    const setSessionState = (
+      state: SessionStateName,
+      reason: string,
+      options?: {
+        exitCode?: number;
+        mcpAttached?: boolean;
+        reasonCode?: CliSessionReasonCode;
+        recoveredFromPartialOutput?: boolean;
+      },
+    ) => publishSessionState(sdk, {
+      sessionId: input.sessionId,
+      chatId: input.chatId,
+      providerId,
+      state,
+      reason,
+      ...(options?.reasonCode !== undefined ? { reasonCode: options.reasonCode } : {}),
+      ...(options?.exitCode !== undefined ? { exitCode: options.exitCode } : {}),
+      ...(options?.mcpAttached !== undefined ? { mcpAttached: options.mcpAttached } : {}),
+      ...(options?.recoveredFromPartialOutput === true
+        ? { recoveredFromPartialOutput: true }
+        : {}),
+    });
     const config = currentSettings.providers[providerId];
-    if (!config?.command) return err("Provider not configured");
+    if (!config?.command) {
+      setSessionState("error", "Provider not configured.");
+      return err("Provider not configured");
+    }
 
     const resolved = await resolveCommand(config.command);
-    if (resolved === undefined) return err(`CLI not found: ${config.command}`);
+    if (resolved === undefined) {
+      setSessionState("error", `CLI not found: ${config.command}`);
+      return err(`CLI not found: ${config.command}`);
+    }
 
     // Check if first message BEFORE setting session (for system prompt injection)
     const isFirstMsg = !cliSessions.has(input.chatId);
+    const caidoToken = getEffectiveCaidoToken();
+    const toolPolicy = getCurrentMcpToolPolicy();
+    const runtimeFiles = await createSessionRuntimeFiles(input.sessionId);
+    const runtimeEnv = buildMcpRuntimeEnv({
+      caidoToken,
+      toolPolicy,
+      activityFilePath: runtimeFiles?.activityFilePath,
+      approvalsFilePath: runtimeFiles?.approvalsFilePath,
+    });
 
     // ── Build args per provider ──
     const args: string[] = [];
+    const sessionDebugLogPath: string | undefined = getSessionDebugLogPath(input.sessionId);
+    let claudeMcpWrapperPath: string | undefined;
+    let claudeMcpConfigPath: string | undefined;
 
     switch (providerId) {
       case "claude-cli": {
-        args.push("-p", "--allowedTools",
-          "mcp__drift__search_history,mcp__drift__get_request,mcp__drift__send_request,mcp__drift__create_finding,mcp__drift__list_findings,mcp__drift__get_scope,mcp__drift__check_scope,mcp__drift__get_environment,mcp__drift__set_environment,mcp__drift__create_replay_session,mcp__drift__intercept_status,mcp__drift__intercept_pause,mcp__drift__intercept_resume,mcp__drift__run_workflow"
+        const claudeAllowedTools =
+          toolPolicy.allowedToolNames.length > 0
+            ? toolPolicy.allowedToolNames
+            : MCP_TOOL_NAMES;
+        const mcpScriptPath = getTempMcpScriptPath();
+        const claudeSessionInstructions = [
+          "You are running inside Drift, a Caido plugin.",
+          mcpScriptPath !== undefined
+            ? "The only supported live Caido access path in this session is the attached Drift MCP server. Use only the attached mcp__drift__* tools for live Caido data."
+            : "No Drift MCP server is attached in this session. If the user asks for live Caido data, explain that Drift MCP is not attached for this turn.",
+          "Call MCP tools one at a time, never in parallel within a single assistant message.",
+          "Do not present progress-only or tool-loading updates as your user-facing answer.",
+        ].join(" ");
+        args.push(
+          "-p",
+          "--verbose",
+          "--output-format",
+          "stream-json",
+          "--disable-slash-commands",
+          "--append-system-prompt",
+          claudeSessionInstructions,
+          "--disallowedTools",
+          "Bash,Edit,Glob,Grep,MultiEdit,NotebookEdit,Read,Skill,Task,TodoWrite,ToolSearch,WebFetch,WebSearch,Write",
+          "--allowedTools",
+          claudeAllowedTools.map((toolName) => `mcp__drift__${toolName}`).join(",")
         );
 
         // Session resume
-        let sid = cliSessions.get(input.chatId);
+        const sid = cliSessions.get(input.chatId);
         if (sid !== undefined) {
           args.push("--resume", sid);
-        } else {
-          sid = genUUID();
-          args.push("--session-id", sid);
-          cliSessions.set(input.chatId, sid);
         }
 
         // Rewrite MCP config on each send so token/url/script path cannot go stale.
-        const mcpScriptPath = getTempMcpScriptPath();
         if (mcpScriptPath !== undefined) {
-          const cfgFile = await writeChatMcpConfig(`mcp-${input.chatId}.json`, mcpScriptPath);
-          if (cfgFile !== undefined) {
-            args.push("--strict-mcp-config", "--mcp-config", cfgFile);
+          if (caidoToken === "") {
+            setSessionState("error", "No Caido access token is available for this provider turn.");
+            return err("No Caido access token is available. Open any Caido page (or reauthenticate) so Drift can pick up your session, then retry.");
           }
+          const nodeExecutable = await requireNodeExecutable();
+          if (nodeExecutable.kind === "Error") {
+            setSessionState("error", nodeExecutable.error);
+            return err(nodeExecutable.error);
+          }
+          const sessionWrapperPath = await writeMcpWrapper(
+            mcpScriptPath,
+            nodeExecutable.value,
+            caidoToken,
+            {
+              name: `mcp-wrapper-${input.sessionId}.sh`,
+              toolPolicy,
+              activityFilePath: runtimeFiles?.activityFilePath,
+              approvalsFilePath: runtimeFiles?.approvalsFilePath,
+            },
+          );
+          if (sessionWrapperPath === undefined) {
+            setSessionState("error", "Drift could not prepare the Claude MCP wrapper script.");
+            return err("Drift could not prepare the Claude MCP wrapper script.");
+          }
+          const cfgFile = await writeChatMcpConfig(
+            `mcp-${input.chatId}.json`,
+            {
+              command: sessionWrapperPath,
+              args: [],
+            },
+          );
+          if (cfgFile === undefined) {
+            setSessionState("error", "Drift could not prepare the Claude MCP configuration file.");
+            return err("Drift could not prepare the Claude MCP configuration file.");
+          }
+          claudeMcpWrapperPath = sessionWrapperPath;
+          claudeMcpConfigPath = cfgFile;
+          args.push("--strict-mcp-config", "--mcp-config", cfgFile);
         }
         break;
       }
@@ -555,10 +1872,33 @@ async function sendCliMessage(
         // MCP: Copilot supports --additional-mcp-config @<path>
         const mcpScriptPath = getTempMcpScriptPath();
         if (mcpScriptPath !== undefined) {
-          const cfgFile = await writeChatMcpConfig(`copilot-mcp-${input.chatId}.json`, mcpScriptPath);
-          if (cfgFile !== undefined) {
-            args.push("--additional-mcp-config", `@${cfgFile}`);
+          if (caidoToken === "") {
+            setSessionState("error", "No Caido access token is available for this provider turn.");
+            return err("No Caido access token is available. Open any Caido page (or reauthenticate) so Drift can pick up your session, then retry.");
           }
+          const nodeExecutable = await requireNodeExecutable();
+          if (nodeExecutable.kind === "Error") {
+            setSessionState("error", nodeExecutable.error);
+            return err(nodeExecutable.error);
+          }
+          const cfgFile = await writeChatMcpConfig(
+            `copilot-mcp-${input.chatId}.json`,
+            {
+              command: nodeExecutable.value,
+              args: [mcpScriptPath],
+              env: buildMcpRuntimeEnv({
+                caidoToken,
+                toolPolicy,
+                activityFilePath: runtimeFiles?.activityFilePath,
+                approvalsFilePath: runtimeFiles?.approvalsFilePath,
+              }),
+            },
+          );
+          if (cfgFile === undefined) {
+            setSessionState("error", "Drift could not prepare the Copilot MCP configuration file.");
+            return err("Drift could not prepare the Copilot MCP configuration file.");
+          }
+          args.push("--additional-mcp-config", `@${cfgFile}`);
         }
         break;
       }
@@ -573,34 +1913,36 @@ async function sendCliMessage(
         case "claude-cli":
           prompt += "You are a security assistant integrated with Caido (a web security proxy). ";
           if (mcpTempDir !== undefined) {
-            prompt += "You have MCP tools connected to this Caido instance. When the user asks about HTTP requests, traffic, or security testing, USE the MCP tools directly - do not say you cannot access them. Available tools: search_history (search HTTP traffic with HTTPQL filters), get_request (get full raw request/response by ID), send_request (replay HTTP requests), create_finding (report vulnerabilities), list_findings, get_scope, check_scope, get_environment, set_environment, create_replay_session, intercept_status, intercept_pause, intercept_resume, run_workflow. For example, to get the last 5 requests, call search_history with no filter and limit 5. ";
+            prompt += "You have MCP tools connected to this Caido instance. When the user asks about HTTP requests, traffic, or security testing, USE the MCP tools directly - do not say you cannot access them. Available tools include search_history (search HTTP traffic with the current Caido project/history context), get_current_context, list_projects, select_project, clear_context_override, get_request, send_request, create_finding, list_findings, get_scope, check_scope, get_environment, set_environment, create_replay_session, intercept_status, intercept_pause, intercept_resume, and run_workflow. Use get_current_context when you need to confirm the active Drift context, and call search_history with no filter and limit 5 to get the latest requests in the active context. ";
           }
+          prompt += "Think and use tools as needed, but do not send user-facing progress updates, preambles, or interim messages about loading tools, fetching schemas, or querying Caido. Only provide the user-facing answer once you have the actual result, unless you genuinely need clarification from the user. ";
           break;
         case "gemini-cli":
           prompt += "You are a security assistant integrated with Caido (a web security proxy). ";
           if (mcpTempDir !== undefined) {
-            prompt += "You have MCP tools (server name: drift) to interact with Caido. Use them to search HTTP history, get requests, create findings, check scope, and more. ";
+            prompt += "You have MCP tools (server name: drift) to interact with Caido. Use them to inspect the active Drift context, list or select projects, search HTTP history with the effective Caido context, get requests, create findings, check scope, and more. ";
           }
           break;
         case "codex-cli":
           prompt += "You are a security code assistant integrated with Caido (a web security proxy). ";
           if (mcpTempDir !== undefined) {
-            prompt += "You have MCP tools (server name: drift) to interact with Caido. Use them to search HTTP history, replay requests, and create findings. ";
+            prompt += "You have MCP tools (server name: drift) to interact with Caido. Use them to inspect the active Drift context, search HTTP history with the effective Caido context, replay requests, and create findings. ";
           }
           break;
         case "copilot-cli":
           prompt += "You are a security assistant integrated with Caido (a web security proxy). ";
           if (mcpTempDir !== undefined) {
-            prompt += "You have MCP tools (server name: drift) to interact with Caido. Use them to search HTTP history, get requests, create findings, and more. ";
+            prompt += "You have MCP tools (server name: drift) to interact with Caido. Use them to inspect the active Drift context, search HTTP history with the effective Caido context, get requests, create findings, and more. ";
           }
           break;
+      }
+      if (mcpTempDir !== undefined && toolPolicy.confirmationRequiredToolNames.length > 0) {
+        prompt += "Some sensitive MCP tools require explicit user confirmation before they can run. ";
       }
       prompt += "\n\n";
     }
 
-    if (input.httpContext !== undefined && input.httpContext !== "") {
-      prompt += `[Current HTTP Request/Response]\n${input.httpContext}\n\n`;
-    }
+    prompt += renderHttpContextAttachment(input.httpContext);
 
     // For stateless providers, prepend truncated conversation history
     if (providerId !== "claude-cli" && input.history !== undefined && input.history.length > 0) {
@@ -624,11 +1966,115 @@ async function sendCliMessage(
     prompt += input.text;
 
     // ── Spawn process ──
-    lastSpawnArgs = [resolved, ...args];
-    sessionStates.set(input.sessionId, "running");
-    return new Promise<Result<string>>((resolve) => {
-      const proc = spawn(resolved, args, {
+    let launchCommand = resolved;
+    let launchArgs = args;
+    let launchScriptPreview = "";
+    if (runtimeFiles !== undefined) {
+      launchScriptPreview = renderExportExecScript(resolved, args, runtimeEnv);
+      const launchScriptPath = await writeLaunchScript(
+        `provider-launch-${input.sessionId}.sh`,
+        resolved,
+        args,
+        runtimeEnv,
+      );
+      if (launchScriptPath === undefined) {
+        setSessionState("error", "Drift could not prepare the provider launcher with the current MCP runtime settings.");
+        return err("Drift could not prepare the provider launcher with the current MCP runtime settings.");
+      }
+      launchCommand = launchScriptPath;
+      launchArgs = [];
+    }
+
+    lastSpawnArgs = [launchCommand, ...launchArgs];
+    appendSessionDebugLog(
+      sessionDebugLogPath,
+      `sendCliMessage start provider=${providerId} mcpAttached=${String(mcpTempDir !== undefined)} timeoutSeconds=${String(currentSettings.processTimeoutSeconds)}`,
+    );
+    if (claudeMcpWrapperPath !== undefined) {
+      appendSessionDebugLog(
+        sessionDebugLogPath,
+        `Claude MCP wrapper path=${claudeMcpWrapperPath}`,
+      );
+      appendSessionDebugLog(
+        sessionDebugLogPath,
+        `Claude MCP wrapper content:\n${redactDebugText(await readFile(claudeMcpWrapperPath, "utf-8"))}`,
+      );
+    }
+    if (claudeMcpConfigPath !== undefined) {
+      appendSessionDebugLog(
+        sessionDebugLogPath,
+        `Claude MCP config path=${claudeMcpConfigPath}`,
+      );
+      appendSessionDebugLog(
+        sessionDebugLogPath,
+        `Claude MCP config content:\n${redactDebugText(await readFile(claudeMcpConfigPath, "utf-8"))}`,
+      );
+    }
+    if (launchScriptPreview !== "") {
+      appendSessionDebugLog(
+        sessionDebugLogPath,
+        `Provider launch script preview:\n${redactDebugText(launchScriptPreview)}`,
+      );
+    }
+    appendSessionDebugLog(
+      sessionDebugLogPath,
+      `Resolved launch: ${JSON.stringify([launchCommand, ...launchArgs])}`,
+    );
+    setSessionState("running", "Provider turn running.", {
+      mcpAttached: mcpTempDir !== undefined,
+      reasonCode: "running",
+    });
+    const collectedActivities: McpToolActivity[] = [];
+    const seenActivityIds = new Set<string>();
+    let readingActivities = false;
+    let notifyClaudeToolActivity: (() => void) | undefined;
+
+    const flushActivities = async () => {
+      if (runtimeFiles === undefined || readingActivities) return;
+      readingActivities = true;
+      try {
+        const raw = await readFile(runtimeFiles.activityFilePath, "utf-8");
+        const events = parseRuntimeActivityEvents(raw);
+        for (const event of events) {
+          if (seenActivityIds.has(event.id)) continue;
+          seenActivityIds.add(event.id);
+          if (event.type === "approval-request") {
+            sdk.api.send("mcp-tool-approval", toToolApprovalRequest(input.sessionId, event));
+            continue;
+          }
+          const activity = toToolActivity(event);
+          collectedActivities.push(activity);
+          sdk.console.log(
+            `[drift watchdog] activity observed tool=${activity.toolName} state=${activity.state} total=${String(collectedActivities.length)} sessionId=${input.sessionId}`,
+          );
+          if (providerId === "claude-cli") {
+            notifyClaudeToolActivity?.();
+          }
+          sdk.api.send("mcp-tool-activity", {
+            sessionId: input.sessionId,
+            activity,
+          });
+        }
+      } catch {
+        // Best-effort only.
+      } finally {
+        readingActivities = false;
+      }
+    };
+
+    return new Promise<Result<SendCliMessageOutput>>((resolve) => {
+      const proc = spawn(launchCommand, launchArgs, {
         stdio: ["pipe", "pipe", "pipe"],
+      });
+      appendSessionDebugLog(
+        sessionDebugLogPath,
+        `spawn() started pid=${String(proc.pid ?? "unknown")}`,
+      );
+      proc.on("spawn", () => {
+        appendSessionDebugLog(
+          sessionDebugLogPath,
+          `proc.spawn event pid=${String(proc.pid ?? "unknown")}`,
+        );
       });
 
       // Track for cancellation
@@ -636,17 +2082,360 @@ async function sendCliMessage(
 
       let stdout = "";
       let stderr = "";
+      let claudePrintState = createClaudePrintState();
+      let settled = false;
+      let claudeRecoveryTimeout: ReturnType<typeof setTimeout> | undefined;
+      let claudePostToolDeadlineTimeout: ReturnType<typeof setTimeout> | undefined;
+      let claudePostToolShutdownRequested = false;
+      let exitFinalizeTimeout: ReturnType<typeof setTimeout> | undefined;
+      let lastStdoutAt = Date.now();
+      let activityTickCounter = 0;
+      let lastActivityTickLogAt = 0;
+      const CLAUDE_STDOUT_SILENCE_BACKSTOP_MS = 20000;
+      const heartbeat = () => {
+        if (settled) return;
+        activityTickCounter += 1;
+        const procRef = proc as unknown as {
+          exitCode: number | null | undefined;
+          signalCode: string | null | undefined;
+        };
+        const hasExitCode = typeof procRef.exitCode === "number";
+        const hasSignalCode =
+          typeof procRef.signalCode === "string" && procRef.signalCode !== "";
+        if (hasExitCode || hasSignalCode) {
+          sdk.console.log(
+            `[drift watchdog] heartbeat detected proc exited sessionId=${input.sessionId} exitCode=${String(procRef.exitCode)} signalCode=${String(procRef.signalCode)}`,
+          );
+          finalizeFromProcessEnd(
+            hasExitCode ? (procRef.exitCode as number) : null,
+            "heartbeat-exit-check",
+            hasSignalCode ? (procRef.signalCode as string) : null,
+          );
+          return;
+        }
+        const now = Date.now();
+        if (now - lastActivityTickLogAt > 5000) {
+          lastActivityTickLogAt = now;
+          sdk.console.log(
+            `[drift watchdog] heartbeat tick=${String(activityTickCounter)} stdoutSilenceMs=${String(now - lastStdoutAt)} activities=${String(collectedActivities.length)} pendingToolUseIds=${String(claudePrintState.pendingToolUseIds.length)} sessionId=${input.sessionId}`,
+          );
+        }
+        if (providerId !== "claude-cli") return;
+        if (claudePostToolShutdownRequested) return;
+        const silenceMs = now - lastStdoutAt;
+        if (silenceMs < CLAUDE_STDOUT_SILENCE_BACKSTOP_MS) return;
+        if (claudePrintState.completed) return;
+        if (finalizeClaudePrintOutput(claudePrintState) !== "") return;
+        sdk.console.log(
+          `[drift watchdog] heartbeat silence backstop fired after ${String(silenceMs)}ms sessionId=${input.sessionId} pendingToolUseIds=${String(claudePrintState.pendingToolUseIds.length)} stopReason=${claudePrintState.stopReason}`,
+        );
+        appendSessionDebugLog(
+          sessionDebugLogPath,
+          `Heartbeat silence backstop fired after ${String(silenceMs)}ms; requesting shutdown.`,
+        );
+        claudePostToolShutdownRequested = true;
+        requestGracefulShutdown();
+      };
+      const activityInterval = setInterval(() => {
+        if (runtimeFiles !== undefined) void flushActivities();
+        heartbeat();
+      }, 250);
+      // Also expose the heartbeat via sessionWatchdogs so frontend keep-alive
+      // RPCs (getCliSessionState) can pump it from within an RPC context.
+      // Caido's plugin runtime does not run pending setInterval callbacks
+      // during RPC handling, so the setInterval above becomes dormant once
+      // the child process stops producing stdout. The frontend keeps calling
+      // getCliSessionState every ~1.5s while isStreaming, and that handler
+      // invokes this watchdog — which is how we actually detect a hung or
+      // dead child in practice.
+      const runWatchdog = async () => {
+        if (settled) return;
+        if (runtimeFiles !== undefined) await flushActivities();
+        heartbeat();
+      };
+      sessionWatchdogs.set(input.sessionId, runWatchdog);
+
+      const clearClaudeRecoveryTimeout = () => {
+        if (claudeRecoveryTimeout !== undefined) {
+          clearTimeout(claudeRecoveryTimeout);
+          claudeRecoveryTimeout = undefined;
+        }
+      };
+
+      const clearClaudePostToolDeadlineTimeout = () => {
+        if (claudePostToolDeadlineTimeout !== undefined) {
+          clearTimeout(claudePostToolDeadlineTimeout);
+          claudePostToolDeadlineTimeout = undefined;
+        }
+      };
+
+      const clearExitFinalizeTimeout = () => {
+        if (exitFinalizeTimeout !== undefined) {
+          clearTimeout(exitFinalizeTimeout);
+          exitFinalizeTimeout = undefined;
+        }
+      };
+
+      const finalizeFromProcessEnd = (
+        code: number | null,
+        source: "exit" | "close" | "heartbeat-exit-check",
+        signal?: string | null,
+      ) => {
+        if (settled) return;
+        clearExitFinalizeTimeout();
+        appendSessionDebugLog(
+          sessionDebugLogPath,
+          `finalizeFromProcessEnd source=${source} code=${String(code)} signal=${String(signal ?? "")}`,
+        );
+        setSessionState(
+          "stopped",
+          code === 0
+            ? "Last provider turn completed. Send another message to continue."
+            : `Provider exited with code ${String(code)}${signal !== undefined && signal !== null ? ` (signal ${signal})` : ""}.`,
+          {
+            exitCode: code === null ? undefined : code,
+            mcpAttached: mcpTempDir !== undefined,
+            reasonCode:
+              providerId === "claude-cli" && getClaudePrintRecoveryMode(claudePrintState) !== null
+                ? "completed_without_result"
+                : "completed",
+            recoveredFromPartialOutput:
+              providerId === "claude-cli" && !claudePrintState.completed &&
+              getClaudePrintRecoveryMode(claudePrintState) !== null,
+          },
+        );
+        const output =
+          (providerId === "claude-cli"
+            ? finalizeClaudePrintOutput(claudePrintState)
+            : stdout.trim()) ||
+          (providerId === "claude-cli" && claudePostToolShutdownRequested
+            ? buildClaudePostToolStallFallback(collectedActivities)
+            : "") ||
+          (providerId === "claude-cli"
+            ? getClaudeToolFailureFallback(collectedActivities)
+            : "") ||
+          stderr.trim() ||
+          stdout.trim() ||
+          `(exit code: ${code})`;
+        finalize(ok({
+          content: output,
+          mcpActivities: [...collectedActivities],
+        }));
+      };
+
+      const finalize = (result: Result<SendCliMessageOutput>) => {
+        if (settled) return;
+        settled = true;
+        appendSessionDebugLog(sessionDebugLogPath, "finalize() start");
+        sdk.console.log(`[drift watchdog] finalize() start sessionId=${input.sessionId} kind=${result.kind}`);
+        clearTimeout(timeout);
+        clearClaudeRecoveryTimeout();
+        clearClaudePostToolDeadlineTimeout();
+        clearExitFinalizeTimeout();
+        clearInterval(activityInterval);
+        sessionWatchdogs.delete(input.sessionId);
+        activeProcesses.delete(input.sessionId);
+        void (async () => {
+          appendSessionDebugLog(sessionDebugLogPath, "finalize(): flushActivities start");
+          await flushActivities();
+          appendSessionDebugLog(sessionDebugLogPath, "finalize(): flushActivities end");
+          if (runtimeFiles !== undefined) {
+            sessionRuntimeFiles.delete(input.sessionId);
+            appendSessionDebugLog(sessionDebugLogPath, `finalize(): rm ${runtimeFiles.activityFilePath}`);
+            await rm(runtimeFiles.activityFilePath, { force: true }).catch(() => undefined);
+            appendSessionDebugLog(sessionDebugLogPath, `finalize(): rm ${runtimeFiles.approvalsFilePath}`);
+            await rm(runtimeFiles.approvalsFilePath, { force: true }).catch(() => undefined);
+          }
+          if (claudeMcpConfigPath !== undefined) {
+            appendSessionDebugLog(sessionDebugLogPath, `finalize(): rm ${claudeMcpConfigPath}`);
+            await rm(claudeMcpConfigPath, { force: true }).catch(() => undefined);
+          }
+          if (claudeMcpWrapperPath !== undefined) {
+            appendSessionDebugLog(sessionDebugLogPath, `finalize(): rm ${claudeMcpWrapperPath}`);
+            await rm(claudeMcpWrapperPath, { force: true }).catch(() => undefined);
+          }
+          if (launchCommand !== resolved) {
+            appendSessionDebugLog(sessionDebugLogPath, `finalize(): rm ${launchCommand}`);
+            await rm(launchCommand, { force: true }).catch(() => undefined);
+          }
+          appendSessionDebugLog(
+            sessionDebugLogPath,
+            `finalize(): resolve kind=${result.kind}`,
+          );
+          await disposeSessionDebugLog(sessionDebugLogPath);
+          resolve(result);
+        })();
+      };
 
       const timeout = setTimeout(() => {
-        proc.kill("SIGKILL");
-        activeProcesses.delete(input.sessionId);
-        sessionStates.set(input.sessionId, "error");
-        resolve(err("Process timed out"));
+        if (settled) return;
+        setSessionState("error", "Process timed out.", {
+          mcpAttached: mcpTempDir !== undefined,
+          reasonCode: "timeout",
+        });
+        finalize(err("Process timed out"));
+        try { proc.kill("SIGKILL"); } catch { /* already dead */ }
       }, currentSettings.processTimeoutSeconds * 1000);
+
+      const requestGracefulShutdown = () => {
+        appendSessionDebugLog(sessionDebugLogPath, "requestGracefulShutdown(): SIGTERM");
+        try { proc.kill("SIGTERM"); } catch { /* already dead */ }
+        setTimeout(() => {
+          appendSessionDebugLog(sessionDebugLogPath, "requestGracefulShutdown(): SIGKILL");
+          try { proc.kill("SIGKILL"); } catch { /* already dead */ }
+        }, 3000);
+      };
+
+      const scheduleClaudePostToolShutdown = () => {
+        if (providerId !== "claude-cli" || settled) return;
+        if (collectedActivities.length === 0) return;
+        const lastActivity = collectedActivities[collectedActivities.length - 1];
+        const delayMs =
+          lastActivity !== undefined && lastActivity.state !== "success"
+            ? CLAUDE_POST_TOOL_ERROR_QUIESCENCE_MS
+            : CLAUDE_POST_TOOL_QUIESCENCE_MS;
+        clearClaudePostToolDeadlineTimeout();
+        sdk.console.log(
+          `[drift watchdog] scheduled post-tool deadline delayMs=${String(delayMs)} activities=${String(collectedActivities.length)} sessionId=${input.sessionId}`,
+        );
+        claudePostToolDeadlineTimeout = setTimeout(() => {
+          sdk.console.log(
+            `[drift watchdog] post-tool deadline fired sessionId=${input.sessionId} settled=${String(settled)} pendingToolUseIds=${String(claudePrintState.pendingToolUseIds.length)} stopReason=${claudePrintState.stopReason} outputLen=${String(finalizeClaudePrintOutput(claudePrintState).length)}`,
+          );
+          if (settled) return;
+          if (claudePrintState.completed || didClaudeStopWithoutResult(claudePrintState)) return;
+          if (finalizeClaudePrintOutput(claudePrintState) !== "") return;
+          appendSessionDebugLog(
+            sessionDebugLogPath,
+            `Claude post-tool deadline fired after ${String(delayMs)}ms without visible output; requesting shutdown. pendingToolUseIds=${String(claudePrintState.pendingToolUseIds.length)} stopReason=${claudePrintState.stopReason}`,
+          );
+          sdk.console.log(
+            `[drift watchdog] requesting graceful shutdown sessionId=${input.sessionId}`,
+          );
+          claudePostToolShutdownRequested = true;
+          requestGracefulShutdown();
+        }, delayMs);
+      };
+      notifyClaudeToolActivity = () => {
+        scheduleClaudePostToolShutdown();
+      };
+
+      const scheduleClaudeRecovery = () => {
+        if (providerId !== "claude-cli" || settled || claudePrintState.completed) return;
+
+        clearClaudeRecoveryTimeout();
+        const recoveryMode = getClaudePrintRecoveryMode(claudePrintState);
+        if (recoveryMode === null) return;
+
+        const idleDelayMs =
+          recoveryMode === "assistant"
+            ? CLAUDE_ASSISTANT_RECOVERY_IDLE_MS
+            : CLAUDE_STREAM_RECOVERY_IDLE_MS;
+        claudeRecoveryTimeout = setTimeout(() => {
+          if (settled || claudePrintState.completed) return;
+          if (getClaudePrintRecoveryMode(claudePrintState) === null) return;
+
+          const output = finalizeClaudePrintOutput(claudePrintState);
+          if (output === "") return;
+
+          setSessionState(
+            "stopped",
+            "Claude Code produced output but never sent a final result event. Drift closed the turn after an inactivity window.",
+            {
+              mcpAttached: mcpTempDir !== undefined,
+              reasonCode: "completed_without_result",
+              recoveredFromPartialOutput: true,
+            },
+          );
+          finalize(ok({
+            content: output,
+            mcpActivities: [...collectedActivities],
+          }));
+          requestGracefulShutdown();
+        }, idleDelayMs);
+      };
 
       proc.stdout?.on("data", (chunk: Buffer) => {
         const text = chunk.toString();
         stdout += text;
+        lastStdoutAt = Date.now();
+        appendSessionDebugLog(
+          sessionDebugLogPath,
+          `[stdout] ${summarizeDebugChunk(text)}`,
+        );
+        appendSessionDebugLog(
+          sessionDebugLogPath,
+          `[stdout-raw] ${text.slice(0, 400)}`,
+        );
+        if (providerId === "claude-cli") {
+          const previousClaudePrintState = claudePrintState;
+          claudePrintState = consumeClaudePrintChunk(claudePrintState, text, {
+            onText: (delta) => {
+              sdk.api.send("cli-output-chunk", {
+                sessionId: input.sessionId,
+                delta,
+                stream: "stdout",
+              });
+            },
+            onSessionId: (sessionId) => {
+              if (!cliSessions.has(input.chatId)) {
+                cliSessions.set(input.chatId, sessionId);
+              }
+            },
+          });
+          const claudeStateChanged =
+            previousClaudePrintState.streamedText !== claudePrintState.streamedText ||
+            previousClaudePrintState.assistantText !== claudePrintState.assistantText ||
+            previousClaudePrintState.completed !== claudePrintState.completed ||
+            previousClaudePrintState.messageStopped !== claudePrintState.messageStopped ||
+            previousClaudePrintState.stopReason !== claudePrintState.stopReason ||
+            previousClaudePrintState.pendingToolUseIds.join(",") !==
+              claudePrintState.pendingToolUseIds.join(",");
+          if (claudeStateChanged) {
+            if (
+              claudePrintState.completed ||
+              didClaudeStopWithoutResult(claudePrintState) ||
+              finalizeClaudePrintOutput(claudePrintState) !== ""
+            ) {
+              clearClaudePostToolDeadlineTimeout();
+            }
+            scheduleClaudeRecovery();
+          }
+          if (settled || (!claudePrintState.completed && !didClaudeStopWithoutResult(claudePrintState))) {
+            return;
+          }
+          const output = finalizeClaudePrintOutput(claudePrintState);
+          if (claudePrintState.isError) {
+            setSessionState("error", output || "Claude Code returned an error.", {
+              mcpAttached: mcpTempDir !== undefined,
+              reasonCode: "error",
+            });
+            finalize(err(output || "Claude Code returned an error."));
+          } else {
+            const recoveredWithoutResult = didClaudeStopWithoutResult(claudePrintState);
+            setSessionState(
+              "stopped",
+              recoveredWithoutResult || claudePostToolShutdownRequested
+                ? "Claude Code completed the turn without emitting the final result record. Drift finalized the response from stream events."
+                : "Last provider turn completed. Send another message to continue.",
+              {
+                mcpAttached: mcpTempDir !== undefined,
+                reasonCode:
+                  recoveredWithoutResult || claudePostToolShutdownRequested
+                    ? "completed_without_result"
+                    : "completed",
+                recoveredFromPartialOutput:
+                  recoveredWithoutResult || claudePostToolShutdownRequested,
+              },
+            );
+            finalize(ok({
+              content: output || "(no response)",
+              mcpActivities: [...collectedActivities],
+            }));
+          }
+          requestGracefulShutdown();
+          return;
+        }
         sdk.api.send("cli-output-chunk", {
           sessionId: input.sessionId,
           delta: text,
@@ -657,6 +2446,14 @@ async function sendCliMessage(
       proc.stderr?.on("data", (chunk: Buffer) => {
         const text = chunk.toString();
         stderr += text;
+        appendSessionDebugLog(
+          sessionDebugLogPath,
+          `[stderr] ${summarizeDebugChunk(text)}`,
+        );
+        appendSessionDebugLog(
+          sessionDebugLogPath,
+          `[stderr-raw] ${text.slice(0, 400)}`,
+        );
         // Stream stderr too so user sees warnings/errors in real-time
         sdk.api.send("cli-output-chunk", {
           sessionId: input.sessionId,
@@ -665,39 +2462,81 @@ async function sendCliMessage(
         });
       });
 
+      appendSessionDebugLog(
+        sessionDebugLogPath,
+        `stdin write bytes=${String((prompt + "\n").length)}`,
+      );
       proc.stdin?.write(prompt + "\n");
+      appendSessionDebugLog(sessionDebugLogPath, "stdin end()");
       proc.stdin?.end();
 
       proc.on("close", (code) => {
-        clearTimeout(timeout);
-        activeProcesses.delete(input.sessionId);
-        sessionStates.set(input.sessionId, "stopped");
-        const output =
-          stdout.trim() || stderr.trim() || `(exit code: ${code})`;
-        resolve(ok(output));
+        sdk.console.log(`[drift watchdog] proc.close fired sessionId=${input.sessionId} code=${String(code)}`);
+        appendSessionDebugLog(sessionDebugLogPath, `process close code=${String(code)}`);
+        finalizeFromProcessEnd(code, "close");
+      });
+
+      proc.on("exit", (code, signal) => {
+        sdk.console.log(`[drift watchdog] proc.exit fired sessionId=${input.sessionId} code=${String(code)} signal=${String(signal ?? "")}`);
+        appendSessionDebugLog(
+          sessionDebugLogPath,
+          `process exit code=${String(code)} signal=${String(signal ?? "")}`,
+        );
+        if (settled) return;
+        clearExitFinalizeTimeout();
+        exitFinalizeTimeout = setTimeout(() => {
+          if (settled) return;
+          finalizeFromProcessEnd(code, "exit", signal);
+        }, 250);
       });
 
       proc.on("error", (e) => {
-        clearTimeout(timeout);
-        activeProcesses.delete(input.sessionId);
-        sessionStates.set(input.sessionId, "error");
-        resolve(err(`Spawn error: ${e.message}`));
+        sdk.console.log(`[drift watchdog] proc.error fired sessionId=${input.sessionId} message=${e.message}`);
+        appendSessionDebugLog(sessionDebugLogPath, `process error ${e.message}`);
+        if (settled) return;
+        setSessionState("error", `Spawn error: ${e.message}`, {
+          mcpAttached: mcpTempDir !== undefined,
+          reasonCode: "spawn_error",
+        });
+        finalize(err(`Spawn error: ${e.message}`));
       });
     });
   } catch (e) {
+    publishSessionState(sdk, {
+      sessionId: input.sessionId,
+      chatId: input.chatId,
+      providerId:
+        currentChats.find((c) => c.id === input.chatId)?.providerId ??
+        currentSettings.activeProvider,
+      state: "error",
+      reason: `sendCliMessage failed: ${String(e)}`,
+      reasonCode: "error",
+      mcpAttached: mcpTempDir !== undefined,
+    });
     return err(`sendCliMessage failed: ${String(e)}`);
   }
 }
 
 function cancelCliMessage(sdk: BackendSDK, sessionId: string): Result<void> {
   const proc = activeProcesses.get(sessionId);
+  const snapshot = getSessionSnapshot(sessionId);
   if (proc !== undefined) {
     try { proc.kill("SIGTERM"); } catch { /* already dead */ }
     setTimeout(() => {
       try { proc.kill("SIGKILL"); } catch { /* already dead */ }
     }, 3000);
     activeProcesses.delete(sessionId);
-    sessionStates.set(sessionId, "stopped");
+    if (snapshot !== undefined) {
+      publishSessionState(sdk, {
+        sessionId,
+        chatId: snapshot.chatId,
+        providerId: snapshot.providerId,
+        state: "stopped",
+        reason: "Provider turn cancelled by the user.",
+        reasonCode: "cancelled",
+        mcpAttached: snapshot.mcpAttached,
+      });
+    }
     sdk.console.log(`[drift] cancelled session ${sessionId}`);
   }
   return ok(undefined);
@@ -709,21 +2548,76 @@ function closeCliSession(
 ): Result<void> {
   // Kill process if still running
   const proc = activeProcesses.get(input.sessionId);
+  const snapshot = getSessionSnapshot(input.sessionId);
   if (proc !== undefined) {
     try { proc.kill("SIGTERM"); } catch { /* already dead */ }
     activeProcesses.delete(input.sessionId);
   }
-  sessionStates.delete(input.sessionId);
+  const runtimeFiles = sessionRuntimeFiles.get(input.sessionId);
+  if (runtimeFiles !== undefined) {
+    sessionRuntimeFiles.delete(input.sessionId);
+    void rm(runtimeFiles.activityFilePath, { force: true }).catch(() => undefined);
+    void rm(runtimeFiles.approvalsFilePath, { force: true }).catch(() => undefined);
+  }
+  if (snapshot !== undefined) {
+    publishSessionState(sdk, {
+      sessionId: input.sessionId,
+      chatId: snapshot.chatId,
+      providerId: snapshot.providerId,
+      state: "stopped",
+      reason: "Session closed. The next message will create a fresh provider turn.",
+      reasonCode: "closed",
+      mcpAttached: snapshot.mcpAttached,
+    });
+  }
   sdk.console.log(`[drift] closed session ${input.sessionId}`);
   return ok(undefined);
 }
 
-function getCliSessionState(
+async function getCliSessionState(
   _sdk: BackendSDK,
   sessionId: string
-): Result<{ sessionId: string; state: string }> {
-  const state = sessionStates.get(sessionId) ?? "stopped";
-  return ok({ sessionId, state });
+): Promise<Result<CliSessionStateEvent | undefined>> {
+  // Pump the session watchdog from inside this RPC handler. Caido's plugin
+  // runtime does not run pending setInterval callbacks during RPC handling,
+  // so without this the heartbeat/flushActivities only run while the child
+  // process is actively producing stdout. The frontend keeps calling this
+  // RPC every ~1.5s while isStreaming, which gives the watchdog a reliable
+  // wake-up channel.
+  const watchdog = sessionWatchdogs.get(sessionId);
+  if (watchdog !== undefined) {
+    try {
+      await watchdog();
+    } catch {
+      // Best-effort only — never let a watchdog failure break state reads.
+    }
+  }
+  return ok(getSessionSnapshot(sessionId));
+}
+
+async function respondToMcpToolApproval(
+  _sdk: BackendSDK,
+  input: {
+    sessionId: string;
+    approvalId: string;
+    approved: boolean;
+  },
+): Promise<Result<void>> {
+  const runtimeFiles = sessionRuntimeFiles.get(input.sessionId);
+  if (runtimeFiles === undefined) {
+    return err(`No pending MCP approval channel exists for session ${input.sessionId}.`);
+  }
+
+  try {
+    await writeApprovalDecision(
+      runtimeFiles.approvalsFilePath,
+      input.approvalId,
+      input.approved,
+    );
+    return ok(undefined);
+  } catch (error) {
+    return err(`Failed to record the MCP approval decision: ${String(error)}`);
+  }
 }
 
 // ── Diagnostic ──────────────────────────────────────────────────────
@@ -732,6 +2626,23 @@ async function getDiagnostics(_sdk: BackendSDK): Promise<Result<Record<string, s
   const mcpScript = path.join(assetsPath, "mcp-server.mjs");
   const mcpScriptExists = await fileExists(mcpScript);
   const mcpTempScript = getTempMcpScriptPath();
+  const storedContext = await readStoredMcpContext();
+  const effectiveContext = buildMcpServerInfo({
+    running: mcpTempDir !== undefined,
+    host: currentSettings.mcp.host,
+    port: currentSettings.mcp.port,
+    token: "",
+    url: mcpTempScript !== undefined ? `stdio://${mcpTempScript}` : "",
+    authState: mcpAuthState,
+    authSource: getCaidoTokenSource(),
+    authMessage: mcpAuthMessage,
+    uiContext: storedContext.uiContext,
+    overrideContext: storedContext.overrideContext,
+    selfTestResults: lastMcpSelfTestResults,
+    toolPolicy: getCurrentMcpToolPolicy(),
+  }).effectiveContext;
+  const toolPolicy = getCurrentMcpToolPolicy();
+  const nodeExecutable = await getNodeExecutable();
   const info: Record<string, string> = {
     pluginPath,
     assetsPath,
@@ -739,12 +2650,35 @@ async function getDiagnostics(_sdk: BackendSDK): Promise<Result<Record<string, s
     mcpScriptExists: String(mcpScriptExists),
     mcpTempDir: mcpTempDir ?? "not set (MCP not started)",
     mcpTempScript: mcpTempScript ?? "not set (MCP not started)",
+    mcpContextFile: getMcpContextFilePath() ?? "not set (MCP not started)",
     caidoApiUrl: currentSettings.caidoApi.url,
-    caidoApiTokenSet: currentSettings.caidoApi.token.length > 0 ? "yes" : "no",
+    caidoApiTokenSet: getEffectiveCaidoToken() !== "" ? "yes" : "no",
+    caidoTokenSource: getCaidoTokenSource(),
+    caidoAuthState: mcpAuthState,
+    caidoAuthMessage: mcpAuthMessage || "none",
+    allowedMcpTools: toolPolicy.allowedToolNames.join(", ") || "none",
+    confirmationRequiredTools: toolPolicy.confirmationRequiredToolNames.join(", ") || "none",
+    caidoProjectId: storedContext.uiContext.projectId || "none",
+    caidoHistoryScopeId: storedContext.uiContext.historyScopeId || "none",
+    caidoHistoryQuery: storedContext.uiContext.historyQuery || "none",
+    caidoFilterId: storedContext.uiContext.filterId || "none",
+    caidoFilterName: storedContext.uiContext.filterName || "none",
+    caidoFilterQuery: storedContext.uiContext.filterQuery || "none",
+    caidoOverrideProjectId: storedContext.overrideContext.projectId || "none",
+    caidoOverrideActive: effectiveContext.overrideActive ? "yes" : "no",
+    caidoEffectiveProjectId: effectiveContext.projectId || "none",
+    caidoEffectiveScopeId: effectiveContext.historyScopeId || "none",
+    nodeExecutable: nodeExecutable || "not found",
+    nodeSearchCandidates: lastNodeSearchCandidates.join(", ") || "none",
     activeProvider: currentSettings.activeProvider,
+    sqlitePersistenceAvailable: db !== undefined ? "yes" : "no",
     activeSessions: String(activeProcesses.size),
     cliSessionsCount: String(cliSessions.size),
     lastSpawnCommand: lastSpawnArgs.join(" "),
+    lastSelfTestProviders: Object.keys(lastMcpSelfTestResults).join(", ") || "none",
+    lastPersistenceScope: lastPersistenceScope || "none",
+    lastPersistenceMessage: lastPersistenceMessage || "none",
+    lastPersistenceTimestamp: lastPersistenceTimestamp > 0 ? String(lastPersistenceTimestamp) : "none",
   };
 
   if (mcpTempDir !== undefined) {
@@ -763,14 +2697,105 @@ async function getDiagnostics(_sdk: BackendSDK): Promise<Result<Record<string, s
   return ok(info);
 }
 
+async function exportSupportBundle(sdk: BackendSDK): Promise<Result<SupportBundleOutput>> {
+  const runtimeProcess = globalThis as typeof globalThis & {
+    process?: {
+      platform?: string;
+      arch?: string;
+      version?: string;
+    };
+  };
+  const diagnostics = await getDiagnostics(sdk);
+  if (diagnostics.kind === "Error") return diagnostics;
+
+  const providerStatuses = await getProviderStatuses(sdk);
+  if (providerStatuses.kind === "Error") return providerStatuses;
+
+  const mcpStatus = await getMcpStatus(sdk);
+  if (mcpStatus.kind === "Error") return mcpStatus;
+
+  const bundle = {
+    generatedAt: new Date().toISOString(),
+    plugin: {
+      version: pluginVersion,
+      path: pluginPath,
+      assetsPath,
+    },
+    environment: {
+      platform: runtimeProcess.process?.platform ?? "unknown",
+      arch: runtimeProcess.process?.arch ?? "unknown",
+      nodeVersion: runtimeProcess.process?.version ?? "unknown",
+    },
+    activeProvider: currentSettings.activeProvider,
+    providers: providerStatuses.value.map((status) => ({
+      id: status.id,
+      available: status.available,
+      command: currentSettings.providers[status.id]?.command ?? "",
+      resolvedPath: status.resolvedPath,
+      error: status.error,
+    })),
+    mcp: {
+      running: mcpStatus.value.running,
+      authState: mcpStatus.value.authState,
+      authSource: mcpStatus.value.authSource,
+      authMessage: mcpStatus.value.authMessage,
+      supportedToolCount: mcpStatus.value.supportedToolCount,
+      toolPolicy: mcpStatus.value.toolPolicy,
+      uiContext: mcpStatus.value.uiContext,
+      overrideContext: mcpStatus.value.overrideContext,
+      effectiveContext: mcpStatus.value.effectiveContext,
+      selfTestResults: mcpStatus.value.selfTestResults,
+    },
+    diagnostics: diagnostics.value,
+    persistence: {
+      scope: lastPersistenceScope || null,
+      message: lastPersistenceMessage || null,
+      timestamp: lastPersistenceTimestamp > 0 ? lastPersistenceTimestamp : null,
+    },
+    sessions: [...sessionSnapshots.values()]
+      .sort((a, b) => b.updatedAt - a.updatedAt)
+      .map((snapshot) => ({
+        ...snapshot,
+        running: activeProcesses.has(snapshot.sessionId),
+      })),
+    chats: currentChats.map((chat) => ({
+      id: chat.id,
+      title: chat.title,
+      providerId: chat.providerId,
+      messageCount: chat.messages.length,
+      hasHttpContext: chat.messages.some((message) => message.httpContextAttachment !== undefined),
+      updatedAt: chat.updatedAt,
+    })),
+    settingsSummary: {
+      mcpEnabled: currentSettings.mcp.enabled,
+      mcpHost: currentSettings.mcp.host,
+      mcpPort: currentSettings.mcp.port,
+      processTimeoutSeconds: currentSettings.processTimeoutSeconds,
+      maxHistoryMessages: currentSettings.maxHistoryMessages,
+      maxHistoryChars: currentSettings.maxHistoryChars,
+      activeProvider: currentSettings.activeProvider,
+      permissionGroups: currentSettings.mcpPermissions.enabledGroups,
+      sensitiveConfirmation: currentSettings.mcpPermissions.confirmSensitiveActions,
+    },
+  };
+
+  return ok({
+    fileName: `drift-diagnostics-${Date.now()}.json`,
+    content: `${JSON.stringify(bundle, null, 2)}\n`,
+  });
+}
+
 // ── API type + init ─────────────────────────────────────────────────
 
 export type API = DefineAPI<{
   getSettings: typeof getSettings;
   updateSettings: typeof updateSettings;
+  syncCaidoSessionToken: typeof syncCaidoSessionToken;
+  syncCaidoHistoryContext: typeof syncCaidoHistoryContext;
   getProviderStatuses: typeof getProviderStatuses;
   checkProviderAvailability: typeof checkProviderAvailability;
   getMcpStatus: typeof getMcpStatus;
+  runMcpSelfTest: typeof runMcpSelfTest;
   startMcpServer: typeof startMcpServer;
   stopMcpServer: typeof stopMcpServer;
   getChat: typeof getChat;
@@ -782,7 +2807,9 @@ export type API = DefineAPI<{
   cancelCliMessage: typeof cancelCliMessage;
   closeCliSession: typeof closeCliSession;
   getCliSessionState: typeof getCliSessionState;
+  respondToMcpToolApproval: typeof respondToMcpToolApproval;
   getDiagnostics: typeof getDiagnostics;
+  exportSupportBundle: typeof exportSupportBundle;
 }>;
 
 export function init(sdk: SDK<API, BackendEvents>) {
@@ -790,6 +2817,10 @@ export function init(sdk: SDK<API, BackendEvents>) {
   assetsPath = sdk.meta.assetsPath();
   initDb(sdk);
   sdk.console.log(`[drift] init — plugin: ${pluginPath}, assets: ${assetsPath}`);
+  void detectPluginVersion().then((version) => {
+    pluginVersion = version;
+    sdk.console.log(`[drift] version detected: ${version}`);
+  });
 
   // Load persisted data
   loadJson<Settings>("settings", DEFAULT_SETTINGS).then((s) => {
@@ -804,9 +2835,12 @@ export function init(sdk: SDK<API, BackendEvents>) {
   // Register APIs
   sdk.api.register("getSettings", getSettings);
   sdk.api.register("updateSettings", updateSettings);
+  sdk.api.register("syncCaidoSessionToken", syncCaidoSessionToken);
+  sdk.api.register("syncCaidoHistoryContext", syncCaidoHistoryContext);
   sdk.api.register("getProviderStatuses", getProviderStatuses);
   sdk.api.register("checkProviderAvailability", checkProviderAvailability);
   sdk.api.register("getMcpStatus", getMcpStatus);
+  sdk.api.register("runMcpSelfTest", runMcpSelfTest);
   sdk.api.register("startMcpServer", startMcpServer);
   sdk.api.register("stopMcpServer", stopMcpServer);
   sdk.api.register("getChat", getChat);
@@ -818,5 +2852,12 @@ export function init(sdk: SDK<API, BackendEvents>) {
   sdk.api.register("cancelCliMessage", cancelCliMessage);
   sdk.api.register("closeCliSession", closeCliSession);
   sdk.api.register("getCliSessionState", getCliSessionState);
+  sdk.api.register("respondToMcpToolApproval", respondToMcpToolApproval);
   sdk.api.register("getDiagnostics", getDiagnostics);
+  sdk.api.register("exportSupportBundle", exportSupportBundle);
+
+  void refreshProjectContext(sdk);
+  sdk.events.onProjectChange(async (_, project) => {
+    await syncProjectContext(sdk, project as ProjectSelection);
+  });
 }
