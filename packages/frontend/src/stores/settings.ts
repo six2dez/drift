@@ -2,6 +2,7 @@ import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 import {
   DEFAULT_SETTINGS,
+  migrateScannerSettings,
   type McpToolPermissionGroup,
   type Settings,
   type ProviderStatus,
@@ -233,11 +234,18 @@ export const useSettingsStore = defineStore("settings", () => {
     initError.value = null;
 
     try {
-      // Load settings from frontend storage (persists across reinstalls)
+      // Load settings from frontend storage (persists across reinstalls).
+      // Normalize the scanner sub-object via the shared migration helper
+      // so legacy field names (activeTimeoutSeconds, providerId) get
+      // rewritten/dropped here rather than riding along via shallow merge.
       try {
         const stored = await sdk.storage.get() as StoredData | undefined;
         if (stored?.settings !== undefined) {
-          settings.value = { ...DEFAULT_SETTINGS, ...stored.settings };
+          const merged: Settings = { ...DEFAULT_SETTINGS, ...stored.settings };
+          merged.scanner = migrateScannerSettings(
+            (stored.settings as { scanner?: unknown }).scanner,
+          );
+          settings.value = merged;
         }
       } catch (storageErr) {
         initError.value = `Storage load failed: ${String(storageErr)}`;

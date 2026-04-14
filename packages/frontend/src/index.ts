@@ -12,6 +12,7 @@ import {
   extractCaidoText,
   enqueuePendingChatInput,
 } from "./chat-context";
+import { enqueuePendingActiveScan } from "./scanner-context";
 
 // ── Command IDs ─────────────────────────────────────────────────────
 
@@ -21,7 +22,23 @@ const CMD = {
   analyzeResponse: "drift.analyze-response",
   findVulns: "drift.find-vulnerabilities",
   analyzeJS: "drift.analyze-js",
+  activeScan: "drift.active-scan",
 } as const;
+
+function extractCaidoRequestId(ctx: unknown): string | undefined {
+  try {
+    const c = ctx as Record<string, unknown>;
+    const request = c["request"] as { getId?: () => unknown } | undefined;
+    if (request !== undefined && typeof request.getId === "function") {
+      const id = request.getId();
+      if (typeof id === "string") return id;
+      if (typeof id === "number") return String(id);
+    }
+  } catch {
+    /* ignore */
+  }
+  return undefined;
+}
 
 export const init = (sdk: FrontendSDK) => {
   const app = createApp(App);
@@ -108,6 +125,17 @@ export const init = (sdk: FrontendSDK) => {
     group: "Drift",
   });
 
+  sdk.commands.register(CMD.activeScan, {
+    name: "Active scan this request",
+    run: (ctx: unknown) => {
+      const requestId = extractCaidoRequestId(ctx);
+      if (requestId === undefined) return;
+      enqueuePendingActiveScan({ requestId, source: "request" });
+      sdk.navigation.goTo("/drift");
+    },
+    group: "Drift",
+  });
+
   // ── Command Palette ───────────────────────────────────────────────
 
   sdk.commandPalette.register(CMD.open);
@@ -140,6 +168,12 @@ export const init = (sdk: FrontendSDK) => {
     leadingIcon: "fas fa-code",
   });
 
+  sdk.menu.registerItem({
+    type: "Request",
+    commandId: CMD.activeScan,
+    leadingIcon: "fas fa-radar",
+  });
+
   // Request row context menus (table/list view - history, sitemap)
   sdk.menu.registerItem({
     type: "RequestRow",
@@ -151,5 +185,11 @@ export const init = (sdk: FrontendSDK) => {
     type: "RequestRow",
     commandId: CMD.findVulns,
     leadingIcon: "fas fa-bug",
+  });
+
+  sdk.menu.registerItem({
+    type: "RequestRow",
+    commandId: CMD.activeScan,
+    leadingIcon: "fas fa-radar",
   });
 };

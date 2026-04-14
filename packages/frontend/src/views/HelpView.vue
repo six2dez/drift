@@ -120,11 +120,22 @@ import Card from "primevue/card";
             — mines a response for API endpoints, hardcoded secrets, DOM XSS
             sinks/sources.
           </li>
+          <li>
+            <span class="font-medium text-surface-100">Active scan this request</span>
+            — kicks off the active scanner pipeline on this exact request.
+            Drift enumerates its real injection points, asks the LLM for
+            payloads, replays them via Caido, and confirms the outcome
+            deterministically before creating a finding. Runs as a
+            background job on the Scanner tab — <em>not</em> a chat turn.
+          </li>
         </ul>
         <p class="mt-2 text-sm text-surface-300 leading-relaxed">
-          Clicking one of those actions switches you to the Chat tab and
-          auto-sends the prompt with the request/response attached as
-          context. You don't need to create the chat first.
+          The four analysis actions switch you to the Chat tab and auto-send
+          the prompt with the request/response attached as context. You
+          don't need to create the chat first. "Active scan this request"
+          switches you to the Scanner tab instead and runs a background
+          pipeline; two rapid clicks on different requests run sequentially
+          (never concurrently).
         </p>
       </template>
     </Card>
@@ -315,11 +326,137 @@ import Card from "primevue/card";
             stateless providers.
           </div>
           <div>
+            <span class="font-medium text-surface-100">Scanner</span>
+            — passive auto-triage of in-scope responses + manual active
+            scan triggered from a request's context menu. Both are
+            off by default.
+          </div>
+          <div>
             <span class="font-medium text-surface-100">Diagnostics</span>
             — inline key/value dump and a redacted JSON bundle you can
             copy or download for bug reports.
           </div>
         </div>
+      </template>
+    </Card>
+
+    <h2 class="text-lg font-semibold text-surface-100 mb-3">Scanners</h2>
+    <Card :pt="{ body: { class: 'p-3' }, content: { class: 'p-0' } }" class="mb-6">
+      <template #content>
+        <p class="text-sm text-surface-300 leading-relaxed">
+          Drift ships two AI-driven scanners. Both use
+          <span class="font-mono">claude-cli</span> spawned headlessly
+          (no MCP, no chat session — the raw request/response is baked
+          into the prompt) and write any confirmed findings directly
+          to Caido's native Findings panel.
+        </p>
+        <ul class="mt-2 text-sm text-surface-300 leading-relaxed list-disc pl-5 space-y-2">
+          <li>
+            <span class="font-medium text-surface-100">Passive</span> —
+            fires on every new in-scope response. Drift runs a filter
+            pipeline (scope, static assets, MIME, body size, endpoint
+            fingerprint dedup, <span class="font-mono">findings.exists</span>
+            short-circuit, global and per-host rate limit) before
+            spending a single LLM call, so the cost stays bounded.
+            The LLM returns a structured JSON verdict; Drift creates
+            a finding only if the verdict is well-formed, has real
+            evidence, clears the configured confidence threshold, and
+            doesn't match the generic-noise blacklist.
+          </li>
+          <li>
+            <span class="font-medium text-surface-100">Active</span> —
+            manual. Right-click any request and choose
+            <span class="font-medium">Active scan this request</span>.
+            Drift first enumerates the request's <em>real</em>
+            injection points deterministically (query params, form
+            body pairs, JSON string leaves, an allowlisted subset of
+            headers), passes them to the LLM as an explicit
+            allowlist, and asks for up to
+            <span class="font-mono">maxActivePayloads</span> payloads
+            across five classes: reflected XSS, error-based SQLi,
+            path traversal / LFI, SSTI, and open redirect. Each
+            payload is sent via Caido's replay engine and confirmed
+            with deterministic rules — the LLM never judges its own
+            payloads. Drift creates a finding only for confirmed
+            verdicts and points the finding's request at the proof
+            replay.
+          </li>
+        </ul>
+        <p class="mt-3 text-sm text-surface-300 leading-relaxed">
+          <span class="font-medium text-surface-100">Important constraint:</span>
+          the scanner only runs while Drift's page is open in the
+          Caido UI. Caido suspends plugin work when the page is
+          hidden, so closing Drift pauses the pipeline — events that
+          fire while Drift is closed are dropped, not queued. Leave
+          the Drift tab open for as long as you want scanning to
+          happen. The Scanner tab shows a "Drift visible" tag so you
+          can confirm the pipeline is actually engaged.
+        </p>
+        <p class="mt-2 text-sm text-surface-300 leading-relaxed">
+          Both scanners are <span class="font-medium">off by default</span>.
+          Enable them from Settings → Scanner or from the toggles on
+          the Scanner tab itself. Both require
+          <span class="font-mono">claude-cli</span> to be installed
+          and resolvable; if Drift fails to find the Claude binary
+          the scanner queue enters a 60-second cooldown with an
+          explicit error instead of hammering the CLI on every job.
+        </p>
+        <h3 class="mt-4 mb-2 text-sm font-semibold text-surface-100">
+          Safety rails
+        </h3>
+        <ul class="text-sm text-surface-300 leading-relaxed list-disc pl-5 space-y-1">
+          <li>
+            <span class="font-medium text-surface-100">Injection-point allowlist.</span>
+            The active scanner's prompt includes the discovered
+            injection points verbatim, and any plan item whose
+            <span class="font-mono">injectionPoint</span> is not in
+            that set is dropped. Every mutator also returns
+            <span class="font-mono">undefined</span> if the target
+            field doesn't exist, so the scanner never fabricates
+            attack surface that wasn't in the original request.
+          </li>
+          <li>
+            <span class="font-medium text-surface-100">URL + body redaction.</span>
+            With the Redaction toggle on, Drift masks sensitive query
+            params (<span class="font-mono">token</span>,
+            <span class="font-mono">api_key</span>,
+            <span class="font-mono">password</span>,
+            <span class="font-mono">secret</span>,
+            <span class="font-mono">auth</span>,
+            <span class="font-mono">jwt</span>, …) and the same
+            allowlist inside form-urlencoded pairs and JSON string
+            leaves before the prompt is built. Headers are masked by
+            the pre-existing header redactor.
+          </li>
+          <li>
+            <span class="font-medium text-surface-100">Serialized active queue.</span>
+            Two rapid "Active scan this request" clicks run
+            back-to-back on a store-side promise chain — never
+            concurrently. The "Active scan running" spinner on the
+            Scanner tab stays on for the entire chain, so you can
+            tell the scan isn't done even after the first click
+            resolves.
+          </li>
+          <li>
+            <span class="font-medium text-surface-100">Rate limits + dedup.</span>
+            Per-host and global rate limits, a concurrency cap,
+            a response body cap, and an hour-long endpoint
+            fingerprint LRU dedup keep passive cost bounded. Both
+            scanners dedupe final findings by
+            <span class="font-mono">(method, host, pathTemplate, class)</span>
+            so repeated triggers on the same endpoint don't stack.
+          </li>
+          <li>
+            <span class="font-medium text-surface-100">Scanner tab feedback.</span>
+            The status card shows queue size, in-flight jobs,
+            analyzed count, findings created, provider cooldown, and
+            any last error. The "Last active scan" card shows
+            payloads sent, confirmed count, truncation, and errors
+            for whichever active scan most recently settled — so a
+            zero-finding scan still gives you a visible signal that
+            it ran.
+          </li>
+        </ul>
       </template>
     </Card>
 

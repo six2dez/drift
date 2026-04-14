@@ -1,16 +1,20 @@
 <script setup lang="ts">
-import { computed, ref, onMounted, watch } from "vue";
+import { computed, ref, onMounted, onUnmounted, watch } from "vue";
 import { useSettingsStore } from "../stores/settings";
 import { useChatStore } from "../stores/chat";
+import { useScannerStore } from "../stores/scanner";
 import { CliProvider } from "shared";
 import ChatView from "./ChatView.vue";
 import SettingsView from "./SettingsView.vue";
 import HelpView from "./HelpView.vue";
+import ScannerView from "./ScannerView.vue";
 import { pendingChatInputQueue } from "../chat-context";
+import { pendingActiveScanQueue } from "../scanner-context";
 
-const activeTab = ref<"chat" | "settings" | "help">("chat");
+const activeTab = ref<"chat" | "scanner" | "settings" | "help">("chat");
 const settingsStore = useSettingsStore();
 const chatStore = useChatStore();
+const scannerStore = useScannerStore();
 const ready = ref(false);
 const initError = ref<string | undefined>(undefined);
 
@@ -22,6 +26,14 @@ watch(
   () => pendingChatInputQueue.value.length,
   (length) => {
     if (length > 0) activeTab.value = "chat";
+  },
+);
+
+// Same pattern for active-scan requests coming from the context menu.
+watch(
+  () => pendingActiveScanQueue.value.length,
+  (length) => {
+    if (length > 0) activeTab.value = "scanner";
   },
 );
 
@@ -69,6 +81,12 @@ const mcpDotClass = computed(() => {
 });
 
 onMounted(async () => {
+  // The scanner-engaged gate is tied to the whole Drift plugin page
+  // lifecycle, NOT to the Scanner tab being active. A user on the
+  // Chat tab with passive scanning enabled still gets findings —
+  // closing the Drift page is what halts them.
+  void scannerStore.setEngaged(true);
+  void scannerStore.refresh();
   try {
     await Promise.allSettled([
       settingsStore.initialize(),
@@ -85,6 +103,10 @@ onMounted(async () => {
     initError.value = `Init failed: ${String(e)}`;
   }
   ready.value = true;
+});
+
+onUnmounted(() => {
+  void scannerStore.setEngaged(false);
 });
 </script>
 
@@ -111,6 +133,15 @@ onMounted(async () => {
         @click="activeTab = 'chat'"
       >
         <i class="fas fa-comments" /> Chat
+      </button>
+      <button
+        class="px-3 py-1.5 text-sm rounded flex items-center gap-1.5"
+        :class="activeTab === 'scanner'
+          ? 'bg-primary-600 text-white'
+          : 'text-surface-400 hover:text-surface-200'"
+        @click="activeTab = 'scanner'"
+      >
+        <i class="fas fa-radar" /> Scanner
       </button>
       <button
         class="px-3 py-1.5 text-sm rounded flex items-center gap-1.5"
@@ -147,6 +178,9 @@ onMounted(async () => {
     <div v-else class="flex-1 overflow-hidden">
       <div v-show="activeTab === 'chat'" class="h-full">
         <ChatView />
+      </div>
+      <div v-show="activeTab === 'scanner'" class="h-full overflow-y-auto">
+        <ScannerView />
       </div>
       <div v-show="activeTab === 'settings'" class="h-full overflow-y-auto">
         <SettingsView />

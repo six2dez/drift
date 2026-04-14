@@ -4,9 +4,11 @@ import { spawn, type ChildProcessWithoutNullStreams } from "child_process";
 import { Buffer } from "buffer";
 import path from "path";
 import {
+  type ActiveScanResult,
   type CliSessionReasonCode,
   type CliSessionStateEvent,
   DEFAULT_SETTINGS,
+  migrateScannerSettings,
   type CaidoContextOverride,
   type CaidoContextSnapshot,
   type ChatMessage,
@@ -21,6 +23,8 @@ import {
   type McpSelfTestResults,
   type McpServerInfo,
   type ProviderStatus,
+  type ScannerRecentFinding,
+  type ScannerStatus,
   type SendCliMessageOutput,
   type Settings,
   type StoredChat,
@@ -56,6 +60,10 @@ import {
   getClaudePrintRecoveryMode,
 } from "./claude-print";
 import { getPersistenceDbHandle, type PersistenceDbHandle } from "./persistence";
+import { createScannerQueue, type ScannerQueue } from "./scanner-queue";
+import { registerPassiveScanner } from "./passive-scanner";
+import { runActiveScanOnRequest } from "./active-scanner";
+import { pumpAllScannerJobs } from "./headless-cli";
 
 // ── Types (inline to avoid Zod which crashes QuickJS) ──────────────
 
@@ -95,6 +103,8 @@ const sessionWatchdogs = new Map<string, () => void | Promise<void>>();
 // getMcpStatus RPC handler (via a frontend keep-alive ping) to prod the
 // pending callMcpMethod promise when Caido's event loop has gone idle.
 let activeSelfTestPoll: (() => void) | undefined;
+let scannerQueue: ScannerQueue | undefined;
+let scannerFrontendEngaged = false;
 let mcpTempDir: string | undefined;
 let mcpAuthState: McpAuthState = "unknown";
 let mcpAuthMessage = "";
@@ -887,6 +897,8 @@ export type BackendEvents = DefineEvents<{
     activity: McpToolActivity;
   }) => void;
   "mcp-tool-approval": (data: McpToolApprovalRequest) => void;
+  "scanner-status": (data: ScannerStatus) => void;
+  "scanner-finding": (data: ScannerRecentFinding) => void;
 }>;
 
 type BackendSDK = SDK<API, BackendEvents>;
@@ -946,6 +958,17 @@ async function updateSettings(
     }
   }
   if (resetCliSessions) cliSessions.clear();
+  if (input.scanner !== undefined && scannerQueue !== undefined) {
+    scannerQueue.setFlags({
+      passiveEnabled: currentSettings.scanner.passiveEnabled,
+      activeEnabled: currentSettings.scanner.activeEnabled,
+    });
+    scannerQueue.updateConfig({
+      maxConcurrent: currentSettings.scanner.maxConcurrent,
+      maxPerMinute: currentSettings.scanner.maxPerMinute,
+      maxPerHostPerMinute: currentSettings.scanner.maxPerHostPerMinute,
+    });
+  }
   const persistenceError = await saveJson("settings", currentSettings);
   if (syncError !== undefined && persistenceError !== undefined) {
     return err(`${syncError}; Settings persistence also failed: ${persistenceError}`);
@@ -994,8 +1017,7 @@ async function refreshActiveMcpRuntime(sdk: BackendSDK): Promise<string | undefi
   }
 
   setMcpAuthStatus("valid", "");
-  await registerMcpWithCli("gemini", wrapperPath, sdk);
-  await registerMcpWithCli("codex", wrapperPath, sdk);
+  await tryRegisterMcpForProviders(wrapperPath, sdk);
   await publishMcpStatus(sdk);
   return undefined;
 }
@@ -1515,34 +1537,92 @@ async function requireNodeExecutable(): Promise<Result<string>> {
   return ok(nodeExecutable);
 }
 
-async function registerMcpWithCli(cli: "gemini" | "codex", mcpScript: string, sdk: BackendSDK): Promise<void> {
-  if (cli === "gemini") {
-    await spawnAndWait("gemini", ["mcp", "remove", "drift"]);
-    // Register wrapper script (has env vars baked in)
-    const result = await spawnAndWait("gemini", [
-      "mcp", "add", "drift", "--", mcpScript,
-    ]);
-    sdk.console.log(`[drift] gemini mcp add: code=${result.code} ${result.stderr.trim()}`);
-  }
+// Tracks the resolved binary path that Drift used for each successful
+// MCP registration in the current session. Unregister iterates over
+// this map so we clean up exactly what we registered, even if the user
+// has since disabled the provider (or uninstalled the CLI).
+const registeredMcpCliPaths = new Map<"gemini" | "codex", string>();
+// Reasons each CLI was skipped during the last register attempt, for
+// diagnostics surfacing. Written by tryRegisterMcpForProviders.
+const skippedMcpCliReasons = new Map<"gemini" | "codex", string>();
 
-  if (cli === "codex") {
-    await spawnAndWait("codex", ["mcp", "remove", "drift"]);
-    const result = await spawnAndWait("codex", [
-      "mcp", "add", "drift", "--", mcpScript,
-    ]);
-    sdk.console.log(`[drift] codex mcp add: code=${result.code} ${result.stderr.trim()}`);
+type McpCliProviderId = "gemini-cli" | "codex-cli";
+const MCP_CLI_TO_PROVIDER: Record<"gemini" | "codex", McpCliProviderId> = {
+  gemini: "gemini-cli",
+  codex: "codex-cli",
+};
+
+async function registerMcpWithCli(
+  cli: "gemini" | "codex",
+  cliBinary: string,
+  mcpScript: string,
+  sdk: BackendSDK,
+): Promise<boolean> {
+  // Best-effort pre-clean — an old "drift" entry in the CLI's config
+  // is normal (previous Drift session); ignore its exit code.
+  await spawnAndWait(cliBinary, ["mcp", "remove", "drift"]);
+  const result = await spawnAndWait(cliBinary, [
+    "mcp", "add", "drift", "--", mcpScript,
+  ]);
+  sdk.console.log(
+    `[drift] ${cli} mcp add via ${cliBinary}: code=${result.code} ${result.stderr.trim()}`,
+  );
+  if (result.code === 0) {
+    registeredMcpCliPaths.set(cli, cliBinary);
+    skippedMcpCliReasons.delete(cli);
+    return true;
+  }
+  skippedMcpCliReasons.set(
+    cli,
+    `mcp add exited with code ${String(result.code)}: ${result.stderr.trim() || "no stderr"}`,
+  );
+  return false;
+}
+
+async function tryRegisterMcpForProviders(mcpScript: string, sdk: BackendSDK): Promise<void> {
+  for (const cli of ["gemini", "codex"] as const) {
+    const providerId = MCP_CLI_TO_PROVIDER[cli];
+    const providerConfig = currentSettings.providers[providerId];
+    if (providerConfig === undefined) {
+      skippedMcpCliReasons.set(cli, "no provider config");
+      sdk.console.log(`[drift] ${cli} mcp register skipped: no provider config`);
+      continue;
+    }
+    if (!providerConfig.enabled) {
+      skippedMcpCliReasons.set(cli, "provider disabled in Drift settings");
+      sdk.console.log(`[drift] ${cli} mcp register skipped: provider disabled`);
+      continue;
+    }
+    const resolved = await resolveCommand(providerConfig.command);
+    if (resolved === undefined) {
+      skippedMcpCliReasons.set(
+        cli,
+        `command "${providerConfig.command}" did not resolve to an executable path`,
+      );
+      sdk.console.log(
+        `[drift] ${cli} mcp register skipped: "${providerConfig.command}" not resolvable`,
+      );
+      continue;
+    }
+    await registerMcpWithCli(cli, resolved, mcpScript, sdk);
   }
 }
 
 async function unregisterMcpFromCli(cli: "gemini" | "codex", sdk: BackendSDK): Promise<void> {
-  if (cli === "gemini") {
-    const result = await spawnAndWait("gemini", ["mcp", "remove", "drift"]);
-    sdk.console.log(`[drift] gemini mcp remove: code=${result.code}`);
+  // NOT gated on the current `enabled` flag — if we previously
+  // registered, we clean up, even if the user disabled the provider
+  // afterwards. Otherwise we'd leak dangling `drift` entries in
+  // external CLI config files.
+  const storedPath = registeredMcpCliPaths.get(cli);
+  if (storedPath === undefined) {
+    // We never registered this CLI in this session — nothing to do.
+    return;
   }
-  if (cli === "codex") {
-    const result = await spawnAndWait("codex", ["mcp", "remove", "drift"]);
-    sdk.console.log(`[drift] codex mcp remove: code=${result.code}`);
-  }
+  const result = await spawnAndWait(storedPath, ["mcp", "remove", "drift"]);
+  sdk.console.log(
+    `[drift] ${cli} mcp remove via ${storedPath}: code=${result.code}`,
+  );
+  registeredMcpCliPaths.delete(cli);
 }
 
 async function cleanupMcpRuntime(
@@ -1619,9 +1699,11 @@ async function startMcpServer(sdk: BackendSDK): Promise<Result<McpServerInfo>> {
 
   setMcpAuthStatus("valid", "");
 
-  // Register MCP with Gemini and Codex using the wrapper
-  await registerMcpWithCli("gemini", wrapperPath, sdk);
-  await registerMcpWithCli("codex", wrapperPath, sdk);
+  // Register MCP with Gemini and Codex only when their providers are
+  // enabled + resolvable. The helper also populates the
+  // `registeredMcpCliPaths` map so cleanup later runs against the
+  // exact binary we used, regardless of future enabled-flag changes.
+  await tryRegisterMcpForProviders(wrapperPath, sdk);
   cliSessions.clear();
 
   await publishMcpStatus(sdk);
@@ -2620,6 +2702,93 @@ async function respondToMcpToolApproval(
   }
 }
 
+// ── Scanner RPCs ────────────────────────────────────────────────────
+
+async function resolveScannerBinary(): Promise<string | undefined> {
+  // v1 scanner is Claude-only. When v2 adds multi-provider support
+  // this reads from a dedicated scanner provider field instead.
+  const providerConfig = currentSettings.providers["claude-cli"];
+  if (providerConfig === undefined) return undefined;
+  if (!providerConfig.enabled) return undefined;
+  try {
+    return await resolveCommand(providerConfig.command);
+  } catch {
+    return undefined;
+  }
+}
+
+async function getScannerStatus(_sdk: BackendSDK): Promise<Result<ScannerStatus>> {
+  // Pump in-flight headless jobs from inside the RPC handler — same
+  // trick as sessionWatchdogs/activeSelfTestPoll. Caido's event loop
+  // does not run pending timers during an awaiting RPC, so the
+  // frontend keep-alive ping is our reliable wake-up channel.
+  pumpAllScannerJobs();
+  if (scannerQueue === undefined) {
+    return ok({
+      passiveEnabled: false,
+      activeEnabled: false,
+      frontendEngaged: scannerFrontendEngaged,
+      queueSize: 0,
+      inFlight: 0,
+      analyzed: 0,
+      findingsCreated: 0,
+      invalidVerdicts: 0,
+    });
+  }
+  scannerQueue.pump();
+  return ok(scannerQueue.getStatus());
+}
+
+function getScannerRecentFindings(_sdk: BackendSDK): Result<ScannerRecentFinding[]> {
+  if (scannerQueue === undefined) return ok([]);
+  return ok(scannerQueue.getRecentFindings());
+}
+
+function clearScannerRecentFindings(_sdk: BackendSDK): Result<void> {
+  if (scannerQueue !== undefined) scannerQueue.clearRecentFindings();
+  return ok(undefined);
+}
+
+function resetScannerStats(_sdk: BackendSDK): Result<void> {
+  if (scannerQueue !== undefined) scannerQueue.resetStats();
+  return ok(undefined);
+}
+
+function setScannerEngaged(
+  _sdk: BackendSDK,
+  engaged: boolean,
+): Result<void> {
+  scannerFrontendEngaged = engaged;
+  if (scannerQueue !== undefined) {
+    scannerQueue.setFlags({ frontendEngaged: engaged });
+  }
+  return ok(undefined);
+}
+
+async function runActiveScan(
+  sdk: BackendSDK,
+  input: { requestId: string },
+): Promise<Result<ActiveScanResult>> {
+  if (scannerQueue === undefined) {
+    return err("Scanner queue is not initialised.");
+  }
+  if (!currentSettings.scanner.activeEnabled) {
+    return err("Active scanner is disabled. Enable it in Settings > Scanner.");
+  }
+  const result = await runActiveScanOnRequest(
+    {
+      sdk,
+      queue: scannerQueue,
+      getSettings: () => currentSettings.scanner,
+      isEngaged: () => scannerFrontendEngaged,
+      isDebugLogging: () => currentSettings.debugLogging,
+      resolveScannerBinary,
+    },
+    { requestId: input.requestId },
+  );
+  return ok(result);
+}
+
 // ── Diagnostic ──────────────────────────────────────────────────────
 
 async function getDiagnostics(_sdk: BackendSDK): Promise<Result<Record<string, string>>> {
@@ -2679,6 +2848,18 @@ async function getDiagnostics(_sdk: BackendSDK): Promise<Result<Record<string, s
     lastPersistenceScope: lastPersistenceScope || "none",
     lastPersistenceMessage: lastPersistenceMessage || "none",
     lastPersistenceTimestamp: lastPersistenceTimestamp > 0 ? String(lastPersistenceTimestamp) : "none",
+    mcpRegisteredCliPaths:
+      registeredMcpCliPaths.size === 0
+        ? "none"
+        : [...registeredMcpCliPaths.entries()]
+            .map(([cli, p]) => `${cli}=${p}`)
+            .join(", "),
+    mcpSkippedCliReasons:
+      skippedMcpCliReasons.size === 0
+        ? "none"
+        : [...skippedMcpCliReasons.entries()]
+            .map(([cli, reason]) => `${cli}: ${reason}`)
+            .join(" | "),
   };
 
   if (mcpTempDir !== undefined) {
@@ -2808,6 +2989,12 @@ export type API = DefineAPI<{
   closeCliSession: typeof closeCliSession;
   getCliSessionState: typeof getCliSessionState;
   respondToMcpToolApproval: typeof respondToMcpToolApproval;
+  getScannerStatus: typeof getScannerStatus;
+  getScannerRecentFindings: typeof getScannerRecentFindings;
+  clearScannerRecentFindings: typeof clearScannerRecentFindings;
+  resetScannerStats: typeof resetScannerStats;
+  setScannerEngaged: typeof setScannerEngaged;
+  runActiveScan: typeof runActiveScan;
   getDiagnostics: typeof getDiagnostics;
   exportSupportBundle: typeof exportSupportBundle;
 }>;
@@ -2824,7 +3011,7 @@ export function init(sdk: SDK<API, BackendEvents>) {
 
   // Load persisted data
   loadJson<Settings>("settings", DEFAULT_SETTINGS).then((s) => {
-    currentSettings = s;
+    currentSettings = { ...s, scanner: migrateScannerSettings(s.scanner) };
     sdk.console.log("[drift] settings loaded");
   });
   loadJson<StoredChat[]>("chats", []).then((c) => {
@@ -2853,8 +3040,44 @@ export function init(sdk: SDK<API, BackendEvents>) {
   sdk.api.register("closeCliSession", closeCliSession);
   sdk.api.register("getCliSessionState", getCliSessionState);
   sdk.api.register("respondToMcpToolApproval", respondToMcpToolApproval);
+  sdk.api.register("getScannerStatus", getScannerStatus);
+  sdk.api.register("getScannerRecentFindings", getScannerRecentFindings);
+  sdk.api.register("clearScannerRecentFindings", clearScannerRecentFindings);
+  sdk.api.register("resetScannerStats", resetScannerStats);
+  sdk.api.register("setScannerEngaged", setScannerEngaged);
+  sdk.api.register("runActiveScan", runActiveScan);
   sdk.api.register("getDiagnostics", getDiagnostics);
   sdk.api.register("exportSupportBundle", exportSupportBundle);
+
+  // Scanner queue + passive hook
+  scannerQueue = createScannerQueue(
+    {
+      onStatusChanged: (status) => {
+        sdk.api.send("scanner-status", status);
+      },
+      onFinding: (finding) => {
+        sdk.api.send("scanner-finding", finding);
+      },
+      initialStatus: {
+        passiveEnabled: currentSettings.scanner.passiveEnabled,
+        activeEnabled: currentSettings.scanner.activeEnabled,
+        frontendEngaged: scannerFrontendEngaged,
+      },
+    },
+    {
+      maxConcurrent: currentSettings.scanner.maxConcurrent,
+      maxPerMinute: currentSettings.scanner.maxPerMinute,
+      maxPerHostPerMinute: currentSettings.scanner.maxPerHostPerMinute,
+    },
+  );
+  registerPassiveScanner({
+    sdk,
+    queue: scannerQueue,
+    getSettings: () => currentSettings.scanner,
+    isEngaged: () => scannerFrontendEngaged,
+    isDebugLogging: () => currentSettings.debugLogging,
+    resolveScannerBinary,
+  });
 
   void refreshProjectContext(sdk);
   sdk.events.onProjectChange(async (_, project) => {
