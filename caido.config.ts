@@ -24,7 +24,9 @@ export default defineConfig({
       kind: "backend",
       id: "backend",
       root: "packages/backend",
-      assets: ["./assets/**/*"],
+      // Asset globs are resolved by caido-dev from the workspace root (cwd),
+      // not the plugin root, so the path must be repo-relative.
+      assets: ["./packages/backend/assets/**/*"],
     },
     {
       kind: "frontend",

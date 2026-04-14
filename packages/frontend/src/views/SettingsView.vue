@@ -216,11 +216,6 @@ async function toggleSensitiveConfirmations() {
   );
 }
 
-async function setScannerField(patch: Partial<typeof store.settings.scanner>) {
-  await store.updateSettings({
-    scanner: { ...store.settings.scanner, ...patch },
-  });
-}
 </script>
 
 <template>
@@ -524,123 +519,6 @@ async function setScannerField(patch: Partial<typeof store.settings.scanner>) {
       </template>
     </Card>
 
-    <!-- Scanner -->
-    <h2 class="text-lg font-semibold text-surface-100 mb-3">Scanner</h2>
-    <Card :pt="{ body: { class: 'p-3' }, content: { class: 'p-0' } }" class="mb-6">
-      <template #content>
-        <p class="text-xs text-surface-400">
-          AI-driven passive and active scanners. Both run ONLY while
-          Drift's page is open in Caido. Passive analyses new in-scope
-          responses; active is a manual "scan this request" action from
-          the context menu. Findings land in Caido's native Findings panel.
-        </p>
-        <div class="mt-3 flex flex-wrap items-center gap-2">
-          <Tag
-            :value="`Passive: ${store.settings.scanner.passiveEnabled ? 'On' : 'Off'}`"
-            :severity="store.settings.scanner.passiveEnabled ? 'success' : 'secondary'"
-            class="cursor-pointer"
-            @click="setScannerField({ passiveEnabled: !store.settings.scanner.passiveEnabled })"
-          />
-          <Tag
-            :value="`Active: ${store.settings.scanner.activeEnabled ? 'On' : 'Off'}`"
-            :severity="store.settings.scanner.activeEnabled ? 'success' : 'secondary'"
-            class="cursor-pointer"
-            @click="setScannerField({ activeEnabled: !store.settings.scanner.activeEnabled })"
-          />
-          <Tag
-            :value="`Redaction: ${store.settings.scanner.redactionEnabled ? 'On' : 'Off'}`"
-            :severity="store.settings.scanner.redactionEnabled ? 'success' : 'secondary'"
-            class="cursor-pointer"
-            @click="setScannerField({ redactionEnabled: !store.settings.scanner.redactionEnabled })"
-          />
-          <Tag
-            :value="`Static assets: ${store.settings.scanner.skipStaticAssets ? 'Skipped' : 'Analysed'}`"
-            :severity="store.settings.scanner.skipStaticAssets ? 'success' : 'warning'"
-            class="cursor-pointer"
-            @click="setScannerField({ skipStaticAssets: !store.settings.scanner.skipStaticAssets })"
-          />
-        </div>
-        <div class="mt-3 grid grid-cols-2 gap-3 text-xs text-surface-300">
-          <div class="flex items-center gap-2">
-            <label class="flex-1">Confidence threshold:</label>
-            <select
-              class="bg-surface-800 border border-surface-600 rounded px-1 py-0.5"
-              :value="store.settings.scanner.confidenceThreshold"
-              @change="(e: Event) => setScannerField({ confidenceThreshold: (e.target as HTMLSelectElement).value as 'medium' | 'high' })"
-            >
-              <option value="medium">medium</option>
-              <option value="high">high</option>
-            </select>
-          </div>
-          <div class="flex items-center gap-2">
-            <label class="flex-1">Global rate (per min):</label>
-            <InputNumber
-              :modelValue="store.settings.scanner.maxPerMinute"
-              :min="1"
-              :max="200"
-              class="w-20"
-              inputClass="p-inputtext-sm"
-              @update:modelValue="(v: number) => setScannerField({ maxPerMinute: v })"
-            />
-          </div>
-          <div class="flex items-center gap-2">
-            <label class="flex-1">Per-host rate (per min):</label>
-            <InputNumber
-              :modelValue="store.settings.scanner.maxPerHostPerMinute"
-              :min="1"
-              :max="100"
-              class="w-20"
-              inputClass="p-inputtext-sm"
-              @update:modelValue="(v: number) => setScannerField({ maxPerHostPerMinute: v })"
-            />
-          </div>
-          <div class="flex items-center gap-2">
-            <label class="flex-1">Max concurrent jobs:</label>
-            <InputNumber
-              :modelValue="store.settings.scanner.maxConcurrent"
-              :min="1"
-              :max="4"
-              class="w-20"
-              inputClass="p-inputtext-sm"
-              @update:modelValue="(v: number) => setScannerField({ maxConcurrent: v })"
-            />
-          </div>
-          <div class="flex items-center gap-2">
-            <label class="flex-1">Max response body (bytes):</label>
-            <InputNumber
-              :modelValue="store.settings.scanner.maxBodyBytes"
-              :min="1024"
-              :max="262144"
-              class="w-24"
-              inputClass="p-inputtext-sm"
-              @update:modelValue="(v: number) => setScannerField({ maxBodyBytes: v })"
-            />
-          </div>
-          <div class="flex items-center gap-2">
-            <label class="flex-1">Max active payloads:</label>
-            <InputNumber
-              :modelValue="store.settings.scanner.maxActivePayloads"
-              :min="1"
-              :max="32"
-              class="w-20"
-              inputClass="p-inputtext-sm"
-              @update:modelValue="(v: number) => setScannerField({ maxActivePayloads: v })"
-            />
-          </div>
-          <div class="flex items-center gap-2">
-            <label class="flex-1">Scanner job timeout (s):</label>
-            <InputNumber
-              :modelValue="store.settings.scanner.jobTimeoutSeconds"
-              :min="15"
-              :max="600"
-              class="w-20"
-              inputClass="p-inputtext-sm"
-              @update:modelValue="(v: number) => setScannerField({ jobTimeoutSeconds: v })"
-            />
-          </div>
-        </div>
-      </template>
-    </Card>
 
     <!-- Quick help -->
     <h2 class="text-lg font-semibold text-surface-100 mb-3">Quick help</h2>

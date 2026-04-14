@@ -268,4 +268,28 @@ describe("settings store", () => {
 
     expect(store.initError).toBeNull();
   });
+
+  it("drops legacy `scanner` key from storage during init", async () => {
+    mockSdk.storage.get.mockResolvedValue({
+      settings: {
+        ...DEFAULT_SETTINGS,
+        // Simulate a pre-removal install where scanner config survived
+        // in storage. The store must load without error and strip the
+        // key so the next save rewrites storage without it.
+        scanner: {
+          passiveEnabled: true,
+          activeEnabled: false,
+          maxPerMinute: 30,
+        },
+        activeProvider: "gemini-cli",
+      },
+    });
+
+    const store = useSettingsStore();
+    await store.initialize();
+
+    expect(store.initError).toBeNull();
+    expect(store.settings.activeProvider).toBe("gemini-cli");
+    expect((store.settings as Record<string, unknown>).scanner).toBeUndefined();
+  });
 });

@@ -3,10 +3,6 @@ import {
   DEFAULT_MCP_PERMISSION_SETTINGS,
   type McpPermissionSettings,
 } from "./mcp";
-import {
-  DEFAULT_SCANNER_SETTINGS,
-  type ScannerSettings,
-} from "./scanner";
 
 export type CaidoApiConfig = {
   url: string;
@@ -28,7 +24,6 @@ export type Settings = {
   maxHistoryChars: number;
   processTimeoutSeconds: number;
   debugLogging: boolean;
-  scanner: ScannerSettings;
 };
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -49,5 +44,4 @@ export const DEFAULT_SETTINGS: Settings = {
   maxHistoryChars: 20000,
   processTimeoutSeconds: 120,
   debugLogging: false,
-  scanner: { ...DEFAULT_SCANNER_SETTINGS },
 };
