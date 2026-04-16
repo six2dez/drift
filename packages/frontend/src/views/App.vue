@@ -15,7 +15,7 @@ const ready = ref(false);
 const initError = ref<string | undefined>(undefined);
 
 // Force-switch to the chat tab whenever a context-menu command enqueues
-// a pending payload. Without this, a click on "Analyze Request" while
+// a pending payload. Without this, a click on "Review Request" while
 // the user is currently looking at Settings or Help would deposit the
 // prompt into ChatView but leave it invisible behind the active tab.
 watch(
@@ -93,7 +93,7 @@ onMounted(async () => {
     <!-- Header -->
     <div class="flex items-center px-4 py-2 border-b border-surface-700 gap-3">
       <span class="text-base font-bold text-surface-100">Drift</span>
-      <span class="text-xs text-surface-500">CLI AI Agent</span>
+      <span class="text-xs text-surface-500">Security Copilot for Caido</span>
       <button
         class="ml-2 inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-[11px] transition-colors"
         :class="mcpBadgeClass"

@@ -24,6 +24,7 @@ import {
   pendingChatInputQueue,
   type PendingChatInput,
 } from "../chat-context";
+import { EMPTY_CHAT_WORKFLOWS } from "../chat-workflows";
 
 const sdk = useSDK();
 const chatStore = useChatStore();
@@ -38,12 +39,6 @@ let currentTurnId = 0;
 
 let messageCounter = Date.now();
 let eventUnsubs: Array<{ stop: () => void }> = [];
-const chatExamples = [
-  "Show me the last 5 requests in the active Caido context and summarize anything interesting.",
-  "Use get_current_context and explain the current project, filter, scope, and whether an override is active.",
-  "If the current setup is degraded, summarize the MCP/session state and tell me the next recovery step.",
-] as const;
-
 const currentProvider = computed(() =>
   chatStore.activeChat?.providerId ?? CliProvider.Claude
 );
@@ -476,7 +471,7 @@ defineExpose({
         <div ref="messagesContainer" class="flex-1 overflow-y-auto">
           <MessageList
             :messages="chatStore.activeMessages"
-            :examples="chatExamples"
+            :workflows="EMPTY_CHAT_WORKFLOWS"
             @use-example="handleSend"
           />
           <div v-if="isStreaming" class="px-4 pb-2">

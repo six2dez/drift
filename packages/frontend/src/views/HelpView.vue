@@ -11,9 +11,11 @@ import Card from "primevue/card";
           Drift is a Caido plugin that lets you chat with a local CLI AI agent
           (Claude Code, Gemini CLI, Codex CLI, or GitHub Copilot CLI) while
           giving it live access to your Caido session through an embedded
-          MCP server. The agent can read your HTTP history, replay requests,
-          inspect scope and environment, and create findings — all scoped to
-          the Caido project you are currently looking at.
+          MCP server. It is designed as a security copilot for manual work:
+          the agent can review HTTP traffic, help you validate hypotheses,
+          replay requests, inspect scope and environment, and draft findings
+          or reports — all scoped to the Caido project you are currently
+          looking at.
         </p>
         <p class="mt-2 text-sm text-surface-300 leading-relaxed">
           Drift does not send your traffic to a remote service. Every chat
@@ -84,9 +86,10 @@ import Card from "primevue/card";
           </li>
           <li>
             Open the <span class="font-medium text-surface-100">Chat</span> tab
-            and send a prompt. Try the example
-            "Show me the last 5 requests in the active Caido context and
-            summarize anything interesting."
+            and send a prompt. A good first message is
+            "Help me validate a security hypothesis in the active Caido
+            context. Build a focused test plan with the best payloads to
+            try and what outcomes would confirm or refute the issue."
           </li>
         </ol>
       </template>
@@ -101,32 +104,32 @@ import Card from "primevue/card";
         </p>
         <ul class="mt-2 text-sm text-surface-300 leading-relaxed list-disc pl-5 space-y-1">
           <li>
-            <span class="font-medium text-surface-100">Analyze Request</span>
-            — general security review of the HTTP request: injection points,
-            auth, IDOR, SSRF, OWASP Top 10.
+            <span class="font-medium text-surface-100">Review Request</span>
+            — summarize what the request does, surface the most relevant
+            attack paths, and suggest the next three manual checks.
           </li>
           <li>
-            <span class="font-medium text-surface-100">Find Vulnerabilities</span>
-            — deeper vuln hunt with attack vectors, test payloads, and
-            severity ratings.
+            <span class="font-medium text-surface-100">Build Test Plan</span>
+            — turn a request into a focused validation plan with payloads,
+            replay steps, and confirmation criteria.
           </li>
           <li>
-            <span class="font-medium text-surface-100">Analyze Response</span>
-            — looks at the HTTP response for information disclosure, missing
-            security headers, sensitive data, internal error leakage.
+            <span class="font-medium text-surface-100">Review Response</span>
+            — inspect the response for security-relevant headers, caching
+            behaviour, data exposure, and the next validation step.
           </li>
           <li>
-            <span class="font-medium text-surface-100">Analyze JavaScript</span>
-            — mines a response for API endpoints, hardcoded secrets, DOM XSS
-            sinks/sources.
+            <span class="font-medium text-surface-100">Inspect JavaScript</span>
+            — extract endpoints, secrets, trust boundaries, and DOM XSS
+            clues from a script or response body.
           </li>
         </ul>
         <p class="mt-2 text-sm text-surface-300 leading-relaxed">
           Each action switches you to the Chat tab and auto-sends the
           prompt with the request/response attached as context — you
-          don't need to create the chat first. The agent then drives its
-          MCP tools (replay, search_history, create_finding, …) while it
-          answers.
+          don't need to create the chat first. The agent then uses Caido's
+          MCP tools to gather evidence, replay follow-up requests, and help
+          you move from review to validation and reporting.
         </p>
       </template>
     </Card>
@@ -145,8 +148,7 @@ import Card from "primevue/card";
             <span class="font-mono">--mcp-config</span> pointing at an
             embedded Drift MCP server. The MCP server exposes Caido tools
             (search_history, get_request, send_request, create_finding, …)
-            scoped to the project and filter you are currently looking at
-            in Caido's History view.
+            scoped to the project and filter you are currently looking at.
           </li>
           <li>
             The agent thinks, calls MCP tools as needed, and streams its

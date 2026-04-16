@@ -1,7 +1,23 @@
 {
   "name": "drift",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
+  "description": "Security copilot for manual web security testing in Caido (MCP + local CLI)",
+  "license": "MIT",
+  "author": "six2dez <six2dez@gmail.com> (https://github.com/six2dez)",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/six2dez/drift.git"
+  },
+  "bugs": {
+    "url": "https://github.com/six2dez/drift/issues"
+  },
+  "homepage": "https://github.com/six2dez/drift#readme",
+  "engines": {
+    "node": ">=20",
+    "pnpm": ">=9"
+  },
+  "packageManager": "pnpm@9.0.0",
   "scripts": {
     "typecheck": "pnpm -r typecheck",
     "lint": "eslint ./packages/**/src --fix",

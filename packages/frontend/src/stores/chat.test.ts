@@ -85,13 +85,13 @@ describe("chat store persistence", () => {
     expect(mockSdk.window.showToast).toHaveBeenCalledTimes(1);
   });
 
-  it("derives better automatic titles from attached HTTP prompts", () => {
+  it("derives workflow titles from attached HTTP review prompts", () => {
     const store = useChatStore();
     const chatId = store.createChat("claude-cli");
     store.addMessage(chatId, {
       id: "msg-1",
       role: "user",
-      content: "Analyze this HTTP request for security issues, misconfigurations, and potential vulnerabilities.",
+      content: "Review this HTTP request as a manual security tester. Summarize what the request does, identify the most relevant attack surfaces, and propose the next 3 manual tests to run in Caido.",
       timestamp: Date.now(),
       providerId: "claude-cli",
       httpContextAttachment: {
@@ -101,7 +101,21 @@ describe("chat store persistence", () => {
       },
     });
 
-    expect(store.chats[0]?.title).toBe("HTTP request vulnerability review");
+    expect(store.chats[0]?.title).toBe("Request review");
+  });
+
+  it("derives report-oriented titles from freeform prompts", () => {
+    const store = useChatStore();
+    const chatId = store.createChat("claude-cli");
+    store.addMessage(chatId, {
+      id: "msg-1",
+      role: "user",
+      content: "Write a bug bounty style report for [FINDING_ID_OR_TITLE_OR_HYPOTHESIS]. Include title, severity, affected asset, summary, impact, evidence, steps to reproduce, PoC notes, and remediation.",
+      timestamp: Date.now(),
+      providerId: "claude-cli",
+    });
+
+    expect(store.chats[0]?.title).toBe("Report draft");
   });
 
   it("surfaces delete failures but removes the chat locally", async () => {

@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import type { ChatMessage } from "shared";
 import MessageBubble from "./MessageBubble.vue";
+import type { EmptyChatWorkflow } from "../../chat-workflows";
 
 defineProps<{
   messages: ChatMessage[];
-  examples?: readonly string[];
+  workflows?: readonly EmptyChatWorkflow[];
 }>();
 
 const emit = defineEmits<{
@@ -16,19 +17,27 @@ const emit = defineEmits<{
   <div class="flex flex-col gap-3 p-4">
     <div v-if="messages.length === 0" class="text-center text-surface-400 py-8">
       <i class="fas fa-comments text-2xl mb-2" />
-      <p class="text-sm">Send a message to start chatting</p>
+      <p class="text-sm text-surface-300">Start with a workflow</p>
       <div
-        v-if="examples && examples.length > 0"
-        class="mt-4 flex flex-wrap justify-center gap-2"
+        v-if="workflows && workflows.length > 0"
+        class="mx-auto mt-5 grid max-w-4xl gap-3 text-left md:grid-cols-3"
       >
-        <button
-          v-for="example in examples"
-          :key="example"
-          class="rounded-full border border-surface-600 px-3 py-1 text-xs text-surface-300 transition-colors hover:border-surface-500 hover:bg-surface-800 hover:text-surface-100"
-          @click="emit('use-example', example)"
+        <div
+          v-for="workflow in workflows"
+          :key="workflow.id"
+          class="rounded-xl border border-surface-700 bg-surface-900/60 px-4 py-4"
         >
-          {{ example }}
-        </button>
+          <div class="mb-2 text-sm font-medium text-surface-100">{{ workflow.label }}</div>
+          <div class="mb-3 text-xs leading-relaxed text-surface-400">
+            {{ workflow.description }}
+          </div>
+          <button
+            class="rounded-full border border-surface-600 px-3 py-1 text-xs text-surface-300 transition-colors hover:border-surface-500 hover:bg-surface-800 hover:text-surface-100"
+            @click="emit('use-example', workflow.template)"
+          >
+            {{ workflow.cta }}
+          </button>
+        </div>
       </div>
       <div class="mx-auto mt-5 max-w-2xl text-left">
         <div class="grid gap-2 md:grid-cols-3">

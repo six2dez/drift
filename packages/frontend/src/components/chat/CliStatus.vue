@@ -19,9 +19,9 @@ const contextSummary = computed(() => {
   if (effective === undefined) return "Caido context unavailable";
 
   const parts = [
-    effective.projectId !== "" ? `Project: ${effective.projectId}` : "Project: none",
-    effective.filterName !== "" ? `Filter: ${effective.filterName}` : "",
-    effective.historyScopeId !== "" ? `Scope: ${effective.historyScopeId}` : "Scope: none",
+    effective.projectId !== "" ? `Project ${effective.projectId}` : "Project none",
+    effective.filterName !== "" ? `Filter ${effective.filterName}` : "Filter none",
+    effective.historyScopeId !== "" ? `Scope ${effective.historyScopeId}` : "Scope none",
   ].filter((part) => part !== "");
 
   return parts.join(" | ");
@@ -29,17 +29,17 @@ const contextSummary = computed(() => {
 
 const toolPolicySummary = computed(() => {
   const status = props.mcpStatus;
-  if (status === undefined || status === null) return "Tool policy unavailable";
+  if (status === undefined || status === null) return "MCP status unavailable";
   const confirmation = status.toolPolicy.confirmSensitiveActions
     ? "confirm sensitive"
     : "no confirmations";
-  return `Tools: ${status.toolCount}/${status.supportedToolCount} | ${confirmation}`;
+  return `MCP ${status.toolCount}/${status.supportedToolCount} | ${confirmation}`;
 });
 
 const sessionSummary = computed(() => {
   const session = props.sessionState;
   if (session === undefined || session === null) {
-    return "Session: idle";
+    return "Session idle";
   }
 
   const labels: Record<CliSessionStateEvent["state"], string> = {
@@ -52,18 +52,26 @@ const sessionSummary = computed(() => {
     session.reasonCode === "completed_without_result"
       ? "recovered"
       : labels[session.state];
-  return `Session: ${summaryLabel}${session.mcpAttached ? " | MCP attached" : " | no MCP"}`;
+  return `Session ${summaryLabel}${session.mcpAttached ? " | MCP attached" : " | no MCP"}`;
 });
 
 const sessionReason = computed(() => {
   const session = props.sessionState;
   if (session === undefined || session === null) {
-    return "No provider session has been created for this chat yet.";
+    return undefined;
   }
   if (session.reasonCode === "completed_without_result") {
     return "Claude finished with visible output but missed the final result event. Drift recovered the turn automatically.";
   }
-  return session.reason;
+  if (
+    session.state === "error" ||
+    session.reasonCode === "timeout" ||
+    session.reasonCode === "spawn_error" ||
+    session.reasonCode === "cancelled"
+  ) {
+    return session.reason;
+  }
+  return undefined;
 });
 </script>
 
@@ -96,7 +104,7 @@ const sessionReason = computed(() => {
     <div class="truncate text-[11px] text-surface-500">
       {{ sessionSummary }}
     </div>
-    <div class="truncate text-[11px] text-surface-500">
+    <div v-if="sessionReason" class="truncate text-[11px] text-surface-500">
       {{ sessionReason }}
     </div>
   </div>

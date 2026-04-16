@@ -1,4 +1,4 @@
-# Drift - AI agent / MCP assistant for Caido
+# Drift - Security copilot / MCP assistant for Caido
 
 Drift runs locally-installed AI CLI tools (Claude Code, Gemini CLI, Codex CLI, Copilot CLI) inside Caido with live access to your Caido session via an embedded MCP server.
 
@@ -8,7 +8,7 @@ Drift runs locally-installed AI CLI tools (Claude Code, Gemini CLI, Codex CLI, C
 
 - **4 CLI backends**: Claude Code (with session resume), Gemini CLI, Codex CLI, Copilot CLI
 - **MCP tools**: 18 Caido tools exposed to every provider via stdio
-- **Caido integration**: command palette, context menus on requests/responses ("Analyze Request", "Find Vulnerabilities", "Analyze Response", "Analyze JavaScript")
+- **Caido integration**: command palette, context menus on requests/responses ("Review Request", "Build Test Plan", "Review Response", "Inspect JavaScript")
 - **Structured HTTP handoff**: analysis actions keep the visible prompt short and attach raw request/response material as a separate chat attachment
 - **Context visibility**: the header shows the current Caido UI context plus any explicit MCP project override
 - **Tool safety**: per-group enables plus optional confirmation for sensitive MCP actions (`send_request`, `create_finding`, `set_environment`, intercept controls, `run_workflow`)
@@ -62,14 +62,15 @@ Registration of the Drift MCP server into each external tool's config file (Gemi
 - **Tool safety** lets you disable MCP capability groups and require confirmation before sensitive actions such as findings, environment changes, replay, intercept, or workflow mutations.
 - **Diagnostics report** exports provider status, MCP status, registered CLI paths, effective Caido context, persistence issues, and chat/session summaries without including tokens or secrets.
 - **Session lifecycle** in chat makes it visible whether the current chat has a live provider session, whether MCP was attached to the last turn, and why the last turn stopped or failed.
-- **Chat polish** includes rename, copy/export, delete confirmation, and better automatic titles for request/response-driven chats.
+- **Chat workflows** emphasize review, validation, and reporting instead of broad scan-style prompts, with better automatic titles for request/response-driven chats.
+- **Chat polish** includes rename, copy/export, delete confirmation, and workflow-oriented empty states and composer presets.
 - **Session debug log (opt-in)** Settings > Process exposes a checkbox that, when enabled, streams per-line provider lifecycle events to `/tmp/drift-session-<id>.log` and deletes the file when the session ends. Off by default — no trace is written and nothing is buffered in memory until you flip it on.
 
 ### Prompt examples
 
-- `Show me the last 5 requests in the active Caido context and summarize anything interesting.`
-- `Use get_current_context and explain the current project, filter, scope, and whether an override is active.`
-- `Analyze this attached HTTP request for auth, access-control, injection, SSRF, and sensitive-data issues.`
+- `Review this HTTP request as a manual security tester. Summarize what it does and propose the next 3 tests to run in Caido.`
+- `Help me validate a security hypothesis in the active Caido context. Build a focused test plan with payloads and confirmation criteria.`
+- `Draft a structured security finding from the current hypothesis or evidence.`
 - `I'm not seeing the expected Caido tools or context. Summarize the MCP/session state and tell me the next recovery step.`
 
 ### Live test semantics
@@ -116,9 +117,9 @@ Drift mirrors the active Caido UI project/filter/query/scope by default. If an M
 ## Caido Integration
 
 - **Command Palette** (Ctrl/Cmd+Shift+P): "Open Drift"
-- **Request context menu**: "Analyze Request", "Find Vulnerabilities"
-- **Response context menu**: "Analyze Response", "Analyze JavaScript"
-- **Request row context menu** (history, sitemap): "Analyze Request", "Find Vulnerabilities"
+- **Request context menu**: "Review Request", "Build Test Plan"
+- **Response context menu**: "Review Response", "Inspect JavaScript"
+- **Request row context menu** (history, sitemap): "Review Request", "Build Test Plan"
 
 The analysis actions keep the visible user prompt short and send the raw HTTP request/response as a structured attachment for provider analysis. If you trigger an action while another turn is already streaming, Drift queues it (with a toast) and fires it as soon as the current turn finishes; pressing Stop drops anything still queued so it cannot fire after a cancel.
 
@@ -146,8 +147,8 @@ Backend tests cover Claude print-mode parsing, command resolution, MCP runtime, 
 
 1. **Provider resolution:** in Settings, confirm Claude, Gemini, Codex, and Copilot resolve correctly or are intentionally disabled.
 2. **Health check:** run Health check and verify provider checks, Caido auth, MCP runtime, live-test state, and context sync.
-3. **Per-provider chat smoke:** for each enabled provider, start a fresh chat and verify `Use get_current_context...` returns the expected project/filter/scope state, `Show me the last 5 requests...` returns history, and MCP activity is shown on the reply.
-4. **Structured HTTP handoff:** use a request/response context-menu analysis action and verify the attachment chip appears in chat and the reply reflects the attached material.
+3. **Per-provider chat smoke:** for each enabled provider, start a fresh chat and verify a review or validation prompt returns the expected project/filter/scope-aware answer and that MCP activity is shown on the reply.
+4. **Structured HTTP handoff:** use a request/response context-menu review action and verify the attachment chip appears in chat and the reply reflects the attached material.
 5. **Cancel race:** start a long-running turn, press Stop mid-stream, and confirm only a single `[Cancelled]` assistant message appears (no late duplicate when the provider eventually exits).
 6. **Context-menu queue:** while a turn is streaming, fire two analysis actions on different requests; confirm the toast, that queued prompts run sequentially after the active turn, and that pressing Stop drops anything still queued.
 7. **Session debug log:** with the flag off (default), confirm `/tmp/drift-session-*.log` is not created during a turn. Toggle it on, run a turn, end the session, and confirm the log file is removed.

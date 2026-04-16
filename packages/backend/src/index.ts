@@ -167,11 +167,19 @@ function initDb(sdk: { meta: { db: () => unknown } }) {
   }
 }
 
+// key is always a hardcoded constant ("settings" | "chats") supplied by saveJson/loadJson — never attacker-reachable.
+// value is the JSON payload; single quotes are doubled per SQLite's string-literal escaping rules.
+// The Caido SQLite binding does not expose parameterized queries on this handle, so we escape manually
+// and keep the inputs constrained at the call site.
+function escapeSqliteLiteral(value: string): string {
+  return value.replace(/'/g, "''");
+}
+
 async function loadSetting(key: string): Promise<string | undefined> {
   if (db === undefined) return undefined;
   try {
     await db.execute("CREATE TABLE IF NOT EXISTS drift_settings (key TEXT PRIMARY KEY, value TEXT)");
-    const rows = await db.query(`SELECT value FROM drift_settings WHERE key = '${key}'`) as Array<{ value: string }>;
+    const rows = await db.query(`SELECT value FROM drift_settings WHERE key = '${escapeSqliteLiteral(key)}'`) as Array<{ value: string }>;
     return rows[0]?.value;
   } catch (error) {
     recordPersistenceIssue(`loadSetting(${key})`, error);
@@ -183,7 +191,7 @@ async function saveSetting(key: string, value: string): Promise<string | undefin
   if (db === undefined) return undefined;
   try {
     await db.execute("CREATE TABLE IF NOT EXISTS drift_settings (key TEXT PRIMARY KEY, value TEXT)");
-    await db.execute(`INSERT OR REPLACE INTO drift_settings (key, value) VALUES ('${key}', '${value.replace(/'/g, "''")}')`);
+    await db.execute(`INSERT OR REPLACE INTO drift_settings (key, value) VALUES ('${escapeSqliteLiteral(key)}', '${escapeSqliteLiteral(value)}')`);
     return undefined;
   } catch (error) {
     return recordPersistenceIssue(`saveSetting(${key})`, error);

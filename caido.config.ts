@@ -12,7 +12,7 @@ const id = "drift";
 export default defineConfig({
   id,
   name: "Drift",
-  description: "CLI AI agent for Caido with MCP integration",
+  description: "Security copilot for manual web security testing in Caido (MCP + local CLI)",
   version: "0.1.0",
   author: {
     name: "six2dez",

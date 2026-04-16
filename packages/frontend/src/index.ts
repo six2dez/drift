@@ -8,6 +8,12 @@ import "./styles/index.css";
 import type { FrontendSDK } from "./types";
 import App from "./views/App.vue";
 import {
+  BUILD_TEST_PLAN_PROMPT,
+  INSPECT_JAVASCRIPT_PROMPT,
+  REVIEW_REQUEST_PROMPT,
+  REVIEW_RESPONSE_PROMPT,
+} from "./chat-workflows";
+import {
   buildPendingChatInput,
   extractCaidoText,
   enqueuePendingChatInput,
@@ -49,11 +55,11 @@ export const init = (sdk: FrontendSDK) => {
   });
 
   sdk.commands.register(CMD.analyzeRequest, {
-    name: "Analyze Request",
+    name: "Review Request",
     run: (ctx: unknown) => {
       const raw = extractCaidoText(ctx, "request");
       enqueuePendingChatInput(buildPendingChatInput({
-        text: "Analyze this HTTP request for security issues, misconfigurations, and potential vulnerabilities. Focus on injection points, authentication issues, sensitive data exposure, IDOR, SSRF, and other OWASP Top 10 issues.",
+        text: REVIEW_REQUEST_PROMPT,
         source: "request",
         label: "HTTP request",
         rawContext: raw,
@@ -64,11 +70,11 @@ export const init = (sdk: FrontendSDK) => {
   });
 
   sdk.commands.register(CMD.analyzeResponse, {
-    name: "Analyze Response",
+    name: "Review Response",
     run: (ctx: unknown) => {
       const raw = extractCaidoText(ctx, "response");
       enqueuePendingChatInput(buildPendingChatInput({
-        text: "Analyze this HTTP response for security issues. Look for information disclosure, missing security headers, sensitive data exposure, internal error leakage, and likely vulnerabilities.",
+        text: REVIEW_RESPONSE_PROMPT,
         source: "response",
         label: "HTTP response",
         rawContext: raw,
@@ -79,11 +85,11 @@ export const init = (sdk: FrontendSDK) => {
   });
 
   sdk.commands.register(CMD.findVulns, {
-    name: "Find Vulnerabilities",
+    name: "Build Test Plan",
     run: (ctx: unknown) => {
       const raw = extractCaidoText(ctx, "request");
       enqueuePendingChatInput(buildPendingChatInput({
-        text: "Perform a thorough security analysis of this HTTP request. For each potential vulnerability, identify the type, explain the attack vector, suggest a test payload, and rate the severity.",
+        text: BUILD_TEST_PLAN_PROMPT,
         source: "request-row",
         label: "HTTP request",
         rawContext: raw,
@@ -94,11 +100,11 @@ export const init = (sdk: FrontendSDK) => {
   });
 
   sdk.commands.register(CMD.analyzeJS, {
-    name: "Analyze JavaScript",
+    name: "Inspect JavaScript",
     run: (ctx: unknown) => {
       const raw = extractCaidoText(ctx, "response");
       enqueuePendingChatInput(buildPendingChatInput({
-        text: "Analyze this JavaScript or HTTP response for security issues. Look for API endpoints, hardcoded secrets, tokens, credentials, internal URLs, debug information, DOM XSS sinks and sources, and sensitive data.",
+        text: INSPECT_JAVASCRIPT_PROMPT,
         source: "response",
         label: "JavaScript or HTTP response",
         rawContext: raw,

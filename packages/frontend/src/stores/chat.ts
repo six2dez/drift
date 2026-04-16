@@ -19,20 +19,32 @@ function inferPromptTitle(content: string): string | undefined {
   const normalized = compactWhitespace(content);
   if (normalized === "") return undefined;
 
-  if (/last\s+\d+\s+requests?/i.test(normalized) || /search_history/i.test(normalized)) {
-    return "History review";
-  }
   if (/get_current_context|current context|override/i.test(normalized)) {
     return "Context review";
   }
-  if (/list .*findings?|findings?.*details/i.test(normalized)) {
-    return "Findings review";
+  if (/review this http request|review request|manual security tester/i.test(normalized)) {
+    return "Request review";
+  }
+  if (/review this http response|review response|manual security triage/i.test(normalized)) {
+    return "Response review";
+  }
+  if (/build a focused manual test plan|validate a security hypothesis|test plan/i.test(normalized)) {
+    return "Test plan";
+  }
+  if (/explain finding|finding .*root cause|exploitability/i.test(normalized)) {
+    return "Finding analysis";
+  }
+  if (/draft a structured security finding|draft finding|create finding/i.test(normalized)) {
+    return "Finding draft";
   }
   if (/proof[- ]of[- ]concept|generate .*poc/i.test(normalized)) {
-    return "PoC generation";
+    return "PoC draft";
   }
   if (/bug bounty report|write a .*report/i.test(normalized)) {
-    return "Report drafting";
+    return "Report draft";
+  }
+  if (/mcp and session state|recovery step|expected Caido tools or context/i.test(normalized)) {
+    return "Recovery help";
   }
 
   return truncateTitle(normalized);
@@ -40,20 +52,19 @@ function inferPromptTitle(content: string): string | undefined {
 
 function deriveChatTitle(message: ChatMessage): string {
   const promptTitle = inferPromptTitle(message.content);
-  const attachmentLabel = compactWhitespace(message.httpContextAttachment?.label ?? "");
+  if (promptTitle !== undefined) {
+    return promptTitle;
+  }
 
+  const attachmentLabel = compactWhitespace(message.httpContextAttachment?.label ?? "");
   if (attachmentLabel !== "") {
-    if (/javascript/i.test(attachmentLabel)) return "JavaScript analysis";
-    if (/response/i.test(attachmentLabel)) return "HTTP response analysis";
-    if (/vulnerab/i.test(message.content)) return "HTTP request vulnerability review";
-    if (/request/i.test(attachmentLabel)) return "HTTP request analysis";
-    if (promptTitle !== undefined) {
-      return truncateTitle(`${attachmentLabel}: ${promptTitle}`);
-    }
+    if (/javascript/i.test(attachmentLabel)) return "JavaScript inspection";
+    if (/response/i.test(attachmentLabel)) return "Response review";
+    if (/request/i.test(attachmentLabel)) return "Request review";
     return truncateTitle(attachmentLabel);
   }
 
-  return promptTitle ?? DEFAULT_CHAT_TITLE;
+  return DEFAULT_CHAT_TITLE;
 }
 
 export const useChatStore = defineStore("chat", () => {
