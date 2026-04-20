@@ -39,12 +39,12 @@ In Settings, set the command path for each CLI tool. Drift first tries the confi
 
 | Provider | Resume | MCP | Status |
 |----------|--------|-----|--------|
-| Claude Code | Yes (`--session-id`/`--resume`) | Yes (per-invocation stdio config) | Stable |
-| Gemini CLI | No | Yes (registered wrapper) | Supported |
-| Codex CLI | No | Yes (registered wrapper) | Supported |
-| Copilot CLI | No | Yes (`--additional-mcp-config`) | Supported |
+| Claude Code | Yes (`--session-id`/`--resume`) | Yes (per-invocation stdio config) | **Stable** — structured `stream-json` parser, dedicated tests, watchdog recovery |
+| Gemini CLI | No | Yes (registered wrapper) | **Experimental** — text output, mutates `~/.gemini/settings.json` on start/stop |
+| Codex CLI | No | Yes (pre-registered via `codex mcp add`) | **Experimental** — text output, thin wiring |
+| Copilot CLI | No | Yes (`--additional-mcp-config`) | **Experimental** — text output, per-chat MCP config file |
 
-All four providers share the same MCP/runtime contract: if a provider is enabled and installed, Drift exposes the same 18 MCP tools, the same effective Caido context model, and the same live-test semantics.
+All four providers share the same MCP/runtime contract: if a provider is enabled and installed, Drift exposes the same 18 MCP tools, the same effective Caido context model, and the same live-test semantics. The **Experimental** providers are functional today but depend on their upstream CLI's text output; an upstream change can break parsing silently. Run **Settings → MCP Server → Run Self-Test** against each provider before trusting it for production work.
 
 ### MCP Server
 
@@ -155,6 +155,11 @@ Backend tests cover Claude print-mode parsing, command resolution, MCP runtime, 
 8. **MCP registration footprint:** with Gemini disabled, start MCP and confirm `~/.gemini/settings.json` is not mutated. Enable Gemini with a specific command path, start MCP, confirm `mcpServers.drift` was registered against that exact path. Disable Gemini, stop MCP, and confirm the entry is cleaned up (the tracked-paths map ignores the current `enabled` flag).
 9. **Diagnostics:** export a diagnostics report and confirm it contains provider/MCP/registered-paths/chat data without secrets.
 10. **Tests:** `pnpm -r typecheck` and `pnpm exec vitest run` both pass.
+
+## Documentation
+
+- **[docs/SECURITY.md](docs/SECURITY.md)** — threat model, data flow, attack surface, and how to report vulnerabilities.
+- **[docs/cookbook.md](docs/cookbook.md)** — 7 real workflow recipes (IDOR, auth bypass, data-leak audit, JS endpoint discovery, race conditions, finding → report).
 
 ## License
 

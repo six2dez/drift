@@ -5,8 +5,10 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   collectVersionManagerCommandCandidates,
   extractHomeDir,
+  formatProviderUnavailableMessage,
   getCommandExecutableCandidates,
   getNodeExecutableCandidates,
+  getProviderInstallHint,
 } from "./command-resolution";
 
 describe("command resolution helpers", () => {
@@ -61,6 +63,28 @@ describe("command resolution helpers", () => {
     expect(candidates).toContain(
       path.join(homeDir, ".nvm", "versions", "node", "v18.0.0", "bin", "claude"),
     );
+  });
+
+  it("returns an actionable install hint for every known provider", () => {
+    expect(getProviderInstallHint("claude-cli")).toContain("claude.ai/install.sh");
+    expect(getProviderInstallHint("gemini-cli")).toContain("@google/gemini-cli");
+    expect(getProviderInstallHint("codex-cli")).toContain("@openai/codex");
+    expect(getProviderInstallHint("copilot-cli")).toContain("gh extension install");
+  });
+
+  it("returns a generic hint for unknown providers", () => {
+    const hint = getProviderInstallHint("unknown-cli");
+    expect(hint).toContain("Install the CLI");
+    expect(hint).toContain("Settings");
+  });
+
+  it("appends the install hint to the cause in formatProviderUnavailableMessage", () => {
+    const message = formatProviderUnavailableMessage(
+      "claude-cli",
+      "CLI not found: claude",
+    );
+    expect(message.startsWith("CLI not found: claude")).toBe(true);
+    expect(message).toContain("claude.ai/install.sh");
   });
 
   it("builds node candidates from known homes and provider-adjacent paths", async () => {

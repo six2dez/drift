@@ -50,6 +50,7 @@ describe("chat-context helpers", () => {
       source: "request",
       label: "HTTP request",
       size: 14,
+      content: "GET / HTTP/1.1",
     });
   });
 

@@ -7,10 +7,14 @@ import Button from "primevue/button";
 import Select from "primevue/select";
 import Textarea from "primevue/textarea";
 
-const props = defineProps<{
-  provider: string;
-  isStreaming: boolean;
-}>();
+const props = withDefaults(
+  defineProps<{
+    provider: string;
+    isStreaming: boolean;
+    hasMessages?: boolean;
+  }>(),
+  { hasMessages: false },
+);
 
 const emit = defineEmits<{
   send: [text: string];
@@ -20,6 +24,7 @@ const emit = defineEmits<{
 
 const settingsStore = useSettingsStore();
 const input = ref("");
+const workflowsExpanded = ref(!props.hasMessages);
 
 const providerOptions = Object.values(CliProvider).map((p) => ({
   value: p,
@@ -47,7 +52,18 @@ function handleKeydown(e: KeyboardEvent) {
 
 <template>
   <div class="border-t border-surface-700 p-3">
-    <div class="mb-3 grid gap-2 lg:grid-cols-3">
+    <button
+      class="mb-2 flex items-center gap-1 text-[11px] text-surface-400 hover:text-surface-200"
+      :aria-expanded="workflowsExpanded"
+      @click="workflowsExpanded = !workflowsExpanded"
+    >
+      <i
+        :class="workflowsExpanded ? 'fas fa-chevron-up' : 'fas fa-chevron-down'"
+        style="font-size: 9px;"
+      />
+      {{ workflowsExpanded ? "Hide workflows" : "Show workflows" }}
+    </button>
+    <div v-show="workflowsExpanded" class="mb-3 grid gap-2 lg:grid-cols-3">
       <div
         v-for="group in CHAT_WORKFLOW_GROUPS"
         :key="group.id"

@@ -1,6 +1,34 @@
 import { readdir, stat } from "fs/promises";
 import path from "path";
 
+// Actionable install / resolution hint per provider. These surface inside the
+// chat error banner and in Settings → CLI Providers so a user who hits
+// "CLI not found" does not have to guess which package to install.
+const PROVIDER_INSTALL_HINTS: Record<string, string> = {
+  "claude-cli":
+    "Install Claude Code with `curl -fsSL https://claude.ai/install.sh | bash`, or set the absolute binary path in Settings → CLI Providers.",
+  "gemini-cli":
+    "Install Gemini CLI with `npm install -g @google/gemini-cli`, or set the absolute binary path in Settings → CLI Providers.",
+  "codex-cli":
+    "Install Codex CLI with `npm install -g @openai/codex`, or set the absolute binary path in Settings → CLI Providers.",
+  "copilot-cli":
+    "Install GitHub Copilot CLI with `gh extension install github/gh-copilot`, or set the absolute binary path in Settings → CLI Providers.",
+};
+
+export function getProviderInstallHint(providerId: string): string {
+  return (
+    PROVIDER_INSTALL_HINTS[providerId] ??
+    "Install the CLI for this provider, or set the absolute binary path in Settings → CLI Providers."
+  );
+}
+
+export function formatProviderUnavailableMessage(
+  providerId: string,
+  cause: string,
+): string {
+  return `${cause}. ${getProviderInstallHint(providerId)}`;
+}
+
 async function pathExists(candidatePath: string): Promise<boolean> {
   try {
     await stat(candidatePath);

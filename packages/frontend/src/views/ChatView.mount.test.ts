@@ -73,10 +73,12 @@ vi.mock("../plugins/sdk", () => ({
 // see the stubbed backend instead of throwing on the real inject() call.
 import ChatView from "./ChatView.vue";
 import { useChatStore } from "../stores/chat";
+import { useApprovalsStore } from "../stores/approvals";
 import {
   clearPendingChatInputQueue,
   enqueuePendingChatInput,
 } from "../chat-context";
+import type { McpToolApprovalRequestEvent } from "shared";
 
 const globalStubs = {
   Splitter: { template: "<div><slot /></div>" },
@@ -86,6 +88,8 @@ const globalStubs = {
   ChatInput: { template: "<div />" },
   CliStatus: { template: "<div />" },
   MessageList: { template: "<div />" },
+  ApprovalDialog: { template: "<div />" },
+  AttachmentPreview: { template: "<div />" },
 };
 
 type MountedWrapper = ReturnType<typeof mount>;
@@ -232,6 +236,105 @@ describe("ChatView integration", () => {
     });
     await nextTick();
     await nextTick();
+  });
+
+  it("skips the approval dialog when the tool is already session-approved", async () => {
+    const wrapper = mountChatView();
+    const vm = wrapper.vm as unknown as {
+      handleApprovalRequest: (event: McpToolApprovalRequestEvent) => Promise<void>;
+      pendingApproval: unknown;
+    };
+    const chatStore = useChatStore();
+    const approvalsStore = useApprovalsStore();
+    chatStore.createChat("claude-cli");
+    // Simulate that the backend already bound this chat to session-1
+    // (the createCliSession mock returns "session-1" in setup).
+    const activeChatId = chatStore.activeChatId!;
+    chatStore.setSessionId(activeChatId, "session-1");
+    approvalsStore.allowForSession("session-1", "replay", "send_request");
+
+    await vm.handleApprovalRequest({
+      sessionId: "session-1",
+      approvalId: "ap-1",
+      toolName: "send_request",
+      toolLabel: "Send request",
+      group: "replay",
+      argumentsSummary: "",
+      message: "",
+      sensitive: true,
+    });
+    await flushPromises();
+
+    expect(vm.pendingApproval).toBe(null);
+    expect(mockSdk.backend.respondToMcpToolApproval).toHaveBeenCalledWith({
+      sessionId: "session-1",
+      approvalId: "ap-1",
+      approved: true,
+    });
+  });
+
+  it("re-sends the last failed payload when Retry is triggered", async () => {
+    mockSdk.backend.sendCliMessage
+      .mockResolvedValueOnce({ kind: "Error", value: undefined, error: "boom" })
+      .mockResolvedValueOnce({
+        kind: "Ok",
+        value: { content: "second attempt reply", mcpActivities: [] },
+      });
+
+    const wrapper = mountChatView();
+    const vm = wrapper.vm as unknown as {
+      handleSend: (text: string) => Promise<void>;
+      handleRetry: () => void;
+      errorMessage: string | undefined;
+      lastFailedInput: unknown;
+    };
+    const chatStore = useChatStore();
+    chatStore.createChat("claude-cli");
+
+    await vm.handleSend("first try");
+    await flushPromises();
+    expect(vm.errorMessage).toBe("boom");
+    expect(vm.lastFailedInput).toMatchObject({ text: "first try" });
+    expect(mockSdk.backend.sendCliMessage).toHaveBeenCalledTimes(1);
+
+    vm.handleRetry();
+    await flushPromises();
+    // After a successful retry, lastFailedInput clears and a second assistant message lands.
+    expect(vm.lastFailedInput).toBe(undefined);
+    expect(mockSdk.backend.sendCliMessage).toHaveBeenCalledTimes(2);
+    const assistantMessages = chatStore.activeMessages.filter((m) => m.role === "assistant");
+    expect(assistantMessages.at(-1)?.content).toBe("second attempt reply");
+  });
+
+  it("auto-denies approval requests for an inactive session", async () => {
+    const wrapper = mountChatView();
+    const vm = wrapper.vm as unknown as {
+      handleApprovalRequest: (event: McpToolApprovalRequestEvent) => Promise<void>;
+      pendingApproval: unknown;
+    };
+    const chatStore = useChatStore();
+    chatStore.createChat("claude-cli");
+    const activeChatId = chatStore.activeChatId!;
+    chatStore.setSessionId(activeChatId, "session-A");
+
+    await vm.handleApprovalRequest({
+      sessionId: "session-B",
+      approvalId: "ap-2",
+      toolName: "create_finding",
+      toolLabel: "Create finding",
+      group: "findings",
+      argumentsSummary: "",
+      message: "",
+      sensitive: true,
+    });
+    await flushPromises();
+
+    expect(vm.pendingApproval).toBe(null);
+    expect(mockSdk.backend.respondToMcpToolApproval).toHaveBeenCalledWith({
+      sessionId: "session-B",
+      approvalId: "ap-2",
+      approved: false,
+    });
   });
 
   it("clears queued context-menu items when the user explicitly cancels", async () => {

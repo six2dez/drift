@@ -28,6 +28,12 @@ import {
   type SupportBundleOutput,
 } from "shared";
 import {
+  buildClaudeLaunchArgs,
+  buildCodexLaunchArgs,
+  buildCopilotLaunchArgs,
+  buildGeminiLaunchArgs,
+} from "./provider-launch";
+import {
   MCP_SELF_TEST_CHECKS,
   MCP_TOOL_NAMES,
   buildMcpToolPolicy,
@@ -45,12 +51,14 @@ import {
 } from "./mcp-runtime";
 import {
   extractHomeDir,
+  formatProviderUnavailableMessage,
   getCommandExecutableCandidates,
   getNodeExecutableCandidates,
 } from "./command-resolution";
 import {
   consumeClaudePrintChunk,
   createClaudePrintState,
+  getClaudePrintUsage,
   didClaudeStopWithoutResult,
   finalizeClaudePrintOutput,
   getClaudePrintRecoveryMode,
@@ -1763,7 +1771,7 @@ async function createCliSession(
 ): Promise<Result<string>> {
   const status = await checkProvider(input.providerId);
   if (!status.available) {
-    return err(`CLI not found: ${status.error}`);
+    return err(formatProviderUnavailableMessage(input.providerId, `CLI not available: ${status.error}`));
   }
 
   const sessionId = `drift-${Date.now()}`;
@@ -1830,8 +1838,12 @@ async function sendCliMessage(
 
     const resolved = await resolveCommand(config.command);
     if (resolved === undefined) {
-      setSessionState("error", `CLI not found: ${config.command}`);
-      return err(`CLI not found: ${config.command}`);
+      const message = formatProviderUnavailableMessage(
+        providerId,
+        `CLI not found: ${config.command}`,
+      );
+      setSessionState("error", message);
+      return err(message);
     }
 
     // Check if first message BEFORE setting session (for system prompt injection)
@@ -1859,35 +1871,10 @@ async function sendCliMessage(
             ? toolPolicy.allowedToolNames
             : MCP_TOOL_NAMES;
         const mcpScriptPath = getTempMcpScriptPath();
-        const claudeSessionInstructions = [
-          "You are running inside Drift, a Caido plugin.",
-          mcpScriptPath !== undefined
-            ? "The only supported live Caido access path in this session is the attached Drift MCP server. Use only the attached mcp__drift__* tools for live Caido data."
-            : "No Drift MCP server is attached in this session. If the user asks for live Caido data, explain that Drift MCP is not attached for this turn.",
-          "Call MCP tools one at a time, never in parallel within a single assistant message.",
-          "Do not present progress-only or tool-loading updates as your user-facing answer.",
-        ].join(" ");
-        args.push(
-          "-p",
-          "--verbose",
-          "--output-format",
-          "stream-json",
-          "--disable-slash-commands",
-          "--append-system-prompt",
-          claudeSessionInstructions,
-          "--disallowedTools",
-          "Bash,Edit,Glob,Grep,MultiEdit,NotebookEdit,Read,Skill,Task,TodoWrite,ToolSearch,WebFetch,WebSearch,Write",
-          "--allowedTools",
-          claudeAllowedTools.map((toolName) => `mcp__drift__${toolName}`).join(",")
-        );
-
-        // Session resume
-        const sid = cliSessions.get(input.chatId);
-        if (sid !== undefined) {
-          args.push("--resume", sid);
-        }
+        const hasMcpAttached = mcpScriptPath !== undefined;
 
         // Rewrite MCP config on each send so token/url/script path cannot go stale.
+        let claudeMcpConfigForLaunch: string | undefined;
         if (mcpScriptPath !== undefined) {
           if (caidoToken === "") {
             setSessionState("error", "No Caido access token is available for this provider turn.");
@@ -1926,27 +1913,30 @@ async function sendCliMessage(
           }
           claudeMcpWrapperPath = sessionWrapperPath;
           claudeMcpConfigPath = cfgFile;
-          args.push("--strict-mcp-config", "--mcp-config", cfgFile);
+          claudeMcpConfigForLaunch = cfgFile;
         }
+
+        args.push(
+          ...buildClaudeLaunchArgs({
+            allowedToolNames: claudeAllowedTools,
+            resumeSessionId: cliSessions.get(input.chatId),
+            mcpConfigPath: claudeMcpConfigForLaunch,
+            hasMcpAttached,
+          }),
+        );
         break;
       }
       case "gemini-cli":
-        args.push("--output-format", "text");
-        // MCP: Gemini uses pre-registered server + allowed names filter
-        if (mcpTempDir !== undefined) {
-          args.push("--allowed-mcp-server-names", "drift");
-        }
-        args.push("-p", ".");
+        args.push(
+          ...buildGeminiLaunchArgs({ hasMcpAttached: mcpTempDir !== undefined }),
+        );
         break;
       case "codex-cli":
-        args.push("exec", "--color", "never");
-        // Codex uses pre-registered MCP (via codex mcp add), no per-invocation flag needed
-        args.push("-");
+        args.push(...buildCodexLaunchArgs());
         break;
       case "copilot-cli": {
-        args.push("-p", "--quiet");
-        // MCP: Copilot supports --additional-mcp-config @<path>
         const mcpScriptPath = getTempMcpScriptPath();
+        let copilotMcpConfigForLaunch: string | undefined;
         if (mcpScriptPath !== undefined) {
           if (caidoToken === "") {
             setSessionState("error", "No Caido access token is available for this provider turn.");
@@ -1974,8 +1964,11 @@ async function sendCliMessage(
             setSessionState("error", "Drift could not prepare the Copilot MCP configuration file.");
             return err("Drift could not prepare the Copilot MCP configuration file.");
           }
-          args.push("--additional-mcp-config", `@${cfgFile}`);
+          copilotMcpConfigForLaunch = cfgFile;
         }
+        args.push(
+          ...buildCopilotLaunchArgs({ mcpConfigPath: copilotMcpConfigForLaunch }),
+        );
         break;
       }
     }
@@ -2296,6 +2289,7 @@ async function sendCliMessage(
         finalize(ok({
           content: output,
           mcpActivities: [...collectedActivities],
+          usage: getClaudePrintUsage(claudePrintState),
         }));
       };
 
@@ -2426,6 +2420,7 @@ async function sendCliMessage(
           finalize(ok({
             content: output,
             mcpActivities: [...collectedActivities],
+            usage: getClaudePrintUsage(claudePrintState),
           }));
           requestGracefulShutdown();
         }, idleDelayMs);
@@ -2507,6 +2502,7 @@ async function sendCliMessage(
             finalize(ok({
               content: output || "(no response)",
               mcpActivities: [...collectedActivities],
+              usage: getClaudePrintUsage(claudePrintState),
             }));
           }
           requestGracefulShutdown();

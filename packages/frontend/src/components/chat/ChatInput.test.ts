@@ -69,6 +69,60 @@ describe("ChatInput", () => {
     expect(wrapper.text()).not.toContain("Scan Scope");
   });
 
+  it("starts with workflows collapsed when the chat already has messages", async () => {
+    const wrapper = mount(ChatInput, {
+      props: {
+        provider: "claude-cli",
+        isStreaming: false,
+        hasMessages: true,
+      },
+      global: {
+        stubs: {
+          Button: ButtonStub,
+          Select: SelectStub,
+          Textarea: TextareaStub,
+        },
+      },
+    });
+
+    const toggle = wrapper
+      .findAll("button")
+      .find((b) => b.text().includes("Show workflows"));
+    expect(toggle).toBeDefined();
+    expect(toggle!.attributes("aria-expanded")).toBe("false");
+
+    await toggle?.trigger("click");
+
+    const toggleAfter = wrapper
+      .findAll("button")
+      .find((b) => b.text().includes("Hide workflows"));
+    expect(toggleAfter).toBeDefined();
+    expect(toggleAfter!.attributes("aria-expanded")).toBe("true");
+  });
+
+  it("starts with workflows expanded when the chat has no messages", () => {
+    const wrapper = mount(ChatInput, {
+      props: {
+        provider: "claude-cli",
+        isStreaming: false,
+        hasMessages: false,
+      },
+      global: {
+        stubs: {
+          Button: ButtonStub,
+          Select: SelectStub,
+          Textarea: TextareaStub,
+        },
+      },
+    });
+
+    const toggle = wrapper
+      .findAll("button")
+      .find((b) => b.text().includes("Hide workflows"));
+    expect(toggle).toBeDefined();
+    expect(toggle!.attributes("aria-expanded")).toBe("true");
+  });
+
   it("fills the textarea with the selected workflow prompt", async () => {
     const wrapper = mount(ChatInput, {
       props: {

@@ -2,14 +2,21 @@
 import { computed, ref } from "vue";
 import MarkdownIt from "markdown-it";
 import DOMPurify from "dompurify";
+import hljs from "highlight.js/lib/common";
+import markdownItHighlightjs from "markdown-it-highlightjs";
 import type { ChatMessage } from "shared";
 
 const props = defineProps<{
   message: ChatMessage;
 }>();
 
+const emit = defineEmits<{
+  "preview-attachment": [attachment: NonNullable<ChatMessage["httpContextAttachment"]>];
+}>();
+
 const copied = ref(false);
 const md = new MarkdownIt({ html: false, linkify: true, breaks: true });
+md.use(markdownItHighlightjs, { hljs, inline: true, auto: true });
 
 const renderedHtml = computed(() => {
   if (props.message.role === "user") return "";
@@ -31,6 +38,25 @@ function formatAttachmentSize(size: number | undefined): string {
   if (size < 1024) return `${size} B`;
   return `${(size / 1024).toFixed(1)} KB`;
 }
+
+function formatTokenCount(tokens: number): string {
+  if (tokens < 1000) return `${tokens}`;
+  return `${(tokens / 1000).toFixed(1)}k`;
+}
+
+const usageSummary = computed<string | undefined>(() => {
+  const usage = props.message.usage;
+  if (usage === undefined) return undefined;
+  if (usage.inputTokens <= 0 && usage.outputTokens <= 0) return undefined;
+  const parts = [
+    `${formatTokenCount(usage.inputTokens)} in`,
+    `${formatTokenCount(usage.outputTokens)} out`,
+  ];
+  if (usage.cacheReadTokens !== undefined && usage.cacheReadTokens > 0) {
+    parts.push(`${formatTokenCount(usage.cacheReadTokens)} cached`);
+  }
+  return parts.join(" / ");
+});
 
 function getActivityStateClass(state: string | undefined): string {
   switch (state) {
@@ -55,14 +81,17 @@ function formatActivityDuration(durationMs: number | null | undefined): string {
     v-if="message.role === 'user'"
     class="group relative max-w-[80%] ml-auto px-4 py-2.5 rounded-2xl rounded-tr-sm text-sm leading-relaxed bg-primary-600 text-white"
   >
-    <div
+    <button
       v-if="message.httpContextAttachment"
-      class="mb-2 inline-flex items-center gap-2 rounded-full bg-primary-700/80 px-2 py-1 text-[11px]"
+      :disabled="!message.httpContextAttachment.content"
+      class="mb-2 inline-flex items-center gap-2 rounded-full bg-primary-700/80 px-2 py-1 text-[11px] hover:bg-primary-600 disabled:cursor-default disabled:hover:bg-primary-700/80"
+      :title="message.httpContextAttachment.content ? 'Preview attachment' : 'Content unavailable (chat was reloaded)'"
+      @click="emit('preview-attachment', message.httpContextAttachment)"
     >
       <i class="fas fa-paperclip" />
       <span>{{ message.httpContextAttachment.label }}</span>
       <span class="text-primary-100/70">{{ formatAttachmentSize(message.httpContextAttachment.size) }}</span>
-    </div>
+    </button>
     <div class="whitespace-pre-wrap">{{ message.content }}</div>
   </div>
 
@@ -107,6 +136,12 @@ function formatActivityDuration(durationMs: number | null | undefined): string {
         </div>
       </div>
     </div>
+    <div
+      v-if="usageSummary"
+      class="mt-2 text-[10px] font-mono text-surface-500"
+    >
+      {{ usageSummary }}
+    </div>
     <button
       class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 text-xs px-2 py-1 rounded transition-opacity"
       style="background: #2d3348; color: #9ca3b0;"
@@ -117,10 +152,18 @@ function formatActivityDuration(durationMs: number | null | undefined): string {
   </div>
 </template>
 
+<style>
+@import "highlight.js/styles/github-dark-dimmed.css";
+</style>
+
 <style scoped>
 :deep(pre) {
   background: #0d1117 !important;
   color: #c9d1d9 !important;
+}
+:deep(pre code.hljs) {
+  background: transparent !important;
+  padding: 0 !important;
 }
 :deep(code) {
   color: #7ee787 !important;

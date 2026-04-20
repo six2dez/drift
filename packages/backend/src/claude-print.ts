@@ -1,10 +1,19 @@
+type ClaudeRawUsage = {
+  input_tokens?: number;
+  output_tokens?: number;
+  cache_creation_input_tokens?: number;
+  cache_read_input_tokens?: number;
+};
+
 type ClaudeStreamEvent = {
   type?: string;
   subtype?: string;
   is_error?: boolean;
   session_id?: string;
+  usage?: ClaudeRawUsage;
   message?: {
     stop_reason?: string;
+    usage?: ClaudeRawUsage;
     content?: Array<{
       type?: string;
       text?: string;
@@ -16,6 +25,7 @@ type ClaudeStreamEvent = {
     type?: string;
     message?: {
       stop_reason?: string | null;
+      usage?: ClaudeRawUsage;
     };
     delta?: {
       type?: string;
@@ -27,9 +37,54 @@ type ClaudeStreamEvent = {
       id?: string;
       tool_use_id?: string;
     };
+    usage?: ClaudeRawUsage;
   };
   result?: string;
 };
+
+export type ClaudeUsage = {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens?: number;
+  cacheCreationTokens?: number;
+};
+
+function normalizeUsage(raw: ClaudeRawUsage | undefined): ClaudeUsage | undefined {
+  if (raw === undefined) return undefined;
+  const inputTokens = typeof raw.input_tokens === "number" ? raw.input_tokens : undefined;
+  const outputTokens = typeof raw.output_tokens === "number" ? raw.output_tokens : undefined;
+  if (inputTokens === undefined && outputTokens === undefined) return undefined;
+  const usage: ClaudeUsage = {
+    inputTokens: inputTokens ?? 0,
+    outputTokens: outputTokens ?? 0,
+  };
+  if (typeof raw.cache_read_input_tokens === "number") {
+    usage.cacheReadTokens = raw.cache_read_input_tokens;
+  }
+  if (typeof raw.cache_creation_input_tokens === "number") {
+    usage.cacheCreationTokens = raw.cache_creation_input_tokens;
+  }
+  return usage;
+}
+
+// Merge incoming usage into the running total. Claude emits partial usage
+// counts during streaming (input_tokens once, output_tokens growing with
+// each chunk) and a final consolidated payload with the `result` event.
+// We keep the last non-undefined value for each field so the final totals
+// overwrite the partials cleanly.
+function mergeUsage(
+  previous: ClaudeUsage | undefined,
+  incoming: ClaudeUsage | undefined,
+): ClaudeUsage | undefined {
+  if (incoming === undefined) return previous;
+  if (previous === undefined) return { ...incoming };
+  return {
+    inputTokens: incoming.inputTokens > 0 ? incoming.inputTokens : previous.inputTokens,
+    outputTokens: incoming.outputTokens > 0 ? incoming.outputTokens : previous.outputTokens,
+    cacheReadTokens: incoming.cacheReadTokens ?? previous.cacheReadTokens,
+    cacheCreationTokens: incoming.cacheCreationTokens ?? previous.cacheCreationTokens,
+  };
+}
 
 export type ClaudePrintState = {
   buffer: string;
@@ -42,6 +97,7 @@ export type ClaudePrintState = {
   pendingToolUseIds: string[];
   messageStopped: boolean;
   stopReason: string;
+  usage: ClaudeUsage | undefined;
 };
 
 export function createClaudePrintState(): ClaudePrintState {
@@ -56,6 +112,7 @@ export function createClaudePrintState(): ClaudePrintState {
     pendingToolUseIds: [],
     messageStopped: false,
     stopReason: "",
+    usage: undefined,
   };
 }
 
@@ -115,6 +172,15 @@ export function consumeClaudePrintChunk(
     if (sessionId !== "" && sessionId !== nextState.sessionId) {
       nextState = { ...nextState, sessionId };
       handlers?.onSessionId?.(sessionId);
+    }
+
+    const incomingUsage =
+      normalizeUsage(parsed.usage) ??
+      normalizeUsage(parsed.message?.usage) ??
+      normalizeUsage(parsed.event?.usage) ??
+      normalizeUsage(parsed.event?.message?.usage);
+    if (incomingUsage !== undefined) {
+      nextState = { ...nextState, usage: mergeUsage(nextState.usage, incomingUsage) };
     }
 
     if (parsed.type === "stream_event" && parsed.event?.type === "message_start") {
@@ -255,6 +321,10 @@ export function consumeClaudePrintChunk(
 
 export function finalizeClaudePrintOutput(state: ClaudePrintState): string {
   return state.finalText || state.streamedText.trim() || state.assistantText.trim();
+}
+
+export function getClaudePrintUsage(state: ClaudePrintState): ClaudeUsage | undefined {
+  return state.usage;
 }
 
 export function getClaudePrintRecoveryMode(

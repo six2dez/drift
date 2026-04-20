@@ -102,6 +102,7 @@ export function createHttpContextAttachment(
     source: payload.source,
     label: payload.label,
     size: payload.raw.length,
+    content: payload.raw,
   };
 }
 

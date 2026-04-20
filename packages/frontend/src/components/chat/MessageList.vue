@@ -10,6 +10,7 @@ defineProps<{
 
 const emit = defineEmits<{
   "use-example": [text: string];
+  "preview-attachment": [attachment: NonNullable<ChatMessage["httpContextAttachment"]>];
 }>();
 </script>
 
@@ -56,6 +57,11 @@ const emit = defineEmits<{
         </div>
       </div>
     </div>
-    <MessageBubble v-for="msg in messages" :key="msg.id" :message="msg" />
+    <MessageBubble
+      v-for="msg in messages"
+      :key="msg.id"
+      :message="msg"
+      @preview-attachment="(payload) => emit('preview-attachment', payload)"
+    />
   </div>
 </template>

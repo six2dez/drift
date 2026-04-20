@@ -7,15 +7,20 @@ import MessageList from "../components/chat/MessageList.vue";
 import ChatInput from "../components/chat/ChatInput.vue";
 import CliStatus from "../components/chat/CliStatus.vue";
 import ChatSidebar from "../components/chat/ChatSidebar.vue";
+import ApprovalDialog from "../components/chat/ApprovalDialog.vue";
+import AttachmentPreview from "../components/chat/AttachmentPreview.vue";
 import { useSDK } from "../plugins/sdk";
 import { useChatStore } from "../stores/chat";
 import { useSettingsStore } from "../stores/settings";
+import { useApprovalsStore } from "../stores/approvals";
 import {
   CliProvider,
   CLI_PROVIDER_DISPLAY_NAMES,
   type ChatMessage,
   type CliOutputChunkEvent,
   type CliSessionStateEvent,
+  type HttpContextAttachment,
+  type McpToolApprovalRequest,
   type McpToolApprovalRequestEvent,
 } from "shared";
 import {
@@ -29,13 +34,20 @@ import { EMPTY_CHAT_WORKFLOWS } from "../chat-workflows";
 const sdk = useSDK();
 const chatStore = useChatStore();
 const settingsStore = useSettingsStore();
+const approvalsStore = useApprovalsStore();
 
 const isStreaming = ref(false);
 const streamingContent = ref("");
 const errorMessage = ref<string | undefined>(undefined);
 const messagesContainer = ref<HTMLElement | undefined>(undefined);
+const pendingApproval = ref<McpToolApprovalRequest | null>(null);
+const previewingAttachment = ref<HttpContextAttachment | null>(null);
+const isNearBottom = ref(true);
+const lastFailedInput = ref<PendingChatInput | undefined>(undefined);
 const cancelledSessionIds = new Set<string>();
 let currentTurnId = 0;
+type ApprovalDecision = { approved: boolean; remember: "once" | "session" };
+let pendingApprovalResolver: ((decision: ApprovalDecision) => void) | null = null;
 
 let messageCounter = Date.now();
 let eventUnsubs: Array<{ stop: () => void }> = [];
@@ -103,9 +115,23 @@ watch(() => chatStore.activeChatId, (chatId) => {
 });
 
 function scrollToBottom() {
+  // Auto-scroll only when the user is already near the bottom — respect the
+  // user's scroll position when they are reading older context.
+  if (!isNearBottom.value) return;
+  forceScrollToBottom();
+}
+
+function forceScrollToBottom() {
   if (messagesContainer.value !== undefined) {
     messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight;
+    isNearBottom.value = true;
   }
+}
+
+function handleMessagesScroll() {
+  if (messagesContainer.value === undefined) return;
+  const el = messagesContainer.value;
+  isNearBottom.value = el.scrollTop + el.clientHeight >= el.scrollHeight - 40;
 }
 
 function handleOutputChunk(event: CliOutputChunkEvent) {
@@ -122,12 +148,23 @@ async function handleApprovalRequest(event: McpToolApprovalRequestEvent) {
     chatStore.activeChatId !== null
       ? chatStore.getSessionId(chatStore.activeChatId)
       : undefined;
-  const isActiveSession = currentSessionId !== undefined && currentSessionId === event.sessionId;
-  const approved = isActiveSession
-    ? window.confirm(
-      `${event.message}\n\nTool: ${event.toolLabel}\nGroup: ${event.group}\nArguments: ${event.argumentsSummary || "(none)"}`,
-    )
-    : false;
+  const isActiveSession =
+    currentSessionId !== undefined && currentSessionId === event.sessionId;
+
+  let approved: boolean;
+  if (!isActiveSession) {
+    approved = false;
+  } else if (
+    approvalsStore.isSessionApproved(event.sessionId, event.group, event.toolName)
+  ) {
+    approved = true;
+  } else {
+    const decision = await requestApprovalDecision(event);
+    approved = decision.approved;
+    if (decision.approved && decision.remember === "session") {
+      approvalsStore.allowForSession(event.sessionId, event.group, event.toolName);
+    }
+  }
 
   const result = await sdk.backend.respondToMcpToolApproval({
     sessionId: event.sessionId,
@@ -137,6 +174,34 @@ async function handleApprovalRequest(event: McpToolApprovalRequestEvent) {
   if (result.kind === "Error") {
     errorMessage.value = result.error;
   }
+}
+
+function requestApprovalDecision(event: McpToolApprovalRequest): Promise<ApprovalDecision> {
+  if (pendingApprovalResolver !== null) {
+    // The backend serializes approval requests per session, so this is defensive.
+    const prev = pendingApprovalResolver;
+    pendingApprovalResolver = null;
+    prev({ approved: false, remember: "once" });
+  }
+  return new Promise<ApprovalDecision>((resolve) => {
+    pendingApprovalResolver = resolve;
+    pendingApproval.value = event;
+  });
+}
+
+function handleApprovalDecision(decision: ApprovalDecision) {
+  pendingApproval.value = null;
+  const resolver = pendingApprovalResolver;
+  pendingApprovalResolver = null;
+  if (resolver !== null) resolver(decision);
+}
+
+function handlePreviewAttachment(attachment: HttpContextAttachment) {
+  previewingAttachment.value = attachment;
+}
+
+function handleClosePreview() {
+  previewingAttachment.value = null;
 }
 
 async function handleSend(text: string | PendingChatInput) {
@@ -150,6 +215,7 @@ async function handleSend(text: string | PendingChatInput) {
   isStreaming.value = true;
   streamingContent.value = "";
   errorMessage.value = undefined;
+  lastFailedInput.value = undefined;
   const chatId = chatStore.activeChatId;
   if (chatId === null) {
     isStreaming.value = false;
@@ -177,6 +243,7 @@ async function handleSend(text: string | PendingChatInput) {
       });
       if (result.kind === "Error") {
         errorMessage.value = result.error;
+        lastFailedInput.value = payload;
         return;
       }
       sid = result.value;
@@ -210,6 +277,7 @@ async function handleSend(text: string | PendingChatInput) {
         cancelledSessionIds.delete(sessionId);
       } else if (result.kind === "Error") {
         errorMessage.value = result.error;
+        lastFailedInput.value = payload;
       } else {
         const assistantMsg: ChatMessage = {
           id: `msg-${++messageCounter}`,
@@ -218,6 +286,7 @@ async function handleSend(text: string | PendingChatInput) {
           timestamp: Date.now(),
           providerId: currentProvider.value,
           mcpActivities: result.value.mcpActivities,
+          usage: result.value.usage,
         };
         chatStore.addMessage(chatId, assistantMsg);
       }
@@ -228,6 +297,7 @@ async function handleSend(text: string | PendingChatInput) {
     await chatStore.saveActiveChat();
   } catch (e) {
     errorMessage.value = String(e);
+    lastFailedInput.value = payload;
   } finally {
     await chatStore.refreshSessionState(chatId).catch(() => undefined);
     await settingsStore.refreshMcpStatus().catch(() => undefined);
@@ -242,10 +312,19 @@ async function handleSend(text: string | PendingChatInput) {
   }
 }
 
+function handleRetry() {
+  const payload = lastFailedInput.value;
+  if (payload === undefined) return;
+  errorMessage.value = undefined;
+  lastFailedInput.value = undefined;
+  void handleSend(payload);
+}
+
 async function handleCancel() {
   const chatId = chatStore.activeChatId;
   if (chatId === null) return;
   clearPendingChatInputQueue();
+  lastFailedInput.value = undefined;
   const sid = chatStore.getSessionId(chatId);
   if (sid !== undefined) {
     cancelledSessionIds.add(sid);
@@ -271,12 +350,14 @@ function handleNewChat() {
   chatStore.createChat(settingsStore.settings?.activeProvider ?? CliProvider.Claude);
   errorMessage.value = undefined;
   streamingContent.value = "";
+  lastFailedInput.value = undefined;
 }
 
 function handleSelectChat(chatId: string) {
   chatStore.activeChatId = chatId;
   errorMessage.value = undefined;
   streamingContent.value = "";
+  lastFailedInput.value = undefined;
 }
 
 async function handleDeleteChat(chatId: string) {
@@ -378,6 +459,10 @@ function handleProviderChange(provider: string) {
 defineExpose({
   handleSend,
   handleCancel,
+  handleRetry,
+  handleApprovalRequest,
+  pendingApproval,
+  lastFailedInput,
   isStreaming,
   streamingContent,
   errorMessage,
@@ -459,6 +544,14 @@ defineExpose({
         >
           <span class="flex-1">{{ errorMessage }}</span>
           <Button
+            v-if="lastFailedInput !== undefined"
+            label="Retry"
+            text
+            size="small"
+            severity="secondary"
+            @click="handleRetry"
+          />
+          <Button
             label="Dismiss"
             text
             size="small"
@@ -468,33 +561,49 @@ defineExpose({
         </div>
 
         <!-- Messages -->
-        <div ref="messagesContainer" class="flex-1 overflow-y-auto">
-          <MessageList
-            :messages="chatStore.activeMessages"
-            :workflows="EMPTY_CHAT_WORKFLOWS"
-            @use-example="handleSend"
-          />
-          <div v-if="isStreaming" class="px-4 pb-2">
-            <div
-              v-if="streamingContent !== ''"
-              class="max-w-[85%] px-3 py-2 rounded-lg text-sm whitespace-pre-wrap bg-surface-700 text-surface-100 border border-surface-600"
-            >
-              {{ streamingContent }}<span class="animate-pulse text-primary-400">|</span>
-            </div>
-            <div v-else class="flex items-center gap-2 text-xs text-surface-400 py-3 px-1">
-              <span class="flex gap-1">
-                <span class="w-1.5 h-1.5 rounded-full bg-primary-500 animate-bounce" style="animation-delay: 0ms;" />
-                <span class="w-1.5 h-1.5 rounded-full bg-primary-500 animate-bounce" style="animation-delay: 150ms;" />
-                <span class="w-1.5 h-1.5 rounded-full bg-primary-500 animate-bounce" style="animation-delay: 300ms;" />
-              </span>
-              Waiting for {{ currentProviderName }}...
+        <div class="flex-1 relative overflow-hidden">
+          <div
+            ref="messagesContainer"
+            class="h-full overflow-y-auto"
+            @scroll.passive="handleMessagesScroll"
+          >
+            <MessageList
+              :messages="chatStore.activeMessages"
+              :workflows="EMPTY_CHAT_WORKFLOWS"
+              @use-example="handleSend"
+              @preview-attachment="handlePreviewAttachment"
+            />
+            <div v-if="isStreaming" class="px-4 pb-2">
+              <div
+                v-if="streamingContent !== ''"
+                class="max-w-[85%] px-3 py-2 rounded-lg text-sm whitespace-pre-wrap bg-surface-700 text-surface-100 border border-surface-600"
+              >
+                {{ streamingContent }}<span class="animate-pulse text-primary-400">|</span>
+              </div>
+              <div v-else class="flex items-center gap-2 text-xs text-surface-400 py-3 px-1">
+                <span class="flex gap-1">
+                  <span class="w-1.5 h-1.5 rounded-full bg-primary-500 animate-bounce" style="animation-delay: 0ms;" />
+                  <span class="w-1.5 h-1.5 rounded-full bg-primary-500 animate-bounce" style="animation-delay: 150ms;" />
+                  <span class="w-1.5 h-1.5 rounded-full bg-primary-500 animate-bounce" style="animation-delay: 300ms;" />
+                </span>
+                Waiting for {{ currentProviderName }}...
+              </div>
             </div>
           </div>
+          <button
+            v-if="!isNearBottom && (chatStore.activeMessages.length > 0 || streamingContent !== '')"
+            class="absolute bottom-4 right-4 z-10 rounded-full bg-primary-600 text-white px-3 py-1.5 text-xs shadow-lg hover:bg-primary-500 flex items-center gap-1.5"
+            @click="forceScrollToBottom"
+          >
+            <i class="fas fa-arrow-down" />
+            New content
+          </button>
         </div>
 
         <ChatInput
           :provider="currentProvider"
           :is-streaming="isStreaming"
+          :has-messages="chatStore.activeMessages.length > 0"
           @send="handleSend"
           @cancel="handleCancel"
           @update:provider="handleProviderChange"
@@ -502,4 +611,6 @@ defineExpose({
       </div>
     </SplitterPanel>
   </Splitter>
+  <ApprovalDialog :event="pendingApproval" @decide="handleApprovalDecision" />
+  <AttachmentPreview :attachment="previewingAttachment" @close="handleClosePreview" />
 </template>

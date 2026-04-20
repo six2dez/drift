@@ -5,6 +5,7 @@ import {
   didClaudeStopWithoutResult,
   finalizeClaudePrintOutput,
   getClaudePrintRecoveryMode,
+  getClaudePrintUsage,
 } from "./claude-print";
 
 describe("claude print parsing", () => {
@@ -320,6 +321,52 @@ describe("claude print parsing", () => {
     expect(state.pendingToolUseIds).toEqual([]);
     expect(getClaudePrintRecoveryMode(state)).toBe("streamed");
     expect(finalizeClaudePrintOutput(state)).toBe("Done after tools");
+  });
+
+  it("captures usage tokens from the final result event", () => {
+    const chunk = `${JSON.stringify({
+      type: "assistant",
+      session_id: "session-usage",
+      message: {
+        content: [{ type: "text", text: "done" }],
+        usage: {
+          input_tokens: 1200,
+          output_tokens: 450,
+          cache_read_input_tokens: 800,
+        },
+      },
+    })}\n${JSON.stringify({
+      type: "result",
+      subtype: "success",
+      session_id: "session-usage",
+      result: "done",
+      usage: {
+        input_tokens: 1210,
+        output_tokens: 460,
+        cache_read_input_tokens: 800,
+        cache_creation_input_tokens: 100,
+      },
+    })}\n`;
+    const state = consumeClaudePrintChunk(createClaudePrintState(), chunk);
+    expect(getClaudePrintUsage(state)).toEqual({
+      inputTokens: 1210,
+      outputTokens: 460,
+      cacheReadTokens: 800,
+      cacheCreationTokens: 100,
+    });
+  });
+
+  it("returns undefined usage when the stream did not report tokens", () => {
+    const state = consumeClaudePrintChunk(
+      createClaudePrintState(),
+      `${JSON.stringify({
+        type: "result",
+        subtype: "success",
+        session_id: "session-no-usage",
+        result: "hi",
+      })}\n`,
+    );
+    expect(getClaudePrintUsage(state)).toBeUndefined();
   });
 
   it("exposes streamed recovery mode when Claude has visible text but no result", () => {

@@ -2,6 +2,7 @@ import { defineStore } from "pinia";
 import { ref, computed } from "vue";
 import type { ChatMessage, CliSessionStateEvent, StoredChat } from "shared";
 import { useSDK } from "../plugins/sdk";
+import { useApprovalsStore } from "./approvals";
 import { INIT_REQUEST_TIMEOUT_MS, withTimeout } from "../utils/promise-timeout";
 
 const DEFAULT_CHAT_TITLE = "New Chat";
@@ -69,6 +70,7 @@ function deriveChatTitle(message: ChatMessage): string {
 
 export const useChatStore = defineStore("chat", () => {
   const sdk = useSDK();
+  const approvalsStore = useApprovalsStore();
 
   const chats = ref<StoredChat[]>([]);
   const activeChatId = ref<string | null>(null);
@@ -146,7 +148,18 @@ export const useChatStore = defineStore("chat", () => {
     const chat = chats.value.find((entry) => entry.id === chatId);
     if (chat === undefined) return;
     try {
-      const result = await sdk.backend.saveChat(chat);
+      // Strip the in-memory attachment `content` before persisting so HTTP
+      // bodies do not end up in storage. The chip in the bubble stays visible
+      // after reload, but clicking preview is disabled when content is missing.
+      const persistable: StoredChat = {
+        ...chat,
+        messages: chat.messages.map((m) => {
+          if (m.httpContextAttachment?.content === undefined) return m;
+          const { content: _content, ...rest } = m.httpContextAttachment;
+          return { ...m, httpContextAttachment: rest };
+        }),
+      };
+      const result = await sdk.backend.saveChat(persistable);
       if (result.kind === "Error") {
         setPersistenceError(`Failed to persist the chat. Changes remain in memory only. ${result.error}`);
         return;
@@ -173,6 +186,8 @@ export const useChatStore = defineStore("chat", () => {
     } catch (error) {
       setPersistenceError(`Failed to delete the chat from persistent storage. The chat was removed only from the current session. ${String(error)}`);
     }
+    const sid = sessionIds.value[chatId];
+    if (sid !== undefined) approvalsStore.clearForSession(sid);
     chats.value = chats.value.filter((c) => c.id !== chatId);
     delete sessionIds.value[chatId];
     delete sessionStates.value[chatId];
@@ -248,6 +263,7 @@ export const useChatStore = defineStore("chat", () => {
     } catch (error) {
       setPersistenceError(`Failed to close the CLI session cleanly for chat ${chatId}. ${String(error)}`, "warning");
     } finally {
+      approvalsStore.clearForSession(sid);
       delete sessionIds.value[chatId];
     }
   }

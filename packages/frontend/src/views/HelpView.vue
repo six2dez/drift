@@ -168,6 +168,27 @@ import Card from "primevue/card";
       </template>
     </Card>
 
+    <h2 class="text-lg font-semibold text-surface-100 mb-3">Provider maturity</h2>
+    <Card :pt="{ body: { class: 'p-3' }, content: { class: 'p-0' } }" class="mb-6">
+      <template #content>
+        <ul class="text-sm text-surface-300 leading-relaxed list-disc pl-5 space-y-1">
+          <li>
+            <span class="font-medium text-surface-100">Claude Code — Stable.</span>
+            Structured <span class="font-mono">stream-json</span> parser,
+            dedicated tests, session resume across turns, watchdog-based
+            recovery when the child goes silent.
+          </li>
+          <li>
+            <span class="font-medium text-surface-100">Gemini / Codex / Copilot — Experimental.</span>
+            Functional today but depend on each upstream CLI's text output;
+            an upstream change can break parsing silently. Run the live MCP
+            test in Settings before trusting an experimental provider for
+            production work.
+          </li>
+        </ul>
+      </template>
+    </Card>
+
     <h2 class="text-lg font-semibold text-surface-100 mb-3">Troubleshooting</h2>
     <Card :pt="{ body: { class: 'p-3' }, content: { class: 'p-0' } }" class="mb-6">
       <template #content>
@@ -177,12 +198,29 @@ import Card from "primevue/card";
               CLI provider shows as unavailable
             </div>
             <div class="mt-1 text-xs text-surface-300 leading-relaxed">
-              Drift could not resolve the binary. Fix: install the CLI, or in
-              Settings → CLI Providers type the absolute path in the
-              <span class="font-mono">Command</span> field (e.g.
-              <span class="font-mono">/Users/you/.local/bin/claude</span>).
-              Click Refresh afterwards.
+              Drift could not resolve the binary. Install the provider you
+              want, or set the absolute path in
+              <span class="font-mono">Settings → CLI Providers → Command</span>.
+              Install commands Drift suggests in its error messages:
             </div>
+            <ul class="mt-1 text-xs text-surface-300 list-disc pl-5 space-y-0.5">
+              <li>
+                <span class="font-medium text-surface-100">Claude Code:</span>
+                <span class="font-mono">curl -fsSL https://claude.ai/install.sh | bash</span>
+              </li>
+              <li>
+                <span class="font-medium text-surface-100">Gemini CLI:</span>
+                <span class="font-mono">npm install -g @google/gemini-cli</span>
+              </li>
+              <li>
+                <span class="font-medium text-surface-100">Codex CLI:</span>
+                <span class="font-mono">npm install -g @openai/codex</span>
+              </li>
+              <li>
+                <span class="font-medium text-surface-100">Copilot CLI:</span>
+                <span class="font-mono">gh extension install github/gh-copilot</span>
+              </li>
+            </ul>
           </div>
 
           <div class="rounded border border-surface-700 px-3 py-2">

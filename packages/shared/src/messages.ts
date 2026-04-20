@@ -16,6 +16,17 @@ export type HttpContextAttachment = {
   source: HttpContextSource;
   label: string;
   size: number;
+  // Raw attached text. Kept in-memory only for the current chat session so the
+  // user can preview what the agent received; stripped before persistence so
+  // reloading the plugin does not leak large HTTP bodies into storage.
+  content?: string;
+};
+
+export type ChatMessageUsage = {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens?: number;
+  cacheCreationTokens?: number;
 };
 
 export type ChatMessage = {
@@ -26,6 +37,7 @@ export type ChatMessage = {
   providerId: string;
   httpContextAttachment?: HttpContextAttachment;
   mcpActivities?: McpToolActivity[];
+  usage?: ChatMessageUsage;
 };
 
 export type StoredChat = {
@@ -91,6 +103,7 @@ export type SendCliMessageInput = {
 export type SendCliMessageOutput = {
   content: string;
   mcpActivities: McpToolActivity[];
+  usage?: ChatMessageUsage;
 };
 
 export type SupportBundleOutput = {
