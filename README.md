@@ -129,6 +129,12 @@ The analysis actions keep the visible user prompt short and send the raw HTTP re
 - Session resume only works with Claude Code
 - Caido's QuickJS backend runtime restricts available Node.js modules
 
+## Screenshots
+
+<img width="3116" height="1955" alt="Screenshot 2026-04-20 at 17 58 17" src="https://github.com/user-attachments/assets/c3134a52-ce92-42f0-9f38-2b66c3fe0891" />
+<img width="3117" height="1948" alt="Screenshot 2026-04-20 at 17 59 38" src="https://github.com/user-attachments/assets/0c6b50ac-0736-4447-a3f8-b3cb8cc4be53" />
+
+
 ## Development
 
 ```bash
