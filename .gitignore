@@ -3,3 +3,9 @@ dist/
 *.zip
 .DS_Store
 *.log
+# Never commit the Ed25519 signing key. Only `public.pem` is intended to be
+# shared (in the Caido store submission); the private key belongs in a
+# GitHub Actions secret named PRIVATE_KEY.
+private.pem
+private_key.pem
+*.pem
