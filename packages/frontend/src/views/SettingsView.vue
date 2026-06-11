@@ -78,6 +78,10 @@ const permissionGroupLabels: Record<McpToolPermissionGroup, string> = {
   workflow: "Workflow",
 };
 
+const allToolGroupsDisabled = computed(() =>
+  permissionGroups.every((group) => !store.settings.mcpPermissions.enabledGroups[group]),
+);
+
 async function updateProviderCommand(providerId: string, command: string) {
   const providers = { ...store.settings.providers };
   const existing = providers[providerId];
@@ -509,6 +513,15 @@ async function toggleSensitiveConfirmations() {
             class="cursor-pointer"
             @click="togglePermissionGroup(group)"
           />
+        </div>
+        <div
+          v-if="allToolGroupsDisabled"
+          class="mt-3 rounded border border-amber-700 bg-amber-950 px-3 py-2 text-xs text-amber-300"
+        >
+          <i class="fas fa-triangle-exclamation mr-1" />
+          Every tool group is off. Drift still attaches the MCP server but exposes
+          <strong>no</strong> tools — the assistant cannot read history, send requests, or
+          create findings until you re-enable at least one group.
         </div>
         <div class="mt-3 text-xs text-surface-400">
           Enabled now: {{ store.mcpStatus?.toolCount ?? 0 }}/{{ store.mcpStatus?.supportedToolCount ?? 18 }} tools.
