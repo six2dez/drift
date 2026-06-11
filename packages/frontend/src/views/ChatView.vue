@@ -37,6 +37,10 @@ const settingsStore = useSettingsStore();
 const approvalsStore = useApprovalsStore();
 
 const isStreaming = ref(false);
+// The chat id the in-flight turn belongs to. Used to keep streaming output and
+// errors scoped to the chat that started the turn, so switching chats mid-turn
+// does not render another chat's streaming bubble or error banner.
+const streamingChatId = ref<string | null>(null);
 const streamingContent = ref("");
 const errorMessage = ref<string | undefined>(undefined);
 const messagesContainer = ref<HTMLElement | undefined>(undefined);
@@ -61,6 +65,11 @@ const currentProviderName = computed(() =>
 const currentSessionState = computed(() => chatStore.activeSessionState);
 const hasSession = computed(() =>
   chatStore.activeChatId !== null && chatStore.getSessionId(chatStore.activeChatId) !== undefined
+);
+// True only when the active chat is the one currently streaming a turn, so a
+// background turn does not paint its streaming bubble into the chat on screen.
+const isActiveChatStreaming = computed(() =>
+  isStreaming.value && streamingChatId.value === chatStore.activeChatId
 );
 
 onMounted(() => {
@@ -221,6 +230,10 @@ async function handleSend(text: string | PendingChatInput) {
     isStreaming.value = false;
     return;
   }
+  streamingChatId.value = chatId;
+  // The turn belongs to `chatId`; only mirror its error state into the shared
+  // banner while that chat is still on screen.
+  const isActiveChat = () => chatStore.activeChatId === chatId;
 
   const userMsg: ChatMessage = {
     id: `msg-${++messageCounter}`,
@@ -242,8 +255,10 @@ async function handleSend(text: string | PendingChatInput) {
         chatId,
       });
       if (result.kind === "Error") {
-        errorMessage.value = result.error;
-        lastFailedInput.value = payload;
+        if (isActiveChat()) {
+          errorMessage.value = result.error;
+          lastFailedInput.value = payload;
+        }
         return;
       }
       sid = result.value;
@@ -276,8 +291,10 @@ async function handleSend(text: string | PendingChatInput) {
       if (cancelledSessionIds.has(sessionId)) {
         cancelledSessionIds.delete(sessionId);
       } else if (result.kind === "Error") {
-        errorMessage.value = result.error;
-        lastFailedInput.value = payload;
+        if (isActiveChat()) {
+          errorMessage.value = result.error;
+          lastFailedInput.value = payload;
+        }
       } else {
         const assistantMsg: ChatMessage = {
           id: `msg-${++messageCounter}`,
@@ -296,13 +313,16 @@ async function handleSend(text: string | PendingChatInput) {
     await chatStore.refreshSessionState(chatId);
     await chatStore.saveActiveChat();
   } catch (e) {
-    errorMessage.value = String(e);
-    lastFailedInput.value = payload;
+    if (isActiveChat()) {
+      errorMessage.value = String(e);
+      lastFailedInput.value = payload;
+    }
   } finally {
     await chatStore.refreshSessionState(chatId).catch(() => undefined);
     await settingsStore.refreshMcpStatus().catch(() => undefined);
     if (myTurn === currentTurnId) {
       isStreaming.value = false;
+      streamingChatId.value = null;
       streamingContent.value = "";
       const next = consumePendingChatInput();
       if (next !== undefined) {
@@ -573,7 +593,7 @@ defineExpose({
               @use-example="handleSend"
               @preview-attachment="handlePreviewAttachment"
             />
-            <div v-if="isStreaming" class="px-4 pb-2">
+            <div v-if="isActiveChatStreaming" class="px-4 pb-2">
               <div
                 v-if="streamingContent !== ''"
                 class="max-w-[85%] px-3 py-2 rounded-lg text-sm whitespace-pre-wrap bg-surface-700 text-surface-100 border border-surface-600"

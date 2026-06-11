@@ -306,6 +306,38 @@ describe("ChatView integration", () => {
     expect(assistantMessages.at(-1)?.content).toBe("second attempt reply");
   });
 
+  it("does not surface a background turn's error in the chat that is now active", async () => {
+    const deferred = createDeferred();
+    mockSdk.backend.sendCliMessage.mockReturnValue(deferred.promise);
+
+    const wrapper = mountChatView();
+    const vm = wrapper.vm as unknown as {
+      handleSend: (text: string) => Promise<void>;
+      errorMessage: string | undefined;
+      lastFailedInput: unknown;
+    };
+    const chatStore = useChatStore();
+    chatStore.createChat("claude-cli");
+
+    // Start a turn in chat A, then switch to a different chat before it fails.
+    const sendPromise = vm.handleSend("message in chat A").catch(() => undefined);
+    await flushPromises();
+    expect(mockSdk.backend.sendCliMessage).toHaveBeenCalledTimes(1);
+
+    chatStore.createChat("claude-cli"); // active chat is now B
+    await nextTick();
+
+    // The background turn (chat A) fails after the switch.
+    deferred.resolve({ kind: "Error", value: undefined, error: "boom in A" });
+    await sendPromise;
+    await flushPromises();
+
+    // The error belongs to chat A, which is no longer on screen, so it must not
+    // paint into chat B's error banner.
+    expect(vm.errorMessage).toBe(undefined);
+    expect(vm.lastFailedInput).toBe(undefined);
+  });
+
   it("auto-denies approval requests for an inactive session", async () => {
     const wrapper = mountChatView();
     const vm = wrapper.vm as unknown as {
