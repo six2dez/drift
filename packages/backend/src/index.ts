@@ -1,5 +1,5 @@
 import type { DefineAPI, SDK, DefineEvents } from "caido:plugin";
-import { readFile, writeFile, open as openFile, stat, mkdir, rm, rename } from "fs/promises";
+import { readFile, writeFile, open as openFile, stat, mkdir, rm, rename, readdir } from "fs/promises";
 import { spawn, type ChildProcessWithoutNullStreams } from "child_process";
 import { Buffer } from "buffer";
 import path from "path";
@@ -260,9 +260,12 @@ async function fileExists(p: string): Promise<boolean> {
 }
 
 async function writeTemp(dir: string, name: string, content: string): Promise<string> {
-  await mkdir(dir, { recursive: true });
+  await mkdir(dir, { recursive: true, mode: 0o700 });
   const fp = path.join(dir, name);
-  await writeFile(fp, content);
+  // 0o600: these temp files can carry the Caido token (e.g. the Copilot MCP
+  // config embeds it). The 0o700 parent dir already blocks other users, but
+  // restrict the file too as defense-in-depth.
+  await writeFile(fp, content, { mode: 0o600 });
   return fp;
 }
 
@@ -303,7 +306,8 @@ async function writeLaunchScript(
   const scriptPath = path.join(mcpTempDir, name);
   const tempScriptPath = `${scriptPath}.tmp`;
   const content = renderExportExecScript(command, args, envVars);
-  await writeFile(tempScriptPath, content);
+  // 0o700: launch scripts export the Caido token and must be executable.
+  await writeFile(tempScriptPath, content, { mode: 0o700 });
   const chmodResult = await spawnAndWait("chmod", ["+x", tempScriptPath]);
   if (chmodResult.code !== 0) {
     await rm(tempScriptPath, { force: true });
@@ -605,7 +609,7 @@ async function createSessionRuntimeFiles(sessionId: string): Promise<{
 } | undefined> {
   if (mcpTempDir === undefined) return undefined;
 
-  await mkdir(mcpTempDir, { recursive: true });
+  await mkdir(mcpTempDir, { recursive: true, mode: 0o700 });
   const activityFilePath = path.join(mcpTempDir, `mcp-activity-${sessionId}.jsonl`);
   const approvalsFilePath = path.join(mcpTempDir, `mcp-approvals-${sessionId}.json`);
   await writeFile(activityFilePath, "");
@@ -761,6 +765,8 @@ async function writeMcpWrapper(
     renderExportExecScript(nodeExecutable, [mcpScriptPath], runtimeEnv, {
       passThroughArgs: true,
     }),
+    // 0o700: the wrapper exports the Caido token and must be executable.
+    { mode: 0o700 },
   );
   const chmodResult = await spawnAndWait("chmod", ["+x", tempWrapperPath]);
   if (chmodResult.code !== 0) {
@@ -1664,6 +1670,27 @@ async function cleanupMcpRuntime(
   await publishMcpStatus(sdk);
 }
 
+// Remove orphaned /tmp/drift-mcp-* dirs left by a previous run that did not
+// stop cleanly (crash, hard kill). Those dirs hold the token-bearing wrapper
+// scripts, so leaking them is a credential-exposure risk. Safe to run here:
+// startMcpServer is only entered when MCP is not already running, so any
+// existing drift-mcp-* dir other than the (about-to-be-replaced) current one
+// is genuinely orphaned.
+async function sweepOrphanedMcpTempDirs(sdk: BackendSDK): Promise<void> {
+  try {
+    const entries = await readdir("/tmp");
+    await Promise.all(
+      entries
+        .filter((name) => name.startsWith("drift-mcp-"))
+        .map((name) => path.join("/tmp", name))
+        .filter((dir) => dir !== mcpTempDir)
+        .map((dir) => rm(dir, { recursive: true, force: true }).catch(() => undefined)),
+    );
+  } catch (error) {
+    sdk.console.error(`[drift] Failed to sweep orphaned MCP temp dirs: ${String(error)}`);
+  }
+}
+
 async function startMcpServer(sdk: BackendSDK): Promise<Result<McpServerInfo>> {
   // Check prerequisites
   const caidoToken = getEffectiveCaidoToken();
@@ -1680,10 +1707,14 @@ async function startMcpServer(sdk: BackendSDK): Promise<Result<McpServerInfo>> {
     return err("MCP server script not found in plugin assets.");
   }
 
+  await sweepOrphanedMcpTempDirs(sdk);
+
   // Use /tmp for MCP configs - Caido plugin path has spaces ("Application Support")
-  // which breaks Claude Code's --mcp-config path parsing
+  // which breaks Claude Code's --mcp-config path parsing.
+  // 0o700 so other local users cannot read the token-bearing wrapper/config
+  // files written inside.
   mcpTempDir = `/tmp/drift-mcp-${genUUID()}`;
-  await mkdir(mcpTempDir, { recursive: true });
+  await mkdir(mcpTempDir, { recursive: true, mode: 0o700 });
 
   const mcpScriptLocal = path.join(mcpTempDir, "mcp-server.mjs");
   await writeFile(mcpScriptLocal, await readFile(mcpScript, "utf-8"));
