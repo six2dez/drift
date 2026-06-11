@@ -93,6 +93,16 @@ let pluginPath = "";
 let assetsPath = "";
 let currentSettings: Settings = { ...DEFAULT_SETTINGS };
 let currentChats: StoredChat[] = [];
+// Resolves once persisted settings + chats have finished loading. Handlers that
+// read or write currentSettings/currentChats await this so an early RPC — the
+// frontend pushes settings and loads chats during its own init — cannot race
+// the initial load. Before this gate, the load's late `.then` could clobber
+// freshly-pushed settings, or getChats could return an empty list and make the
+// UI auto-create a chat that hides the persisted ones.
+let markDataReady: () => void = () => {};
+const dataReady: Promise<void> = new Promise((resolve) => {
+  markDataReady = resolve;
+});
 const cliSessions = new Map<string, string>();        // chatId → cliSessionId (resume)
 let lastSpawnArgs: string[] = [];                     // for diagnostics
 const activeProcesses = new Map<string, ChildProcessWithoutNullStreams>(); // sessionId → ChildProcess
@@ -947,7 +957,8 @@ async function refreshProjectContext(sdk: BackendSDK): Promise<void> {
 
 // ── API: Settings ───────────────────────────────────────────────────
 
-function getSettings(_sdk: BackendSDK): Result<Settings> {
+async function getSettings(_sdk: BackendSDK): Promise<Result<Settings>> {
+  await dataReady;
   return ok(currentSettings);
 }
 
@@ -955,6 +966,7 @@ async function updateSettings(
   sdk: BackendSDK,
   input: Partial<Settings>
 ): Promise<Result<Settings>> {
+  await dataReady;
   const resetCliSessions =
     input.caidoApi !== undefined ||
     input.mcp !== undefined;
@@ -1724,15 +1736,18 @@ async function stopMcpServer(sdk: BackendSDK): Promise<Result<void>> {
 
 // ── API: Chats ──────────────────────────────────────────────────────
 
-function getChat(_sdk: BackendSDK, chatId: string): Result<StoredChat | undefined> {
+async function getChat(_sdk: BackendSDK, chatId: string): Promise<Result<StoredChat | undefined>> {
+  await dataReady;
   return ok(currentChats.find((c) => c.id === chatId));
 }
 
-function getChats(_sdk: BackendSDK): Result<StoredChat[]> {
+async function getChats(_sdk: BackendSDK): Promise<Result<StoredChat[]>> {
+  await dataReady;
   return ok(currentChats);
 }
 
 async function saveChat(_sdk: BackendSDK, chat: StoredChat): Promise<Result<void>> {
+  await dataReady;
   const idx = currentChats.findIndex((c) => c.id === chat.id);
   if (idx >= 0) {
     currentChats[idx] = chat;
@@ -1745,6 +1760,7 @@ async function saveChat(_sdk: BackendSDK, chat: StoredChat): Promise<Result<void
 }
 
 async function deleteChat(_sdk: BackendSDK, chatId: string): Promise<Result<void>> {
+  await dataReady;
   currentChats = currentChats.filter((c) => c.id !== chatId);
   cliSessions.delete(chatId);
   for (const [sessionId, snapshot] of sessionSnapshots.entries()) {
@@ -1773,6 +1789,7 @@ async function createCliSession(
   sdk: BackendSDK,
   input: { providerId: string; chatId: string }
 ): Promise<Result<string>> {
+  await dataReady;
   const status = await checkProvider(input.providerId);
   if (!status.available) {
     return err(formatProviderUnavailableMessage(input.providerId, `CLI not available: ${status.error}`));
@@ -1807,6 +1824,7 @@ async function sendCliMessage(
   }
 ): Promise<Result<SendCliMessageOutput>> {
   try {
+    await dataReady;
     await refreshProjectContext(sdk);
 
     const chat = currentChats.find((c) => c.id === input.chatId);
@@ -2913,14 +2931,16 @@ export function init(sdk: SDK<API, BackendEvents>) {
   // Load persisted data. Unknown keys from legacy installs (e.g. the
   // removed `scanner` block) are ignored by the type and dropped on
   // the next save.
-  loadJson<Settings>("settings", DEFAULT_SETTINGS).then((s) => {
-    currentSettings = { ...DEFAULT_SETTINGS, ...s };
-    sdk.console.log("[drift] settings loaded");
-  });
-  loadJson<StoredChat[]>("chats", []).then((c) => {
-    currentChats = c;
-    sdk.console.log(`[drift] ${c.length} chats loaded`);
-  });
+  void Promise.all([
+    loadJson<Settings>("settings", DEFAULT_SETTINGS).then((s) => {
+      currentSettings = { ...DEFAULT_SETTINGS, ...s };
+      sdk.console.log("[drift] settings loaded");
+    }),
+    loadJson<StoredChat[]>("chats", []).then((c) => {
+      currentChats = c;
+      sdk.console.log(`[drift] ${c.length} chats loaded`);
+    }),
+  ]).finally(() => markDataReady());
 
   // Register APIs
   sdk.api.register("getSettings", getSettings);
