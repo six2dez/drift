@@ -573,6 +573,10 @@ function buildMcpRuntimeEnv(input: {
     ...(getMcpContextFilePath() !== undefined
       ? { DRIFT_CONTEXT_FILE: getMcpContextFilePath()! }
       : {}),
+    // Signals to the MCP server that the allowlist is intentionally configured.
+    // With this set, an empty DRIFT_ALLOWED_TOOLS means "deny all" (every group
+    // disabled), not "allow all". See getAvailableTools() in mcp-server.mjs.
+    DRIFT_ALLOWLIST_ACTIVE: "1",
     DRIFT_ALLOWED_TOOLS: toolPolicy.allowedToolNames.join(","),
     DRIFT_CONFIRMATION_REQUIRED_TOOLS: toolPolicy.confirmationRequiredToolNames.join(","),
     DRIFT_CONFIRM_SENSITIVE_ACTIONS: toolPolicy.confirmSensitiveActions ? "1" : "0",
@@ -1866,10 +1870,10 @@ async function sendCliMessage(
 
     switch (providerId) {
       case "claude-cli": {
-        const claudeAllowedTools =
-          toolPolicy.allowedToolNames.length > 0
-            ? toolPolicy.allowedToolNames
-            : MCP_TOOL_NAMES;
+        // Use exactly the policy's allowed tools. An empty list (every group
+        // disabled) must restrict Claude to no Drift tools — never fall back to
+        // the full set, which would invert the user's deny-all intent.
+        const claudeAllowedTools = toolPolicy.allowedToolNames;
         const mcpScriptPath = getTempMcpScriptPath();
         const hasMcpAttached = mcpScriptPath !== undefined;
 

@@ -30,6 +30,13 @@ const CONFIRMATION_REQUIRED_TOOL_NAMES = new Set(
     .map((value) => value.trim())
     .filter((value) => value !== ""),
 );
+// The backend always sets DRIFT_ALLOWLIST_ACTIVE=1 when it wires the runtime,
+// so an empty DRIFT_ALLOWED_TOOLS means "the user disabled every permission
+// group" and must DENY all tools. Only when this flag is absent (the server
+// is run standalone / unconfigured) does an empty allowlist fall back to
+// exposing every tool. Without this distinction, turning every group off in
+// Settings would silently grant every tool (fail-open).
+const ALLOWLIST_ACTIVE = process.env.DRIFT_ALLOWLIST_ACTIVE === "1";
 
 // ── GraphQL client ──────────────────────────────────────────────────
 
@@ -603,7 +610,7 @@ const TOOL_METADATA = {
 };
 
 function getAvailableTools() {
-  if (ALLOWED_TOOL_NAMES.size === 0) return TOOLS;
+  if (!ALLOWLIST_ACTIVE && ALLOWED_TOOL_NAMES.size === 0) return TOOLS;
   return TOOLS.filter((tool) => ALLOWED_TOOL_NAMES.has(tool.name));
 }
 
