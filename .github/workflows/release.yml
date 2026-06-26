@@ -53,22 +53,22 @@ jobs:
           echo "${{ secrets.PRIVATE_KEY }}" > private_key.pem
           openssl pkeyutl -sign \
             -inkey private_key.pem \
-            -out drift.zip.sig \
-            -rawin -in drift.zip
+            -out plugin_package.zip.sig \
+            -rawin -in plugin_package.zip
           rm -f private_key.pem
 
       - name: Resolve plugin version
         id: meta
         working-directory: dist
         run: |
-          VERSION=$(unzip -p drift.zip manifest.json | python3 -c "import json,sys;print(json.load(sys.stdin)['version'])")
+          VERSION=$(unzip -p plugin_package.zip manifest.json | python3 -c "import json,sys;print(json.load(sys.stdin)['version'])")
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub release
         uses: caido/action-release@v1
         with:
-          tag: v${{ steps.meta.outputs.version }}
+          tag: ${{ steps.meta.outputs.version }}
           commit: ${{ github.sha }}
           body: "Drift v${{ steps.meta.outputs.version }}"
-          artifacts: "dist/drift.zip,dist/drift.zip.sig"
+          artifacts: "dist/plugin_package.zip,dist/plugin_package.zip.sig"
           immutableCreate: true
