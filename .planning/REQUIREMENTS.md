@@ -82,17 +82,50 @@ Explicitly excluded for this milestone. Documented to prevent scope creep.
 
 ## Traceability
 
-Which phases cover which requirements. Populated during roadmap creation.
+Which phases cover which requirements. Populated during roadmap creation. Every v1 requirement maps to exactly one phase.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| (to be filled by roadmapper) | | |
+| RUN-01 | Phase 3 | Pending |
+| RUN-02 | Phase 3 | Pending |
+| RUN-03 | Phase 2 | Pending |
+| RUN-04 | Phase 2 | Pending |
+| RUN-05 | Phase 2 | Pending |
+| HLT-01 | Phase 3 | Pending |
+| HLT-02 | Phase 3 | Pending |
+| RES-01 | Phase 4 | Pending |
+| RES-02 | Phase 4 | Pending |
+| RES-03 | Phase 4 | Pending |
+| PRV-01 | Phase 5 | Pending |
+| PRV-02 | Phase 5 | Pending |
+| PRV-03 | Phase 5 | Pending |
+| PRV-04 | Phase 5 | Pending |
+| LIF-01 | Phase 6 | Pending |
+| CI-01 | Phase 7 | Pending |
+| CI-02 | Phase 1 | Pending |
+| CI-03 | Phase 7 | Pending |
+| UX-01 | Phase 5 | Pending |
+| UX-02 | Phase 4 | Pending |
+| UX-03 | Phase 8 | Pending |
+| UX-04 | Phase 8 | Pending |
+| CMP-01 | Phase 3 | Pending |
+| CMP-02 | Phase 2 | Pending |
 
 **Coverage:**
-- v1 requirements: 22 total
-- Mapped to phases: (pending roadmap)
-- Unmapped: (pending roadmap)
+- v1 requirements: 24 enumerated REQ-IDs (the milestone summary cited "22 total"; the document enumerates 24 distinct IDs across RUN/HLT/RES/PRV/LIF/CI/UX/CMP — all are mapped)
+- Mapped to phases: 24
+- Unmapped: 0
+
+**Phase → requirement rollup:**
+- Phase 1 (CI Spike): CI-02
+- Phase 2 (Platform Foundation): RUN-03, RUN-04, RUN-05, CMP-02
+- Phase 3 (Kill Shell Wrappers): RUN-01, RUN-02, HLT-01, HLT-02, CMP-01
+- Phase 4 (Windows Command Resolution): RES-01, RES-02, RES-03, UX-02
+- Phase 5 (Provider Spawn & Registration): PRV-01, PRV-02, PRV-03, PRV-04, UX-01
+- Phase 6 (Process Lifecycle): LIF-01
+- Phase 7 (CI Hardening): CI-01, CI-03
+- Phase 8 (Windows Polish): UX-03, UX-04
 
 ---
 *Requirements defined: 2026-06-26*
-*Last updated: 2026-06-26 after initial definition*
+*Last updated: 2026-06-26 — traceability populated during roadmap creation*
