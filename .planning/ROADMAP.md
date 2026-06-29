@@ -38,7 +38,9 @@ Decimal phases appear between their surrounding integers in numeric order.
   2. The probe confirms `os.tmpdir()` returns a drive-lettered path that exists on disk and `os.platform()` returns `"win32"` inside the Caido backend runtime.
   3. The probe records the remaining assertions: `.cmd` direct-spawn behavior (EINVAL / runs / hangs), `where.exe` spawnability + CRLF output parse, bare `"os"` import resolution, `USERPROFILE`/`APPDATA`/`LOCALAPPDATA` presence, and `crypto.randomUUID` availability.
   4. Results are captured as a CI log/artifact that confirms the direct-spawn + env-injection architecture (or triggers the documented `.cmd`-launcher fallback) and feeds back to this roadmap before Phase 2 begins.
-**Plans**: 1 plan (provisional)
+**Plans**: 1 plan
+Plans:
+- [ ] 01-01-PLAN.md — Create probe script (7 LLRT assertions) and windows-latest CI spike job
 **Research flag**: YES — this phase IS the research. Its results resolve the LLRT unknowns all other phases depend on and must feed back before Phase 2.
 
 ### Phase 2: Platform Foundation
