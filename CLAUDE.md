@@ -70,8 +70,8 @@ Drift is a Caido plugin that turns the user's own local AI CLIs (Claude Code / G
 - Frontend uses `vue-tsc` for type-checking
 - `dist/plugin_package/` — produced by `caido-dev build`
 - `dist/drift.zip` — final deliverable created by the `build` script in root `package.json`; `packages/backend/assets/` is copied into `dist/plugin_package/backend/assets/` post-build
-- ESLint: `eslint ./packages/**/src --fix` (config file not detected in root; likely in individual packages or inherited)
-- Prettier 3.8.1: formats `*.{vue,ts,js,json}` files under `packages/**/src`
+- ESLint 10.8.1: flat config at `eslint.config.mjs` (repo root; `.mjs` because the root package is CommonJS-typed), covering TypeScript, Vue SFCs, `.mjs`, and test files. `pnpm lint` runs `eslint . --max-warnings 0` and never auto-fixes; `pnpm lint:fix` (`eslint . --fix`) is the local auto-fix entry point
+- Prettier 3.8.1: `pnpm format` formats `packages/**/src/**/*.{vue,ts,js,json}` plus root-level `*.{ts,mjs}`, which is what reaches `caido.config.ts`, `vitest.config.ts`, `vitest.setup.ts`, and `eslint.config.mjs`
 ## Platform Requirements
 - Node.js 20 (`.nvmrc`)
 - pnpm 9.x
@@ -109,10 +109,10 @@ Drift is a Caido plugin that turns the user's own local AI CLIs (Claude Code / G
 - `type` preferred over `interface` for object shapes; `interface` appears only in `persistence.ts` for duck-typed handle
 ## Code Style
 - Prettier 3.8.1 (`prettier` in root devDependencies)
-- Run: `pnpm format` — formats `packages/**/src/**/*.{vue,ts,js,json}`
+- Run: `pnpm format` — formats `packages/**/src/**/*.{vue,ts,js,json}` plus root-level `*.{ts,mjs}` (`caido.config.ts`, `vitest.config.ts`, `vitest.setup.ts`, `eslint.config.mjs`)
 - No `.prettierrc` committed — default Prettier settings apply (2-space indent, double quotes)
-- ESLint present (`pnpm lint` calls `eslint ./packages/**/src --fix`)
-- No project-level ESLint config file; relies on default rules
+- ESLint 10.8.1 flat config at `eslint.config.mjs` (root; `.mjs` because the root package is CommonJS-typed) — covers TypeScript, Vue SFCs, `.mjs`, and test files
+- `pnpm lint` runs `eslint . --max-warnings 0`; it never auto-fixes, so CI cannot silently rewrite the checkout and report success. `pnpm lint:fix` is the local auto-fix entry point
 - `pnpm typecheck` runs `tsc --noEmit` (backend) and `vue-tsc --noEmit` (frontend)
 - `index.ts` uses ASCII box headers to delimit logical sections:
 - Use this style when adding new top-level sections to `packages/backend/src/index.ts`
