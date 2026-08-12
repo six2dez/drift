@@ -707,7 +707,7 @@ async function writeApprovalDecision(
   approvalId: string,
   approved: boolean,
 ): Promise<void> {
-  let current: Record<string, ApprovalDecision> = {};
+  let current: Record<string, ApprovalDecision>;
   try {
     const raw = await readFile(approvalsFilePath, "utf-8");
     current = JSON.parse(raw) as Record<string, ApprovalDecision>;
