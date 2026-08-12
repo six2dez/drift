@@ -275,7 +275,7 @@ async function graphqlRaw(query, variables = {}, options = {}) {
     return json.data;
   } catch (error) {
     if (error?.name === "AbortError" && timeoutMs !== undefined) {
-      throw new Error(`GraphQL request timed out after ${timeoutMs}ms`);
+      throw new Error(`GraphQL request timed out after ${timeoutMs}ms`, { cause: error });
     }
     throw error;
   } finally {
