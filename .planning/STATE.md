@@ -2,11 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: planning
-stopped_at: Hardening phases prepended; Windows phases renumbered 1-8 → 3-10
-last_updated: "2026-08-12T10:43:14.850Z"
-last_activity: 2026-08-12 — Codebase review folded into roadmap (10 phases, 43/43 requirements mapped, 9 backlog items)
+status: executing
+stopped_at: Phase 1 planned — 6 plans in 3 waves, plan-checker clean
+last_updated: "2026-08-12T13:07:29.677Z"
+last_activity: 2026-08-12 -- Phase 1 planning complete
 progress:
+  # total_phases counts the 10 milestone phases only. The SDK's recompute counts
+  # the 11 backlog 999.x entries too (21); total_plans is likewise the roadmap's
+  # provisional sum, not the PLAN.md files currently on disk. Re-correct after any
+  # `state planned-phase` / `state patch` call.
   total_phases: 10
   completed_phases: 0
   total_plans: 18
@@ -26,9 +30,9 @@ See: .planning/PROJECT.md (updated 2026-06-26)
 ## Current Position
 
 Phase: 1 of 10 (Restore the Verification Signal)
-Plan: 0 of 2 in current phase
-Status: Ready to plan
-Last activity: 2026-08-12 — Codebase review folded into roadmap (10 phases, 43/43 requirements mapped, 9 backlog items)
+Plan: 0 of 6 in current phase
+Status: Ready to execute
+Last activity: 2026-08-12 -- Phase 1 planning complete
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -60,7 +64,7 @@ Progress: [░░░░░░░░░░] 0%
 Decisions are logged in PROJECT.md Key Decisions table.
 Recent decisions affecting current work:
 
-- [Review 2026-08-12]: A full-codebase review found the suite red on Node >= 22, `pnpm lint` never wired, and correctness/security defects shipping on macOS/Linux. Two hardening phases were prepended and the Windows phases renumbered 1-8 -> 3-10, so the port starts from a trustworthy CI signal.
+- [Review 2026-08-12]: A full-codebase review found the suite red on Node >= 25, `pnpm lint` never wired, and correctness/security defects shipping on macOS/Linux. Two hardening phases were prepended and the Windows phases renumbered 1-8 -> 3-10, so the port starts from a trustworthy CI signal. (The review's first diagnosis said Node >= 22; Phase 1 research corrected it to >= 25 — Node 25.0.0 unflagged Web Storage. The original wording made SIG-01 satisfiable without fixing anything.)
 - [Review 2026-08-12]: Phase 2 is scoped to avoid the spawn path Phases 5-8 rewrite. Review items that live in that code (POSIX process-tree kill, temp plumbing, buffer bounds) were folded into Phases 4 and 8 instead of Phase 2.
 - [Review 2026-08-12]: GSD has no "insert integer phase at the front" operation — `phase insert` only creates decimals and only `phase remove` renumbers. The renumber was done manually with explicit user authorization and verified with `validate consistency`.
 - [Roadmap]: Phase 3 is a CI spike — prove the 7 LLRT primitives on `windows-latest` before writing any port code; results feed back before Phase 4.
@@ -71,7 +75,7 @@ Recent decisions affecting current work:
 
 [From .planning/todos/pending/ — ideas captured during sessions]
 
-None yet. Nine review items are parked in the ROADMAP backlog (999.1-999.9).
+None yet. Eleven items are parked in the ROADMAP backlog (999.1-999.11): nine from the 2026-08-12 review, plus 999.10 (type-check the test files) and 999.11 (repo-wide Prettier sweep, which collides with the Phase 5-8 spawn-path fence) found during Phase 1 research and planning.
 
 ### Blockers/Concerns
 
@@ -99,5 +103,7 @@ Items acknowledged and carried forward from previous milestone close:
 ## Session Continuity
 
 Last session: 2026-08-12
-Stopped at: Hardening phases prepended; Windows phases renumbered 1-8 -> 3-10; requirements re-targeted
+Stopped at: Phase 1 planned — 6 plans in 3 waves; plan-checker converged 2/6 -> 2/4 -> 0 blockers
 Resume file: None
+
+**Before executing Phase 1:** `IMPROVEMENT-PLAN.md` is untracked at the repo root. Plan `01-06` (wave 3) asserts a globally clean `git status --porcelain` five times before pushing its scratch branch, so that file must be committed or removed first. It is the June 2026 review document, now fully absorbed into this roadmap.
