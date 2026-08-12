@@ -28,12 +28,12 @@
 
 **Formatting:**
 - Prettier 3.8.1 (`prettier` in root devDependencies)
-- Run: `pnpm format` — formats `packages/**/src/**/*.{vue,ts,js,json}`
+- Run: `pnpm format` — formats `packages/**/src/**/*.{vue,ts,js,json}` plus root-level `*.{ts,mjs}` (`caido.config.ts`, `vitest.config.ts`, `vitest.setup.ts`, `eslint.config.mjs`)
 - No `.prettierrc` committed — default Prettier settings apply (2-space indent, double quotes)
 
 **Linting:**
-- ESLint present (`pnpm lint` calls `eslint ./packages/**/src --fix`)
-- No project-level ESLint config file; relies on default rules
+- ESLint 10.8.1 flat config at `eslint.config.mjs` (root; `.mjs` because the root package is CommonJS-typed) — covers TypeScript, Vue SFCs, `.mjs`, and test files
+- `pnpm lint` runs `eslint . --max-warnings 0`; it never auto-fixes, so CI cannot silently rewrite the checkout and report success. `pnpm lint:fix` is the local auto-fix entry point
 - `pnpm typecheck` runs `tsc --noEmit` (backend) and `vue-tsc --noEmit` (frontend)
 
 **Section headers in large files:**

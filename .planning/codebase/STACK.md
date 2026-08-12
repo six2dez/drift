@@ -93,8 +93,8 @@
 - `dist/drift.zip` — final deliverable created by the `build` script in root `package.json`; `packages/backend/assets/` is copied into `dist/plugin_package/backend/assets/` post-build
 
 **Linting/Formatting:**
-- ESLint: `eslint ./packages/**/src --fix` (config file not detected in root; likely in individual packages or inherited)
-- Prettier 3.8.1: formats `*.{vue,ts,js,json}` files under `packages/**/src`
+- ESLint 10.8.1: flat config at `eslint.config.mjs` (repo root; `.mjs` because the root package is CommonJS-typed), covering TypeScript, Vue SFCs, `.mjs`, and test files. `pnpm lint` runs `eslint . --max-warnings 0` and never auto-fixes; `pnpm lint:fix` (`eslint . --fix`) is the local auto-fix entry point
+- Prettier 3.8.1: `pnpm format` formats `packages/**/src/**/*.{vue,ts,js,json}` plus root-level `*.{ts,mjs}`, which is what reaches `caido.config.ts`, `vitest.config.ts`, `vitest.setup.ts`, and `eslint.config.mjs`
 
 ## Platform Requirements
 
