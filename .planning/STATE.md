@@ -14,8 +14,8 @@ progress:
   total_phases: 10
   completed_phases: 0
   total_plans: 18
-  completed_plans: 3
-  percent: 17
+  completed_plans: 5
+  percent: 28
 ---
 
 # Project State
@@ -30,11 +30,11 @@ See: .planning/PROJECT.md (updated 2026-06-26)
 ## Current Position
 
 Phase: 01 (restore-the-verification-signal) — EXECUTING
-Plan: 3 of 6 (wave 1 complete: 01-01, 01-02, 01-03)
-Status: Executing Phase 01 — wave 2 next (01-04, 01-05)
-Last activity: 2026-08-12 -- Phase 01 wave 1 merged, post-merge gate green (23 files / 131 tests)
+Plan: 5 of 6 (waves 1-2 complete: 01-01..01-05)
+Status: Executing Phase 01 — wave 3 next (01-06, checkpoint plan, needs real pushed CI runs)
+Last activity: 2026-08-12 -- Phase 01 wave 2 merged; gate green: lint 0/0, typecheck, build, 23 files / 131 tests
 
-Progress: [█████░░░░░] 50%
+Progress: [████████░░] 83%
 
 ## Performance Metrics
 

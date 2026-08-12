@@ -57,8 +57,8 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 01-04-PLAN.md — Clear lint debt to 0/0, prove the gate bites, cross-version green gate on Node 22/24/26
-- [ ] 01-05-PLAN.md — ci.yml four-leg Node matrix on every branch + release.yml lint step
+- [x] 01-04-PLAN.md — Clear lint debt to 0/0, prove the gate bites, cross-version green gate on Node 22/24/26
+- [x] 01-05-PLAN.md — ci.yml four-leg Node matrix on every branch + release.yml lint step
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
@@ -244,7 +244,7 @@ Parallelism opportunities: Phase 2 may run alongside Phase 3 (both depend only o
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Restore the Verification Signal | 3/6 | In Progress|  |
+| 1. Restore the Verification Signal | 5/6 | In Progress|  |
 | 2. POSIX Correctness & Hardening | 0/3 | Not started | - |
 | 3. CI Spike — Prove LLRT Basics on Windows | 0/1 | Not started | - |
 | 4. Platform Foundation | 0/2 | Not started | - |
@@ -265,7 +265,7 @@ Unsequenced ideas from the 2026-08-12 codebase review. Not ready for active plan
 
 **Goal:** [Captured for future planning] `sendCliMessage` holds an RPC promise open for the entire turn, and Caido's runtime does not deliver `child_process` callbacks or run `setInterval` while an RPC awaits. Every pumping workaround exists because of this: the 1.5 s frontend keep-alive, `activeSelfTestPoll`, `sessionWatchdogs`, and the 250 ms heartbeat. Returning a `turnId` immediately and delivering results over the existing event channel would delete the whole problem class (~300 lines). Deliberately sequenced after the port — it collides head-on with Phases 5 and 8.
 **Requirements:** TBD
-**Plans:** 3/6 plans executed
+**Plans:** 5/6 plans executed
 
 Plans:
 
