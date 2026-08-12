@@ -13,9 +13,10 @@ export default defineConfig({
     },
   },
   test: {
-    environmentMatchGlobs: [
-      ["packages/frontend/src/views/**/*.test.ts", "happy-dom"],
-      ["packages/frontend/src/components/**/*.test.ts", "happy-dom"],
-    ],
+    // The per-glob environment mapping that used to live here was REMOVED in
+    // Vitest 4, not merely deprecated, so it was silently inert. Do not
+    // re-add it: every DOM test file already selects its environment with a
+    // line-1 `// @vitest-environment happy-dom` docblock.
+    setupFiles: ["./vitest.setup.ts"],
   },
 });
