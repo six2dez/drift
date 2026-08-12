@@ -1,4 +1,4 @@
-# Phase 1: CI Spike — Prove LLRT Basics on Windows — Research
+# Phase 3: CI Spike — Prove LLRT Basics on Windows — Research
 
 **Researched:** 2026-06-26
 **Domain:** GitHub Actions `windows-latest`, LLRT/QuickJS runtime, Node.js `child_process` on Windows
@@ -18,7 +18,7 @@
 
 ## Summary
 
-Phase 1 is a CI spike whose purpose is to empirically prove seven LLRT runtime primitives on a real Windows host before any production port code is written. The central planning question is: **what vehicle faithfully executes those assertions on `windows-latest` CI when Caido's LLRT runtime cannot be booted standalone?**
+Phase 3 is a CI spike whose purpose is to empirically prove seven LLRT runtime primitives on a real Windows host before any production port code is written. The central planning question is: **what vehicle faithfully executes those assertions on `windows-latest` CI when Caido's LLRT runtime cannot be booted standalone?**
 
 **The standalone LLRT vehicle is NOT available on windows-latest.** The upstream `awslabs/llrt` project dropped its Windows binary at v0.6.0-beta (commit `4ed0ac1`, July 2025). `caido/dependency-llrt` has no published binary releases at all. There is no pre-built LLRT executable that can be downloaded and invoked as `llrt probe.mjs` in GitHub Actions.
 
@@ -28,7 +28,7 @@ Phase 1 is a CI spike whose purpose is to empirically prove seven LLRT runtime p
 
 The LLRT source also confirms that both `"os"` and `"node:os"` import specifiers work identically: the module resolver strips the `node:` prefix before lookup (`name.trim_start_matches("node:")`). The `os` module is fully documented. All seven assertions can therefore be answered meaningfully by a Node.js probe.
 
-**Primary recommendation:** Create one new file: a self-contained probe script at `scripts/windows-llrt-probe.mjs` and one new CI workflow `.github/workflows/windows-llrt-probe.yml`. The probe runs all 7 assertions, emits machine-parseable `PASS/FAIL` lines, exits non-zero only on P0 failures (the `env`-passthrough and `os.tmpdir()` assertions), and uploads its full output as an artifact for review before Phase 2.
+**Primary recommendation:** Create one new file: a self-contained probe script at `scripts/windows-llrt-probe.mjs` and one new CI workflow `.github/workflows/windows-llrt-probe.yml`. The probe runs all 7 assertions, emits machine-parseable `PASS/FAIL` lines, exits non-zero only on P0 failures (the `env`-passthrough and `os.tmpdir()` assertions), and uploads its full output as an artifact for review before Phase 4.
 
 ---
 
@@ -41,14 +41,14 @@ The LLRT source also confirms that both `"os"` and `"node:os"` import specifiers
 | OS-info assertions | Node.js `os` module | Same surface as LLRT `os` module | Both call Windows OS APIs directly |
 | `.cmd` EINVAL assertion | Node.js `child_process` | CVE-2024-27980 guard | Node.js IS the source of the EINVAL guard Drift must handle |
 | `where.exe` assertion | Windows built-in | Spawned as child process | `where.exe` is on PATH on every Windows host |
-| CRLF artifact upload | GitHub Actions artifact | — | For human review before Phase 2 |
+| CRLF artifact upload | GitHub Actions artifact | — | For human review before Phase 4 |
 | Residual LLRT-only risk | Real Caido-on-Windows | Reporter machine only | Not achievable in CI without paid Caido Teams |
 
 ---
 
 ## Central Question Resolved: Which Vehicle for Each Assertion
 
-The crux of Phase 1 planning: **how do you execute the 7 assertions inside or faithfully approximating Caido's LLRT/QuickJS runtime when CI cannot boot Caido?**
+The crux of Phase 3 planning: **how do you execute the 7 assertions inside or faithfully approximating Caido's LLRT/QuickJS runtime when CI cannot boot Caido?**
 
 ### Vehicle 1: Standalone LLRT Binary — NOT AVAILABLE
 
@@ -183,7 +183,7 @@ This phase installs NO external packages. The probe uses only Node.js built-in m
         └── windows-llrt-probe.yml  # NEW: windows-latest CI spike job
 ```
 
-**Constraint:** Phase 1 MUST NOT touch any file under `packages/*/src`. The probe script is the only code file created.
+**Constraint:** Phase 3 MUST NOT touch any file under `packages/*/src`. The probe script is the only code file created.
 
 ### Pattern: Self-Contained Probe Script
 
@@ -200,7 +200,7 @@ This phase installs NO external packages. The probe uses only Node.js built-in m
 
 ```javascript
 // scripts/windows-llrt-probe.mjs
-// Phase 1 CI Spike — LLRT/Windows primitive probe
+// Phase 3 CI Spike — LLRT/Windows primitive probe
 // Vehicle: Node.js 20 on windows-latest (LLRT standalone binary unavailable)
 // Evidence: LLRT child_process uses CreateProcess (same as Node) for env passthrough.
 // Assertions use OS-level facts that hold regardless of runtime.
@@ -440,7 +440,7 @@ async function main() {
     process.exit(1);
   } else {
     console.log("");
-    console.log("PROBE PASSED: P0 assertions green — proceed to Phase 2.");
+    console.log("PROBE PASSED: P0 assertions green — proceed to Phase 4.");
     process.exit(0);
   }
 }
@@ -455,9 +455,9 @@ main().catch((err) => {
 
 ```yaml
 # .github/workflows/windows-llrt-probe.yml
-# Phase 1 CI Spike — proves 7 LLRT/Windows primitives before any port code is written.
+# Phase 3 CI Spike — proves 7 LLRT/Windows primitives before any port code is written.
 # This job is SEPARATE from the permanent CI (ci.yml); it is a one-time spike.
-# Phase 7 will create the permanent windows-latest build+vitest job.
+# Phase 9 will create the permanent windows-latest build+vitest job.
 
 name: Windows LLRT Primitive Probe
 
@@ -512,8 +512,8 @@ jobs:
 - `shell: bash` on the probe step — matches existing CI convention and works on windows-latest via Git Bash
 - `2>&1 | tee` — merges stderr into the artifact (FAIL lines go to stderr)
 - `if: always()` on artifact upload — captures output even if probe exits non-zero
-- `retention-days: 30` — long enough for the team to review before Phase 2 starts
-- Separate workflow file (not merged into `ci.yml`) — the spike is temporary; Phase 7 creates the permanent job
+- `retention-days: 30` — long enough for the team to review before Phase 4 starts
+- Separate workflow file (not merged into `ci.yml`) — the spike is temporary; Phase 9 creates the permanent job
 - `concurrency: cancel-in-progress` — matches ci.yml pattern
 
 ### Anti-Patterns to Avoid
@@ -556,8 +556,8 @@ jobs:
 ### Pitfall 3: Windows AV scan delays on fresh `.cmd` file write
 
 **What goes wrong:** P1-CMD creates a `.cmd` file in `os.tmpdir()` and immediately tries to spawn it. Windows Defender may hold a brief exclusive handle, causing `EPERM` or `EBUSY` instead of the expected `EINVAL`.
-**Why it happens:** Defender scans freshly-written executables. This is one of the exact pitfalls Phase 2 must handle (RUN-04).
-**How to avoid:** P1-CMD records whatever error occurs (`EINVAL`, `EPERM`, `EBUSY`, `ENOENT`). All are informational. If `EPERM`/`EBUSY`, note in the artifact that Phase 2's AV-retry is needed for this path too.
+**Why it happens:** Defender scans freshly-written executables. This is one of the exact pitfalls Phase 4 must handle (RUN-04).
+**How to avoid:** P1-CMD records whatever error occurs (`EINVAL`, `EPERM`, `EBUSY`, `ENOENT`). All are informational. If `EPERM`/`EBUSY`, note in the artifact that Phase 4's AV-retry is needed for this path too.
 
 ### Pitfall 4: `where.exe` not on PATH in `shell: bash`
 
@@ -580,7 +580,7 @@ jobs:
 
 ## Validation Architecture
 
-This section describes how each of the 7 LLRT assertions maps to concrete probe observations in CI. This feeds the VALIDATION.md for Phase 1.
+This section describes how each of the 7 LLRT assertions maps to concrete probe observations in CI. This feeds the VALIDATION.md for Phase 3.
 
 ### Assertion Map
 
@@ -597,7 +597,7 @@ This section describes how each of the 7 LLRT assertions maps to concrete probe 
 ### Exit Code Policy
 
 ```
-exit 0  → P0-ENV PASS and P0-TMP PASS → proceed to Phase 2 as planned
+exit 0  → P0-ENV PASS and P0-TMP PASS → proceed to Phase 4 as planned
 exit 1  → P0-ENV FAIL or P0-TMP FAIL  → trigger fallback design (documented in STACK.md)
            (P1/P2/P3 failures never cause exit 1)
 ```
@@ -613,17 +613,17 @@ Content: all stdout + stderr interleaved via `2>&1 | tee`. Each line is one of:
 
 **What the team reads from the artifact:**
 
-| P1-CMD result | Interpretation | Phase 2+ impact |
+| P1-CMD result | Interpretation | Phase 4+ impact |
 |---|---|---|
-| `FAIL [P1-CMD]: spawnError=EINVAL` | LLRT on Windows likely has the EINVAL guard too — `buildSpawnSpec` cmd.exe branch is mandatory | Phase 5: cmd.exe /c branch required |
-| `PASS [P1-CMD]: direct .cmd spawn succeeded` | LLRT may not have the EINVAL guard | Phase 5: cmd.exe /c still recommended (injection safety); document LLRT difference |
+| `FAIL [P1-CMD]: spawnError=EINVAL` | LLRT on Windows likely has the EINVAL guard too — `buildSpawnSpec` cmd.exe branch is mandatory | Phase 7: cmd.exe /c branch required |
+| `PASS [P1-CMD]: direct .cmd spawn succeeded` | LLRT may not have the EINVAL guard | Phase 7: cmd.exe /c still recommended (injection safety); document LLRT difference |
 | `PASS [P1-CMD]: spawnError=ENOENT` | Platform found no `.cmd` support at all | Investigate runner environment |
 | `PASS [P1-CMD]: spawnError=timeout` | .cmd hung without error | Use cmd.exe /c in production; direct spawn unreliable |
 
 | P1-WHERE result | Interpretation |
 |---|---|
 | First line ends `.exe` | node.exe is on PATH; where resolves correctly with extension |
-| First line ends `.cmd` | where found a .cmd shim first; prefer resolution by `where.exe /f node.exe` in Phase 4 |
+| First line ends `.cmd` | where found a .cmd shim first; prefer resolution by `where.exe /f node.exe` in Phase 6 |
 | Zero lines / FAIL | where.exe not spawnable from Node on windows-latest runner — investigate PATH |
 
 ### Framework: Standalone Script (not Vitest)
@@ -635,7 +635,7 @@ Content: all stdout + stderr interleaved via `2>&1 | tee`. Each line is one of:
 | Quick run (local) | `node scripts/windows-llrt-probe.mjs` |
 | Full run (CI) | `node scripts/windows-llrt-probe.mjs 2>&1 | tee probe-results.txt` |
 
-Rationale for not using Vitest: the probe uses async event-driven `child_process` patterns with safety timeouts; it must run on a different OS runner than the existing `pnpm exec vitest run` job; and it is a one-time spike, not a permanent regression test (that role goes to Phase 7).
+Rationale for not using Vitest: the probe uses async event-driven `child_process` patterns with safety timeouts; it must run on a different OS runner than the existing `pnpm exec vitest run` job; and it is a one-time spike, not a permanent regression test (that role goes to Phase 9).
 
 ---
 
@@ -680,7 +680,7 @@ Concretely:
 - **P2-OS risk:** Caido might register `os` under a different specifier. The Caido docs show `import { tmpdir } from "os"` style, so this risk is LOW.
 - **P1-CMD risk:** LLRT's Rust `StdCommand` does NOT implement the Node.js EINVAL guard. The EINVAL guard is in Node's `libuv`/`uv_spawn`. LLRT will likely throw a different error or succeed when spawning `.cmd` directly. **The `cmd.exe /c` approach is correct regardless.**
 
-**Mitigation:** The Phase 1 CI spike result, combined with the reporter testing Phase 3 output on a real Caido installation, resolves this. The ROADMAP.md already notes: "the maintainer cannot test native Windows locally; validation is CI + the original reporter confirming on a real machine."
+**Mitigation:** The Phase 3 CI spike result, combined with the reporter testing Phase 5 output on a real Caido installation, resolves this. The ROADMAP.md already notes: "the maintainer cannot test native Windows locally; validation is CI + the original reporter confirming on a real machine."
 
 Confidence that the probe is sufficient: HIGH. The OS-level mechanism (`CreateProcess` + environment block) is the same for both runtimes. The LLRT source confirms the `env` option is implemented. The risk is architecturally informed, not speculative.
 
@@ -718,16 +718,16 @@ Confidence that the probe is sufficient: HIGH. The OS-level mechanism (`CreatePr
 2. **What exact error does Windows `CreateProcess` return for a `.cmd` file?**
    - What we know: Windows `CreateProcess` on a `.cmd` file without `CREATE_NEW_CONSOLE` / shell invocation returns `ERROR_BAD_EXE_FORMAT` (193). Node maps this to EINVAL post-CVE-2024-27980.
    - What's unclear: How LLRT surfaces this Windows error at the JavaScript level — could be EINVAL, ENOENT, or a custom LLRT error.
-   - Recommendation: Probe records the raw `err.code` and `err.message`. Phase 5 plan handles all variants.
+   - Recommendation: Probe records the raw `err.code` and `err.message`. Phase 7 plan handles all variants.
 
-3. **Is Phase 1 workflow file meant to be permanent or removed after Phase 7?**
-   - Recommendation: Mark it as temporary in comments. Phase 7 creates the permanent `windows-latest` build+vitest job. After Phase 7 is complete and merged, `windows-llrt-probe.yml` can be removed or left as documentation of the spike findings. Decision is deferred to Phase 7.
+3. **Is Phase 3 workflow file meant to be permanent or removed after Phase 9?**
+   - Recommendation: Mark it as temporary in comments. Phase 9 creates the permanent `windows-latest` build+vitest job. After Phase 9 is complete and merged, `windows-llrt-probe.yml` can be removed or left as documentation of the spike findings. Decision is deferred to Phase 9.
 
 ---
 
 ## Security Domain
 
-Phase 1 creates no production code and processes no secrets. The probe uses a synthetic sentinel value (not a real token). Security domain is not applicable to this phase.
+Phase 3 creates no production code and processes no secrets. The probe uses a synthetic sentinel value (not a real token). Security domain is not applicable to this phase.
 
 ---
 
@@ -735,15 +735,15 @@ Phase 1 creates no production code and processes no secrets. The probe uses a sy
 
 From `./CLAUDE.md`:
 
-1. **Runtime constraint:** "Only use Node APIs Caido actually provides. Whether `os.tmpdir()` and `process.platform` are available in that runtime is an open research question for planning — confirm before relying on them." — Phase 1 IS the confirmation step. Probe result resolves this constraint.
+1. **Runtime constraint:** "Only use Node APIs Caido actually provides. Whether `os.tmpdir()` and `process.platform` are available in that runtime is an open research question for planning — confirm before relying on them." — Phase 3 IS the confirmation step. Probe result resolves this constraint.
 
 2. **Testing constraint:** "The maintainer cannot test native Windows locally. Validation is CI on `windows-latest` (build + vitest) plus, where possible, the original reporter confirming the fix on a real machine." — Probe is the mechanism for this validation.
 
-3. **Compatibility constraint:** "Must preserve existing macOS/Linux behavior." — Phase 1 adds no production code; existing CI (`ci.yml`) is unchanged. macOS/Linux unaffected.
+3. **Compatibility constraint:** "Must preserve existing macOS/Linux behavior." — Phase 3 adds no production code; existing CI (`ci.yml`) is unchanged. macOS/Linux unaffected.
 
-4. **Security constraint:** "Runtime temp files carry the Caido token. Windows ignores POSIX modes." — Not applicable to Phase 1 (no temp files with real tokens in probe).
+4. **Security constraint:** "Runtime temp files carry the Caido token. Windows ignores POSIX modes." — Not applicable to Phase 3 (no temp files with real tokens in probe).
 
-5. **No-POSIX rule (from REQUIREMENTS.md):** Phase 1 touches ONLY CI (`windows-latest` job) and the probe script. No `packages/*/src` edits. No POSIX-breaking changes.
+5. **No-POSIX rule (from REQUIREMENTS.md):** Phase 3 touches ONLY CI (`windows-latest` job) and the probe script. No `packages/*/src` edits. No POSIX-breaking changes.
 
 ---
 

@@ -1,5 +1,5 @@
 ---
-phase: 1
+phase: 3
 slug: ci-spike-prove-llrt-basics-on-windows
 status: draft
 nyquist_compliant: true
@@ -7,7 +7,7 @@ wave_0_complete: false
 created: 2026-06-26
 ---
 
-# Phase 1 — Validation Strategy
+# Phase 3 — Validation Strategy
 
 > Per-phase validation contract. This phase IS validation: it adds a `windows-latest` CI job whose probe empirically answers the 7 LLRT/Windows assertions. There is no src code to unit-test; the probe's PASS/FAIL output is the verification.
 
@@ -68,7 +68,7 @@ created: 2026-06-26
 
 - [ ] Probe asserts all 7 primitives and emits machine-parseable `PASS`/`FAIL: <reason>` lines
 - [ ] P0 assertions (env passthrough, `os.tmpdir`) gate the job exit code
-- [ ] `windows-latest` CI job is green (or its FAILs are documented and fed back to Phase 2)
+- [ ] `windows-latest` CI job is green (or its FAILs are documented and fed back to Phase 4)
 - [ ] No real Caido token printed in CI logs (dummy `SENTINEL` only)
 - [ ] `nyquist_compliant: true` set in frontmatter
 
