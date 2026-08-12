@@ -158,6 +158,15 @@ None — no external service configuration required.
 - `vitest.setup.ts` carries its own removal instruction; whoever upgrades to Vitest >= 5 should delete it and re-verify `sessionStorage`, which v5 still does not list in `OTHER_KEYS`.
 - No blockers.
 
+## Self-Check: PASSED
+
+- `vitest.setup.ts` — FOUND
+- `packages/frontend/src/__storage-shim.test.ts` — FOUND
+- `.planning/phases/01-restore-the-verification-signal/01-02-SUMMARY.md` — FOUND
+- Commit `4706558` — FOUND
+- Commit `8ae1961` — FOUND
+- Working tree clean; no changes to STATE.md or ROADMAP.md (orchestrator-owned).
+
 ---
 *Phase: 01-restore-the-verification-signal*
 *Completed: 2026-08-12*
