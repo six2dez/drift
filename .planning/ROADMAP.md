@@ -51,9 +51,9 @@ Decimal phases appear between their surrounding integers in numeric order.
 **Plans**: 6 plansPlans:
 **Wave 1**
 
-- [ ] 01-01-PLAN.md — Production storage guard in settings.ts + three guard unit tests (SIG-01e/f/g)
-- [ ] 01-02-PLAN.md — vitest.setup.ts Web Storage shim, setupFiles wiring, shim-inertness test (SIG-01i)
-- [ ] 01-03-PLAN.md — ESLint 10 toolchain: 8 exact-pinned devDeps, eslint.config.mjs, lint/lint:fix scripts, doc sync
+- [x] 01-01-PLAN.md — Production storage guard in settings.ts + three guard unit tests (SIG-01e/f/g)
+- [x] 01-02-PLAN.md — vitest.setup.ts Web Storage shim, setupFiles wiring, shim-inertness test (SIG-01i)
+- [x] 01-03-PLAN.md — ESLint 10 toolchain: 8 exact-pinned devDeps, eslint.config.mjs, lint/lint:fix scripts, doc sync
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -244,7 +244,7 @@ Parallelism opportunities: Phase 2 may run alongside Phase 3 (both depend only o
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Restore the Verification Signal | 0/6 | Not started | - |
+| 1. Restore the Verification Signal | 3/6 | In Progress|  |
 | 2. POSIX Correctness & Hardening | 0/3 | Not started | - |
 | 3. CI Spike — Prove LLRT Basics on Windows | 0/1 | Not started | - |
 | 4. Platform Foundation | 0/2 | Not started | - |
@@ -265,7 +265,7 @@ Unsequenced ideas from the 2026-08-12 codebase review. Not ready for active plan
 
 **Goal:** [Captured for future planning] `sendCliMessage` holds an RPC promise open for the entire turn, and Caido's runtime does not deliver `child_process` callbacks or run `setInterval` while an RPC awaits. Every pumping workaround exists because of this: the 1.5 s frontend keep-alive, `activeSelfTestPoll`, `sessionWatchdogs`, and the 250 ms heartbeat. Returning a `turnId` immediately and delivering results over the existing event channel would delete the whole problem class (~300 lines). Deliberately sequenced after the port — it collides head-on with Phases 5 and 8.
 **Requirements:** TBD
-**Plans:** 0 plans
+**Plans:** 3/6 plans executed
 
 Plans:
 

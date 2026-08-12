@@ -3,19 +3,19 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 1 planned — 6 plans in 3 waves, plan-checker clean
-last_updated: "2026-08-12T13:07:29.677Z"
-last_activity: 2026-08-12 -- Phase 1 planning complete
+stopped_at: Phase 1 planned — 6 plans in 3 waves; plan-checker converged 2/6 -> 2/4 -> 0 blockers
+last_updated: "2026-08-12T13:22:36.710Z"
+last_activity: 2026-08-12 -- Phase 01 execution started
 progress:
   # total_phases counts the 10 milestone phases only. The SDK's recompute counts
   # the 11 backlog 999.x entries too (21); total_plans is likewise the roadmap's
   # provisional sum, not the PLAN.md files currently on disk. Re-correct after any
-  # `state planned-phase` / `state patch` call.
+  # `state planned-phase` / `state patch` / `state begin-phase` call.
   total_phases: 10
   completed_phases: 0
   total_plans: 18
-  completed_plans: 0
-  percent: 0
+  completed_plans: 3
+  percent: 17
 ---
 
 # Project State
@@ -25,16 +25,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-26)
 
 **Core value:** The user's local AI CLI must reliably start, attach to Caido via the MCP server, and run tools against live Caido data — on native Windows as well as macOS/Linux.
-**Current focus:** Phase 1 — Restore the Verification Signal
+**Current focus:** Phase 01 — restore-the-verification-signal
 
 ## Current Position
 
-Phase: 1 of 10 (Restore the Verification Signal)
-Plan: 0 of 6 in current phase
-Status: Ready to execute
-Last activity: 2026-08-12 -- Phase 1 planning complete
+Phase: 01 (restore-the-verification-signal) — EXECUTING
+Plan: 3 of 6 (wave 1 complete: 01-01, 01-02, 01-03)
+Status: Executing Phase 01 — wave 2 next (01-04, 01-05)
+Last activity: 2026-08-12 -- Phase 01 wave 1 merged, post-merge gate green (23 files / 131 tests)
 
-Progress: [░░░░░░░░░░] 0%
+Progress: [█████░░░░░] 50%
 
 ## Performance Metrics
 
