@@ -212,6 +212,24 @@ Threat register dispositions, all `mitigate`, all applied:
 - `settings.ts:78` carries one of the 4 errors and is also touched by plan 01-01's SIG-01 guard in this same wave. Plan 01-04 folds the fix in, as planned.
 - `.nvmrc` (`20`), `engines.node` (`>=20`), and the `build` / `watch` / `typecheck` scripts were left untouched, as specified.
 
+## Self-Check: PASSED
+
+All 8 claimed files verified present on disk; all 3 claimed commits verified present in `git log`. Working tree clean after the final commit.
+
+| Claim | Result |
+|---|---|
+| `eslint.config.mjs` | FOUND |
+| `package.json` | FOUND |
+| `pnpm-lock.yaml` | FOUND |
+| `caido.config.ts` | FOUND |
+| `CLAUDE.md` | FOUND |
+| `.planning/codebase/STACK.md` | FOUND |
+| `.planning/codebase/CONVENTIONS.md` | FOUND |
+| `.planning/phases/01-restore-the-verification-signal/01-03-SUMMARY.md` | FOUND |
+| commit `d67e034` (Task 1) | FOUND |
+| commit `320da35` (Task 2) | FOUND |
+| commit `e6a7eef` (SUMMARY) | FOUND |
+
 ---
 *Phase: 01-restore-the-verification-signal*
 *Completed: 2026-08-12*
