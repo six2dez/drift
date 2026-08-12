@@ -62,7 +62,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 01-06-PLAN.md — CI proofs: first green matrix run, SIG-03e lint-failure proof, SIG-03f revert-proof, A7 hand-off
+- [x] 01-06-PLAN.md — CI proofs: first green matrix run, SIG-03e lint-failure proof, SIG-03f revert-proof, A7 hand-off
 
 **Research flag**: DONE — `01-RESEARCH.md` (2026-08-12). It corrected the brief: the failure appears on **Node ≥ 25**, not ≥ 22 (Node 25.0.0 unflagged Web Storage; measured 125/125 green on 22.23.2 and 24.13.0, 5 red on 26.7.0). Root cause is vitest's `getWindowKeys()` dropping any happy-dom window key that already exists on the Node global — `localStorage` is not in its allow-list, and is still absent in vitest 4.1.10, so upgrading does not help. Fix is a production guard **plus** a `vitest.setup.ts` shim (both measured green). Lint debt measured at 4 errors / 20 warnings — 0/0 after the recommended rule config.
 
@@ -244,7 +244,7 @@ Parallelism opportunities: Phase 2 may run alongside Phase 3 (both depend only o
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Restore the Verification Signal | 5/6 | In Progress|  |
+| 1. Restore the Verification Signal | 6/6 | In Progress (all plans executed; awaiting phase verification) |  |
 | 2. POSIX Correctness & Hardening | 0/3 | Not started | - |
 | 3. CI Spike — Prove LLRT Basics on Windows | 0/1 | Not started | - |
 | 4. Platform Foundation | 0/2 | Not started | - |

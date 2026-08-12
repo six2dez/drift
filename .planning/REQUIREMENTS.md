@@ -10,9 +10,9 @@ Requirements for the hardening + native-Windows milestone. Each maps to exactly 
 
 ### Signal (SIG) — added 2026-08-12
 
-- [ ] **SIG-01**: `pnpm exec vitest run` is green on Node 20, 22, 24 and **26**, and `window.localStorage` is accessed through a guard that tolerates an environment where storage is absent or throws *(amended 2026-08-12: the failure appears on Node ≥ 25, not ≥ 22 — a 20/22/24 matrix satisfies the original wording without fixing anything)*
-- [ ] **SIG-02**: `pnpm lint` invokes a real, installed ESLint with a committed flat config for TypeScript and Vue, passes with `--max-warnings 0`, and carries no `--fix` on the CI path; CI fails on lint errors
-- [ ] **SIG-03**: CI runs typecheck → lint → test → build on push and pull request for every branch, across a Node 20/22/24/**26** matrix with `fail-fast: false`, and the closure of the blind spot is proven by a revert-test on a scratch branch
+- [x] **SIG-01**: `pnpm exec vitest run` is green on Node 20, 22, 24 and **26**, and `window.localStorage` is accessed through a guard that tolerates an environment where storage is absent or throws *(amended 2026-08-12: the failure appears on Node ≥ 25, not ≥ 22 — a 20/22/24 matrix satisfies the original wording without fixing anything)*
+- [x] **SIG-02**: `pnpm lint` invokes a real, installed ESLint with a committed flat config for TypeScript and Vue, passes with `--max-warnings 0`, and carries no `--fix` on the CI path; CI fails on lint errors
+- [x] **SIG-03**: CI runs typecheck → lint → test → build on push and pull request for every branch, across a Node 20/22/24/**26** matrix with `fail-fast: false`, and the closure of the blind spot is proven by a revert-test on a scratch branch
 
 ### Correctness (COR) — added 2026-08-12
 
@@ -119,9 +119,9 @@ Which phases cover which requirements. Every v1 requirement maps to exactly one 
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| SIG-01 | Phase 1 | Pending |
-| SIG-02 | Phase 1 | Pending |
-| SIG-03 | Phase 1 | Pending |
+| SIG-01 | Phase 1 | Complete |
+| SIG-02 | Phase 1 | Complete |
+| SIG-03 | Phase 1 | Complete |
 | COR-01 | Phase 2 | Pending |
 | COR-02 | Phase 2 | Pending |
 | COR-03 | Phase 2 | Pending |

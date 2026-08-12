@@ -3,9 +3,9 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 1 planned — 6 plans in 3 waves; plan-checker converged 2/6 -> 2/4 -> 0 blockers
-last_updated: "2026-08-12T13:22:36.710Z"
-last_activity: 2026-08-12 -- Phase 01 execution started
+stopped_at: Completed 01-06-PLAN.md — all 6 Phase 1 plans executed; SIG-01/02/03 closed on real CI evidence
+last_updated: "2026-08-12T14:32:00.000Z"
+last_activity: 2026-08-12 -- Phase 01 wave 3 complete; three CI runs recorded, SIG-03f revert-proof passed
 progress:
   # total_phases counts the 10 milestone phases only. The SDK's recompute counts
   # the 11 backlog 999.x entries too (21); total_plans is likewise the roadmap's
@@ -14,8 +14,8 @@ progress:
   total_phases: 10
   completed_phases: 0
   total_plans: 18
-  completed_plans: 5
-  percent: 28
+  completed_plans: 6
+  percent: 33
 ---
 
 # Project State
@@ -30,30 +30,30 @@ See: .planning/PROJECT.md (updated 2026-06-26)
 ## Current Position
 
 Phase: 01 (restore-the-verification-signal) — EXECUTING
-Plan: 5 of 6 (waves 1-2 complete: 01-01..01-05)
-Status: Executing Phase 01 — wave 3 next (01-06, checkpoint plan, needs real pushed CI runs)
-Last activity: 2026-08-12 -- Phase 01 wave 2 merged; gate green: lint 0/0, typecheck, build, 23 files / 131 tests
+Plan: 6 of 6 (all waves complete: 01-01..01-06)
+Status: Phase 01 plans all executed — awaiting phase verification. SIG-01, SIG-02 and SIG-03 marked Complete in REQUIREMENTS.md, each backed by a recorded CI run.
+Last activity: 2026-08-12 -- Phase 01 wave 3 complete; matrix green on Node 20/22/24/26, lint gate proven to fail CI, SIG-03f revert-proof passed
 
-Progress: [████████░░] 83%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 0
-- Average duration: - min
-- Total execution time: 0.0 hours
+- Total plans completed: 6
+- Average duration: ~12 min
+- Total execution time: ~1.2 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| - | - | - | - |
+| 01 | 6 | ~72 min | ~12 min |
 
 **Recent Trend:**
 
-- Last 5 plans: -
-- Trend: -
+- Last 5 plans: 01-02, 01-03, 01-04 (12 min), 01-05 (6 min), 01-06 (21 min)
+- Trend: steady; 01-06 is the longest because it waits on three real CI runs and a three-Node local pre-flight
 
 *Updated after each plan completion*
 
@@ -70,6 +70,9 @@ Recent decisions affecting current work:
 - [Roadmap]: Phase 3 is a CI spike — prove the 7 LLRT primitives on `windows-latest` before writing any port code; results feed back before Phase 4.
 - [Roadmap]: Critical path to the blocking must-have (Claude on Windows, PRV-01) = Phases 1->3->4->5->6 + the provider-spawn slice of Phase 7.
 - [Roadmap]: CMP-01/CMP-02 are milestone invariants — every phase preserves macOS/Linux; POSIX launch path stays unchanged behind `os.platform()` guards.
+- [01-06]: A CI claim is recorded with its run URL, per-leg conclusion, per-step conclusion and the log line proving the mechanism — never just a green tick. Phase 3's `windows-latest` spike reuses this pattern verbatim (scratch branch → push → `gh run view --json jobs` → delete).
+- [01-06]: Version-discrimination proofs must assert the *negative* legs stay green. An all-red run discriminates nothing, which is why the `settings.ts` `let token: string;` lint fix was deliberately kept during the SIG-03f revert.
+- [01-06]: Scratch branches pushed to the public `origin` use targeted `git add <path>`, never `git add -A` — an untracked local document at the repo root would otherwise be published. Branch names are `scratch/ci-proof-*` so a single glob confirms none survive.
 
 ### Pending Todos
 
@@ -103,7 +106,7 @@ Items acknowledged and carried forward from previous milestone close:
 ## Session Continuity
 
 Last session: 2026-08-12
-Stopped at: Phase 1 planned — 6 plans in 3 waves; plan-checker converged 2/6 -> 2/4 -> 0 blockers
+Stopped at: Completed 01-06-PLAN.md — all 6 Phase 1 plans executed; three CI runs recorded (31605493233 green matrix, 31605906945 lint proof, 31606402559 revert-proof); SIG-01/02/03 marked Complete
 Resume file: None
 
 **Still untracked:** `IMPROVEMENT-PLAN.md` at the repo root — the June 2026 review document, now fully absorbed into this roadmap. Plan `01-06` did **not** commit or delete it (it is a user file outside that plan's `files_modified`). Instead 01-06 used targeted `git add <path>` rather than `git add -A` on every scratch branch, so the file was never staged and never pushed to the public remote. Its literal "`git status --porcelain` is empty" assertions were satisfied in the path-scoped form. **Decide before the next phase:** commit it, delete it, or add it to `.gitignore` — a bare `git add -A` anywhere would otherwise publish it.
