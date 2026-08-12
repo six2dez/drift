@@ -265,6 +265,19 @@ None — no external service configuration required.
 - **Note for `01-03`/`01-04`:** `.planning/` and the two source files are the only things this plan touched; `IMPROVEMENT-PLAN.md` (flagged in STATE.md as blocking `01-06`'s clean-status assertions) is **not** present in this worktree and was not addressed here.
 - No blockers.
 
+## Self-Check: PASSED
+
+- `packages/frontend/src/stores/settings.ts` — FOUND (modified, committed)
+- `packages/frontend/src/stores/settings.test.ts` — FOUND (modified, committed)
+- `.planning/phases/01-restore-the-verification-signal/01-01-SUMMARY.md` — FOUND
+- Commit `70e72f9` — FOUND
+- Commit `c6bf736` — FOUND
+- Commit `b0498d9` — FOUND
+- `git status --porcelain` — empty (working tree clean)
+
+STATE.md and ROADMAP.md were intentionally NOT modified — this plan ran as a parallel
+worktree executor; the orchestrator owns those writes after the wave merges.
+
 ---
 *Phase: 01-restore-the-verification-signal*
 *Completed: 2026-08-12*
