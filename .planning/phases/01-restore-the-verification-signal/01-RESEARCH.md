@@ -649,7 +649,7 @@ Not estimated. Measured, twice: once in an isolated sandbox copy, once read-only
 | `vue/v-on-event-hyphenation` | 3 | `ChatInput.vue:103`, `SettingsView.vue:581,592` | **Rule off.** All are `@update:modelValue`. |
 | `vue/one-component-per-file` | 3 | `ChatInput.test.ts:15,24,35` | **Off for `**/*.test.ts`.** Inline stub components are intentional. |
 | `vue/attributes-order` | 2 | `MessageBubble.vue:106,107` | **Fix** — reorder `style`/`class` before `v-html`. Auto-fixable. |
-| `vue/no-v-html` | 1 | `MessageBubble.vue:105` | **Keep the rule on**; add `// eslint-disable-next-line vue/no-v-html` with a comment naming `markdown-it({html:false})` + DOMPurify. Security-relevant tripwire. |
+| `vue/no-v-html` | 1 | `MessageBubble.vue:105` | **Keep the rule on**; wrap that one element in a closed `<!-- eslint-disable vue/no-v-html -->` / `<!-- eslint-enable vue/no-v-html -->` pair placed outside the start tag, with a rationale comment naming `markdown-it({html:false})` + DOMPurify. Security-relevant tripwire. *(Corrected 2026-08-12: `eslint-disable-next-line` was the original recommendation, but after the `vue/attributes-order` fix the `v-html` attribute sits inside a multi-line start tag, where an HTML comment is a Vue parse error — `Illegal '/' in tags.` — verified against `@vue/compiler-sfc@3.5.29`.)* |
 
 **Residual after all of the above: 0 errors, 0 warnings.** SIG-02's "passes clean" branch is reachable in one plan task — no debt-tracking document is needed. Pin `--max-warnings 0` in CI so it cannot regress.
 
@@ -954,29 +954,29 @@ The Nyquist argument: the failure mode being fixed is *version-conditional*, so 
 
 ---
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Should the matrix keep Node 20 at all?**
    - Known: Node 20 hit EOL 2026-04-30. `engines: node >=20`, `.nvmrc: 20`, and CI all still target it. ESLint 10 needs ≥ 20.19.0.
    - Unclear: whether Drift's users (Caido plugin authors, who also need Node ≥ 18 for the MCP server host) are actually on Node 20.
-   - Recommendation: **keep the Node 20 leg for this phase** — dropping it is a user-facing support decision, not a CI decision. Raise `.nvmrc` to `24` (active LTS) as a separate, explicit choice.
+   - RESOLVED: **keep the Node 20 leg for this phase** — dropping it is a user-facing support decision, not a CI decision. Raise `.nvmrc` to `24` (active LTS) as a separate, explicit choice.
 
 2. **Should SIG-01's wording be amended to say Node 26?**
    - Known: as written ("green on Node 20, 22 and 24") the criterion is **already satisfied** with zero code changes.
-   - Recommendation: amend to *"green on Node 20, 22, 24 and 26"*. Leaving it unamended means the phase can be marked complete without fixing the bug.
+   - RESOLVED: amend to *"green on Node 20, 22, 24 and 26"*. Leaving it unamended means the phase can be marked complete without fixing the bug.
 
 3. **Do the action major bumps belong in Phase 1 or Phase 9?**
    - Known: Node 20 actions runtime is removed in fall 2026; Phase 9 rewrites this same workflow to add `windows-latest`.
-   - Recommendation: **do it here.** Phase 1 is already restructuring `ci.yml`; doing it twice is waste, and a deprecation-warning banner on every run erodes exactly the signal this phase is restoring.
+   - RESOLVED: **do it here.** Phase 1 is already restructuring `ci.yml`; doing it twice is waste, and a deprecation-warning banner on every run erodes exactly the signal this phase is restoring.
 
 4. **`--max-warnings 0` now, or after a grace period?**
    - Known: measured residual with the recommended config is 0 errors / 0 warnings.
-   - Recommendation: **`--max-warnings 0` immediately.** There is no debt to grandfather, and a ratchet with slack is a ratchet that slips.
+   - RESOLVED: **`--max-warnings 0` immediately.** There is no debt to grandfather, and a ratchet with slack is a ratchet that slips.
 
 5. **Test files are excluded from `pnpm typecheck` — fix now?**
    - Known: both package tsconfigs `exclude: ["./src/**/*.test.ts"]`, so 3,538 lines of test code are never type-checked.
    - Unclear: how many type errors that exposes. The type-aware ESLint probe suggests the count is small but non-zero.
-   - Recommendation: **backlog item, not this phase.** It is real signal debt but a distinct change with its own error surface, and folding it in would blur what "Phase 1 green" means.
+   - RESOLVED: **backlog item, not this phase.** It is real signal debt but a distinct change with its own error surface, and folding it in would blur what "Phase 1 green" means.
 
 ---
 

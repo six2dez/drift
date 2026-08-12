@@ -309,3 +309,12 @@ Plans:
 
 Plans:
 - [ ] TBD (promote with /gsd-review-backlog when ready)
+
+### Phase 999.11: Repo-wide Prettier sweep (BACKLOG)
+
+**Goal:** [Captured for future planning] Measured during Phase 1 planning: 46 files under `packages/**/src` are not Prettier-clean, including `packages/backend/src/index.ts`, `provider-launch.ts`, `command-resolution.ts`, `packages/frontend/src/index.ts` and `MessageBubble.vue`. Running `pnpm format` repo-wide rewrites the bodies of `renderExportExecScript`, `writeMcpWrapper`, `writeLaunchScript`, `shellQuote` and the `chmod` call sites — the exact code the Phase 5-8 scope fence (see Overview, "Phase 2 boundary constraint") holds byte-stable — so it was deliberately kept out of Phase 1, which only `--check`s the five files it creates or formats. This is its own change with its own commit and a large, purely-whitespace diff; sequence it **after** Phase 8 so it cannot collide with the spawn-path rewrite. Pair it with a `prettier --check` step in CI once the tree is clean.
+**Requirements:** TBD
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (promote with /gsd-review-backlog when ready)

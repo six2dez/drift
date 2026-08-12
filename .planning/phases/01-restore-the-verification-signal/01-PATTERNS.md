@@ -463,7 +463,7 @@ The repo's comment style names the external constraint (Caido's runtime, pnpm ho
 
 Verified none of these sit in `renderExportExecScript` / `writeMcpWrapper` / `writeLaunchScript` / `shellQuote` / any `chmod` call site — the Phase 5–8 boundary (CMP-inv) holds.
 
-### The `vue/no-v-html` inline disable (ASVS V5)
+### The `vue/no-v-html` element-scoped disable (ASVS V5)
 **Source:** `packages/frontend/src/components/chat/MessageBubble.vue:104-108` — confirmed:
 ```html
     <div
@@ -472,7 +472,11 @@ Verified none of these sit in `renderExportExecScript` / `writeMcpWrapper` / `wr
       class="max-w-none [&_p]:mb-2 …"
     />
 ```
-`v-html` is on **line 105**; `style` on **106** and `class` on **107** are the two `vue/attributes-order` warnings. Fixing the order moves `style`/`class` above `v-html`, which shifts the line the `eslint-disable-next-line vue/no-v-html` comment must precede. Do both edits together.
+`v-html` is on **line 105**; `style` on **106** and `class` on **107** are the two `vue/attributes-order` warnings. Fixing the order moves `style`/`class` above `v-html`. Do both edits together.
+
+**`eslint-disable-next-line` cannot be used here — corrected 2026-08-12 during plan review.** `vue/no-v-html` reports on the `v-html` *attribute* node, and after the reorder that attribute is the last one *inside* the multi-line start tag. An HTML comment in that position is a Vue parse error, reproduced against this repo's own `@vue/compiler-sfc@3.5.29`: `Illegal '/' in tags.` plus `Element is missing end tag.`. Collapsing the element to one line is not stable either — the `class` value is ~500 characters and Prettier re-expands the tag.
+
+The mechanism plan `01-04` task 2 prescribes, verified to parse with zero errors against the same compiler, is a **closed disable/enable pair placed outside the start tag**: a rationale comment, then `<!-- eslint-disable vue/no-v-html -->` on its own line immediately before `<div`, and `<!-- eslint-enable vue/no-v-html -->` on its own line immediately after the element's `/>`. The `enable` half is mandatory — without it the rule is off for the rest of the file. This works because `vue/comment-directive` ships in `pluginVue.configs["flat/base"]`, which `flat/recommended` pulls in.
 
 ---
 
