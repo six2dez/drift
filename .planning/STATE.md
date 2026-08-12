@@ -77,7 +77,8 @@ None yet. Nine review items are parked in the ROADMAP backlog (999.1-999.9).
 
 [Issues that affect future work]
 
-- The test suite is red today on Node >= 22 (5 failures in `ChatView.mount.test.ts`; vitest + happy-dom leave `window.localStorage` undefined). CI hides it by pinning Node 20. Phase 1 resolves it and is a prerequisite for trusting any later phase's validation.
+- The test suite is red today on Node >= 25 (5 failures in `ChatView.mount.test.ts`; Node 25 unflagged Web Storage, and vitest's `getWindowKeys()` then drops happy-dom's `localStorage` because the key already exists on the Node global). Measured 125/125 green on 22.23.2 and 24.13.0, 5 red on 26.7.0. CI hides it by pinning Node 20. Phase 1 resolves it and is a prerequisite for trusting any later phase's validation.
+- ACTION REQUIRED (human, outside git): Phase 1 renames the CI job from `Typecheck, test, build` to four matrix legs. If GitHub branch protection on `main` requires the old check name, it must be updated in repo settings or `main` is left merge-unguarded. Logged as assumption A7 in 01-RESEARCH.md.
 - `check_scope` is wrong in both directions for real Caido glob scope patterns (verified). Users can act on bad in-scope/out-of-scope answers until Phase 2 ships.
 - LLRT `spawn({env})` env-passthrough on Windows is unverified (P0 risk). Phase 3 resolves it; if it fails, the documented fallback is a minimal `.cmd` launcher that `set`s env vars.
 - Gemini-on-Windows MCP reliability has open upstream issues — treat as best-effort, gate Phase 7 on a real-machine check. Codex `${VAR}` expansion in `mcp add` needs CI confirmation.

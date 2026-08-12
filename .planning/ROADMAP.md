@@ -2,7 +2,7 @@
 
 ## Overview
 
-This milestone has two layers. **Phases 1–2 are a pre-port hardening layer** added 2026-08-12 after a full-codebase review: the test suite is red on any Node ≥ 22, `pnpm lint` has never run, and a handful of correctness and security defects ship today on macOS/Linux. Entering a platform port with an untrustworthy CI signal makes every `windows-latest` failure ambiguous, so the signal gets restored first and the POSIX-side defects get fixed before the port starts rewriting the same code paths.
+This milestone has two layers. **Phases 1–2 are a pre-port hardening layer** added 2026-08-12 after a full-codebase review: the test suite is red on Node ≥ 25, `pnpm lint` has never run, and a handful of correctness and security defects ship today on macOS/Linux. Entering a platform port with an untrustworthy CI signal makes every `windows-latest` failure ambiguous, so the signal gets restored first and the POSIX-side defects get fixed before the port starts rewriting the same code paths.
 
 **Phases 3–10 are the original brownfield platform port**, not new-feature work: Drift already ships on macOS/Linux, and the entire MCP launch path in `packages/backend/src/index.ts` is POSIX-only. The journey takes the launch path from "`chmod` + `#!/bin/bash` + `.sh` spawn" to "direct `node.exe` spawn + structured `env` injection," extends command/binary resolution to Windows, hardens process lifecycle, and locks everything behind a permanent `windows-latest` CI net.
 
@@ -22,7 +22,7 @@ Two things shape the port's order. First, Caido's LLRT/QuickJS runtime behavior 
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: Restore the Verification Signal** - Green suite on Node 20/22/24, real ESLint in CI, CI on every branch
+- [ ] **Phase 1: Restore the Verification Signal** - Green suite on Node 20/22/24/26, real ESLint in CI, CI on every branch
 - [ ] **Phase 2: POSIX Correctness & Hardening** - Fix `check_scope`, `list_workflows`, settings-churn, token blast radius, and the frontend quick wins
 - [ ] **Phase 3: CI Spike — Prove LLRT Basics on Windows** - Prove the 7 LLRT runtime primitives on `windows-latest` before writing any port code
 - [ ] **Phase 4: Platform Foundation** - Pure `platform.ts`, `os.tmpdir()` everywhere, AV-retry, fail-loud runtime probe, bounded buffers
@@ -40,12 +40,12 @@ Decimal phases appear between their surrounding integers in numeric order.
 **Depends on**: Nothing (first phase)
 **Requirements**: SIG-01, SIG-02, SIG-03
 **Success Criteria** (what must be TRUE):
-  1. `pnpm exec vitest run` is green on Node 20, 22 and 24. The five `ChatView.mount.test.ts` failures are gone, and `window.localStorage` (`packages/frontend/src/stores/settings.ts:72`) is read through a guard that tolerates an environment where storage is absent or throws — a runtime hazard in a restricted webview, not just a test artifact.
-  2. `pnpm lint` invokes a real, installed ESLint with a committed flat config covering TypeScript and Vue, and either passes clean or reports a documented, tracked debt list.
-  3. CI runs typecheck → lint → test → build on push and pull request for **every** branch (not only `main`), across a Node 20/22/24 matrix, and a lint failure fails the job.
-  4. The blind spot that hid this — CI pinned to a single Node version — is closed: the matrix is part of the required job, so a version-specific breakage cannot pass silently again.
+  1. `pnpm exec vitest run` is green on Node 20, 22, 24 **and 26**. The five `ChatView.mount.test.ts` failures are gone, and `window.localStorage` (`packages/frontend/src/stores/settings.ts:72`) is read through a guard that tolerates an environment where storage is absent or throws — a runtime hazard in a restricted webview, not just a test artifact.
+  2. `pnpm lint` invokes a real, installed ESLint with a committed flat config covering TypeScript and Vue, and passes with `--max-warnings 0`. The CI lint invocation carries no `--fix` — a linter that rewrites source and then reports success is a false pass.
+  3. CI runs typecheck → lint → test → build on push and pull request for **every** branch (not only `main`), across a Node 20/22/24/**26** matrix with `fail-fast: false`, and a lint failure fails the job.
+  4. The blind spot that hid this — CI pinned to a single Node version — is closed, and that closure is *proven*: on a scratch branch, reverting only the guard and the shim must turn the Node 26 leg red while 20/22/24 stay green.
 **Plans**: 2 plans (provisional)
-**Research flag**: NO — the root cause is diagnosed (vitest + happy-dom leave `localStorage` undefined on Node ≥ 22, verified locally on Node 26.7.0).
+**Research flag**: DONE — `01-RESEARCH.md` (2026-08-12). It corrected the brief: the failure appears on **Node ≥ 25**, not ≥ 22 (Node 25.0.0 unflagged Web Storage; measured 125/125 green on 22.23.2 and 24.13.0, 5 red on 26.7.0). Root cause is vitest's `getWindowKeys()` dropping any happy-dom window key that already exists on the Node global — `localStorage` is not in its allow-list, and is still absent in vitest 4.1.10, so upgrading does not help. Fix is a production guard **plus** a `vitest.setup.ts` shim (both measured green). Lint debt measured at 4 errors / 20 warnings — 0/0 after the recommended rule config.
 
 ### Phase 2: POSIX Correctness & Hardening
 **Goal**: Fix the user-facing correctness and security defects that ship today on macOS/Linux, before the port starts rewriting the same files — without touching the spawn path Phases 5–8 own.
@@ -288,6 +288,15 @@ Plans:
 ### Phase 999.9: Chat UX minors (BACKLOG)
 
 **Goal:** [Captured for future planning] Keyboard shortcuts via `sdk.shortcuts`; token usage accounting for all four providers (only Claude parses `usage` today); chat export to an H1/Bugcrowd report template; replace the remaining `window.confirm` in `ChatView.vue` with the existing custom modal.
+**Requirements:** TBD
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (promote with /gsd-review-backlog when ready)
+
+### Phase 999.10: Type-check the test files (BACKLOG)
+
+**Goal:** [Captured for future planning] Both package tsconfigs carry `exclude: ["./src/**/*.test.ts"]`, so ~3,538 lines of test code are never type-checked — real signal debt found during Phase 1 research. Deliberately kept out of Phase 1: it is a distinct change with its own error surface, and folding it in would blur what "Phase 1 green" means. Related: adopting Vitest 5 once stable ships, which obsoletes the `vitest.setup.ts` storage shim.
 **Requirements:** TBD
 **Plans:** 0 plans
 
