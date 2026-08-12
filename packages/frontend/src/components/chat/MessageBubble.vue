@@ -101,11 +101,16 @@ function formatActivityDuration(durationMs: number | null | undefined): string {
     class="group relative max-w-[85%] mr-auto px-4 py-3 rounded-2xl rounded-tl-sm text-sm leading-relaxed"
     style="background: #1a1f2e; color: #e8eaed; border: 1px solid #2d3348;"
   >
+    <!-- Only v-html in the repo: markdown-it is built with html: false (:18) and the output
+         is passed through DOMPurify.sanitize (:23), so model markdown cannot inject markup.
+         Rule stays enabled globally; the enable below restores it for the rest of the file. -->
+    <!-- eslint-disable vue/no-v-html -->
     <div
-      v-html="renderedHtml"
       style="line-height: 1.7;"
       class="max-w-none [&_p]:mb-2 [&_p:last-child]:mb-0 [&_pre]:p-3 [&_pre]:rounded-lg [&_pre]:overflow-x-auto [&_pre]:my-2 [&_code]:text-xs [&_a]:underline [&_ul]:list-disc [&_ul]:pl-4 [&_ol]:list-decimal [&_ol]:pl-4 [&_li]:mb-1 [&_h1]:text-base [&_h1]:font-bold [&_h1]:mb-2 [&_h2]:text-sm [&_h2]:font-bold [&_h2]:mb-2 [&_h3]:text-sm [&_h3]:font-semibold [&_h3]:mb-1 [&_blockquote]:border-l-2 [&_blockquote]:pl-3 [&_blockquote]:italic"
+      v-html="renderedHtml"
     />
+    <!-- eslint-enable vue/no-v-html -->
     <div
       v-if="message.mcpActivities && message.mcpActivities.length > 0"
       class="mt-3 border-t border-surface-700/70 pt-3"
