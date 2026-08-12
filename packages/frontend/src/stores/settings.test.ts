@@ -292,4 +292,41 @@ describe("settings store", () => {
     expect(store.settings.activeProvider).toBe("gemini-cli");
     expect((store.settings as Record<string, unknown>).scanner).toBeUndefined();
   });
+
+  it("treats absent browser storage as no token", async () => {
+    // Node >= 25 test environments and restricted webviews both produce this
+    // shape: `window` exists, `localStorage` was never installed on it.
+    vi.stubGlobal("window", {});
+    const store = useSettingsStore();
+
+    await store.syncCaidoRuntimeContext();
+
+    expect(mockSdk.backend.syncCaidoSessionToken).toHaveBeenCalledWith("");
+  });
+
+  it("treats a throwing localStorage getter as no token", async () => {
+    // Storage disabled by enterprise policy, Safari private mode, and
+    // sandboxed webview origins throw on the property read itself, before
+    // getItem is ever reached.
+    vi.stubGlobal("window", {
+      get localStorage(): never {
+        throw new DOMException("The operation is insecure.", "SecurityError");
+      },
+    });
+    const store = useSettingsStore();
+
+    await expect(store.syncCaidoRuntimeContext()).resolves.not.toThrow();
+    expect(mockSdk.backend.syncCaidoSessionToken).toHaveBeenCalledWith("");
+  });
+
+  it("treats a storage object without getItem as no token", async () => {
+    // A partial or page-injected stub is not a Storage; calling getItem on it
+    // would be a TypeError.
+    vi.stubGlobal("window", { localStorage: {} });
+    const store = useSettingsStore();
+
+    await store.syncCaidoRuntimeContext();
+
+    expect(mockSdk.backend.syncCaidoSessionToken).toHaveBeenCalledWith("");
+  });
 });
