@@ -113,7 +113,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
-- [ ] 03-05-PLAN.md — Write 03-FINDINGS.md from the measured output and settle the P0-ENV blocker in STATE.md
+- [x] 03-05-PLAN.md — Write 03-FINDINGS.md from the measured output and settle the P0-ENV blocker in STATE.md
 
 **Research flag**: YES — this phase IS the research. Its results resolve the LLRT unknowns all other port phases depend on and must feed back before Phase 4.
 
