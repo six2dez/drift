@@ -101,7 +101,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 **Wave 1**
 
 - [x] 03-01-PLAN.md — Write the seven-assertion Node probe (four-surface spawn classifier, D-05/D-06/D-07 exit contract) and ignore its output file
-- [ ] 03-02-PLAN.md — Write the windows-latest probe workflow (bare triggers, ci.yml-matched pins, D-10 secret gate) and prove its structure against ci.yml
+- [x] 03-02-PLAN.md — Write the windows-latest probe workflow (bare triggers, ci.yml-matched pins, D-10 secret gate) and prove its structure against ci.yml
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
