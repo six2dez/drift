@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: executing
-stopped_at: Completed 03-04-PLAN.md
-last_updated: "2026-08-13T13:17:33.906Z"
-last_activity: 2026-08-13 -- Plan 03-04 complete (both verification gates falsified on real windows-latest runs; all scratch branches torn down)
+status: verifying
+stopped_at: Completed 03-05-PLAN.md
+last_updated: "2026-08-13T13:29:19.811Z"
+last_activity: 2026-08-13 -- Plan 03-05 complete (CI-02 verdict recorded in 03-FINDINGS.md; Phase 3 complete)
 progress:
   total_phases: 21
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 11
-  completed_plans: 10
-  percent: 5
+  completed_plans: 11
+  percent: 10
 ---
 
 # Project State
@@ -27,30 +27,30 @@ See: .planning/PROJECT.md (updated 2026-06-26)
 
 Phase: 03 (CI Spike — Prove LLRT Basics on Windows) — COMPLETE
 Plan: 5 of 5
-Status: Complete — CI-02 proven on a real `windows-latest` run and recorded in `03-FINDINGS.md`
+Status: Phase complete — ready for verification. CI-02 proven on a real `windows-latest` run and recorded in `03-FINDINGS.md`
 Last activity: 2026-08-13 -- Plan 03-05 complete (CI-02 verdict recorded: 7/7 assertions PASS at exit 0 on windows-latest; env-passthrough blocker resolved with the libuv eleven-name bound; `cmd.exe /c` mandatory for `.cmd` targets)
 
-Progress: [█░░░░░░░░░] 10% (1 of 10 milestone phases)
+Progress: [██░░░░░░░░] 20% (2 of 10 milestone phases)
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 10 (plus 1 quick task)
+- Total plans completed: 11 (plus 1 quick task)
 - Average duration: ~10 min
-- Total execution time: ~1.7 hours
+- Total execution time: ~1.8 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 01 | 6 | - | - |
-| 03 | 4 of 5 | 30min | ~8min |
+| 03 | 5 of 5 | 38min | ~8min |
 
 **Recent Trend:**
 
-- Last 5 plans: 01-06 (21 min), 03-01 (4 min, 2 tasks, 2 files), 03-02 (6 min, 2 tasks, 1 file), 03-03 (9 min, 2 tasks, 1 file, 2 Windows CI runs), 03-04 (11 min, 3 tasks, 0 files net, 4 CI runs)
-- Trend: steady; 01-06 is the longest because it waits on three real CI runs and a three-Node local pre-flight. 03-03 came in at 9 min despite needing two real `windows-latest` runs — the Windows probe job completes in 16-18s, so the CI wait is far cheaper than the ubuntu matrix. 03-04 waited on four runs (2 Windows probe + 2 ubuntu matrix) and still finished in 11 min for the same reason.
+- Last 5 plans: 03-01 (4 min, 2 tasks, 2 files), 03-02 (6 min, 2 tasks, 1 file), 03-03 (9 min, 2 tasks, 1 file, 2 Windows CI runs), 03-04 (11 min, 3 tasks, 0 files net, 4 CI runs), 03-05 (8 min, 2 tasks, 2 files, 0 CI runs — evidence transcription only)
+- Trend: steady; 01-06 is the longest (21 min) because it waits on three real CI runs and a three-Node local pre-flight. 03-03 came in at 9 min despite needing two real `windows-latest` runs — the Windows probe job completes in 16-18s, so the CI wait is far cheaper than the ubuntu matrix. 03-04 waited on four runs (2 Windows probe + 2 ubuntu matrix) and still finished in 11 min for the same reason. 03-05 burned no runner at all: it only re-queried the six existing run records and transcribed their measured output.
 
 *Updated after each plan completion*
 
@@ -126,10 +126,10 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-13T13:17:33.903Z
-Stopped at: Completed 03-04-PLAN.md
-Resume file: .planning/phases/03-ci-spike-prove-llrt-basics-on-windows/03-05-PLAN.md
+Last session: 2026-08-13T13:29:19.766Z
+Stopped at: Completed 03-05-PLAN.md
+Resume file: None
 
-**Live on the public remote: nothing of ours.** Plan 03-04 tore down all three `scratch/*` branches (`ci-proof-windows-probe`, `ci-proof-windows-probe-negative`, `ci-proof-windows-gate-negative`) locally and remotely. Asserted with a `test -z` discrimination over the captured glob (`scratch-glob-empty=0`) plus the full unfiltered listing, which now shows only `main` at `2d8cf16` and the pre-existing, unrelated `fix/security-hotfixes` at `0cd81f3`. `origin/main` was never pushed by this phase and is still `2d8cf16`; local `main` is 19 commits ahead and deliberately unpushed. All five Phase 3 run records still resolve after the deletions.
+**Live on the public remote: nothing of ours.** Plan 03-04 tore down all three `scratch/*` branches (`ci-proof-windows-probe`, `ci-proof-windows-probe-negative`, `ci-proof-windows-gate-negative`) locally and remotely. Asserted with a `test -z` discrimination over the captured glob (`scratch-glob-empty=0`) plus the full unfiltered listing, which now shows only `main` at `2d8cf16` and the pre-existing, unrelated `fix/security-hotfixes` at `0cd81f3`. `origin/main` was never pushed by this phase and is still `2d8cf16`; local `main` is 23 commits ahead and deliberately unpushed. **Re-verified 2026-08-13 (plan 03-05):** the remote still lists only `main` `2d8cf16` and the pre-existing `fix/security-hotfixes` `0cd81f3`, and all eight Phase 3 run records (4 probe + 4 `CI` control) still resolve with their recorded conclusions — which is what makes the URLs in `03-FINDINGS.md` valid citations after the branches were deleted. The probe **artifacts** do not survive: they expire 2026-09-12, which is why D-11 required the committed findings document.
 
 **Still untracked:** `IMPROVEMENT-PLAN.md` at the repo root — the June 2026 review document, now fully absorbed into this roadmap. Plan `01-06` did **not** commit or delete it (it is a user file outside that plan's `files_modified`). Instead 01-06 used targeted `git add <path>` rather than `git add -A` on every scratch branch, so the file was never staged and never pushed to the public remote. Its literal "`git status --porcelain` is empty" assertions were satisfied in the path-scoped form. **Decide before the next phase:** commit it, delete it, or add it to `.gitignore` — a bare `git add -A` anywhere would otherwise publish it.

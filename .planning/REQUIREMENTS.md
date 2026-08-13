@@ -72,7 +72,7 @@ Requirements for the hardening + native-Windows milestone. Each maps to exactly 
 ### Validation (CI)
 
 - [ ] **CI-01**: A `windows-latest` CI job builds the plugin and runs vitest (the permanent regression net)
-- [ ] **CI-02**: A CI spike proves the 7 LLRT assertions (spawn `env` passthrough, `os.tmpdir()`/`os.platform()`, `.cmd` EINVAL behavior, `where` parsing, `os` import specifier, `USERPROFILE`/`APPDATA`/`LOCALAPPDATA`, `crypto.randomUUID`) before any production port code is built on them
+- [x] **CI-02**: A CI spike proves the 7 LLRT assertions (spawn `env` passthrough, `os.tmpdir()`/`os.platform()`, `.cmd` EINVAL behavior, `where` parsing, `os` import specifier, `USERPROFILE`/`APPDATA`/`LOCALAPPDATA`, `crypto.randomUUID`) before any production port code is built on them
 - [ ] **CI-03**: Windows CI is green for the *right* reasons — `.gitattributes` (`eol=lf`), `\r?\n`-tolerant snapshot assertions, pinned shell
 
 ### UX / Polish (UX)
@@ -133,7 +133,7 @@ Which phases cover which requirements. Every v1 requirement maps to exactly one 
 | SEC-04 | Phase 2 | Pending |
 | SEC-05 | Phase 2 | Pending |
 | PERF-01 | Phase 2 | Pending |
-| CI-02 | Phase 3 | Pending |
+| CI-02 | Phase 3 | Complete |
 | RUN-03 | Phase 4 | Pending |
 | RUN-04 | Phase 4 | Pending |
 | RUN-05 | Phase 4 | Pending |
