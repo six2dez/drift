@@ -105,7 +105,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 03-03-PLAN.md — Local pre-flight, then run the probe on a real windows-latest host and capture all seven assertion lines with the run URL
+- [x] 03-03-PLAN.md — Local pre-flight, then run the probe on a real windows-latest host and capture all seven assertion lines with the run URL
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
