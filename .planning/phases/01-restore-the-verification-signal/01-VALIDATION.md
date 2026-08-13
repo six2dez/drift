@@ -62,7 +62,7 @@ created: 2026-08-12
 | SIG-01e | Guard returns `""` when `window.localStorage` is **absent** | SIG-01 | unit | `pnpm exec vitest run packages/frontend/src/stores/settings.test.ts -t "absent browser storage"` | ❌ Wave 0 | ⬜ pending |
 | SIG-01f | Guard returns `""` when reading `localStorage` **throws** | SIG-01 | unit | `… -t "throwing localStorage"` | ❌ Wave 0 | ⬜ pending |
 | SIG-01g | Guard returns `""` when storage exists but has **no `getItem`** | SIG-01 | unit | `… -t "without getItem"` | ❌ Wave 0 | ⬜ pending |
-| SIG-01h | The existing happy path (real token in storage) still works | SIG-01 | unit | `pnpm exec vitest run packages/frontend/src/stores/settings.test.ts` | ✅ exists (`vi.stubGlobal`) | ⬜ pending |
+| SIG-01h | A present `CAIDO_AUTHENTICATION` token is parsed and its **trimmed `accessToken`** is forwarded — not the raw JSON | SIG-01 | unit | `… -t "forwards the parsed accessToken"` | ❌ Wave 0 — was mis-recorded as pre-existing `vi.stubGlobal` coverage; that stub returns `null`, so nothing drove a present token through the guard. Added by gap-closure `260813-dc7` | ⬜ pending |
 | SIG-01i | Shim is **inert** when storage already works | SIG-01 | unit | `pnpm exec vitest run packages/frontend/src/__storage-shim.test.ts` — round-trip **and** assert the instance is happy-dom's, not the in-memory fallback, under Node ≤ 24 | ❌ Wave 0 | ⬜ pending |
 | SIG-02a | ESLint is installed and executable | SIG-02 | smoke | `pnpm exec eslint --version` → `10.x` | ❌ Wave 0 | ⬜ pending |
 | SIG-02b | Config loads with no `MODULE_TYPELESS_PACKAGE_JSON` warning | SIG-02 | smoke | `pnpm lint 2>&1 \| grep -c MODULE_TYPELESS` → `0` | ❌ Wave 0 | ⬜ pending |
@@ -94,6 +94,7 @@ The dominant risk in this phase is self-certification.
 | SIG-01 | Guard "verified" only by the absence of a crash in ChatView tests — no test asserts guard behaviour directly | SIG-01e/f/g, including the *throwing* getter case |
 | SIG-01 | Suite green because the shim silently masks a real product regression | Guard has unit tests independent of the shim; SIG-01i asserts the shim is inert when storage works |
 | SIG-01 | A committed `it.only` / `describe.only` reduces the suite to one test and everything is "green" | `@vitest/eslint-plugin` `no-focused-tests`; also assert total count is **125+** |
+| SIG-01 | Every guard test asserts `syncCaidoSessionToken` was called with `""` — precisely what a permanently broken read also produces — so the guard's forwarding direction survives any mutation and the suite stays green at 131 tests | SIG-01h drives a present token and asserts the trimmed `accessToken`; falsified by re-applying `if (key !== "__never__") return undefined;` to `readBrowserStorageItem` |
 | SIG-02 | `--fix` rewrites code in CI, reports clean, changes are discarded | SIG-02e greps **both** `package.json` and the workflow |
 | SIG-02 | ESLint exits 0 because it linted **zero** files (bad glob / over-broad `ignores`) | SIG-02c asserts the linted-file count is 59 and names `mcp-server.mjs` explicitly |
 | SIG-02 | Warnings exist but exit code is 0 (ESLint does not fail on warnings by default — measured) | `--max-warnings 0` |
@@ -109,7 +110,7 @@ The dominant risk in this phase is self-certification.
 
 - [ ] `vitest.setup.ts` — Web Storage shim (SIG-01). **Trap:** an unguarded shim calling `new Storage()` breaks 15 of 22 test files with `Illegal constructor` — Node's native `Storage` is not constructible.
 - [ ] `vitest.config.ts` — remove dead `environmentMatchGlobs`, add `setupFiles` (SIG-01)
-- [ ] `packages/frontend/src/stores/settings.test.ts` — three guard cases: absent / throwing / no-`getItem` (SIG-01e/f/g)
+- [ ] `packages/frontend/src/stores/settings.test.ts` — six cases: the three tolerance guards absent / throwing / no-`getItem` (SIG-01e/f/g), plus present-token forwarding, malformed JSON, and non-string return (SIG-01h)
 - [ ] `packages/frontend/src/__storage-shim.test.ts` — shim inertness + round-trip (SIG-01i)
 - [ ] `eslint.config.mjs` — flat config (SIG-02)
 - [ ] `package.json` — 8 devDependencies, `lint` / `lint:fix` split, committed `pnpm-lock.yaml` (SIG-02)
