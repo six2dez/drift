@@ -154,11 +154,31 @@ Not 0 (which would mean the ID never reached the summary) and not 2 (which would
 
 ## Deviations from Plan
 
-None — plan executed exactly as written. No auto-fixes were required; `pnpm lint` and `pnpm -r typecheck` were green on the first run of each.
+No deviations in the plan's two tasks — both executed exactly as written, and no auto-fixes were required (`pnpm lint` and `pnpm -r typecheck` were green on the first run of each).
+
+One deviation in the post-plan state update:
+
+### Auto-fixed Issues
+
+**1. [Rule 1 - Bug] Reverted a premature `CI-02: Complete` mark in REQUIREMENTS.md**
+
+- **Found during:** state updates, after both task commits
+- **Issue:** The executor workflow marks every ID in the plan's `requirements:` frontmatter complete on plan completion. All five Phase 3 plans carry `requirements: [CI-02]`, and CI-02 reads "A CI spike **proves** the 7 LLRT assertions". Running `requirements mark-complete CI-02` after plan 1 of 5 flipped the checkbox to `[x]` and the traceability row to `Complete` while no `windows-latest` run has happened at all — the exact false-green D-13 forbids ("the files exist and the YAML is valid" is explicitly not sufficient) and the class of defect Phase 1 existed to eliminate.
+- **Fix:** Reverted `.planning/REQUIREMENTS.md` to its committed state — CI-02 stays `[ ]` / `Pending`. It is the later Phase 3 plan that records the real run's verdict (D-11/D-12/D-13) that should mark it complete.
+- **Files modified:** none (revert restored the file byte-for-byte; `git status --porcelain .planning/REQUIREMENTS.md` is empty)
+- **Verification:** `grep -n "CI-02" .planning/REQUIREMENTS.md` → line 75 `- [ ] **CI-02**`, line 136 `| CI-02 | Phase 3 | Pending |`
+- **Committed in:** n/a — the revert leaves no diff to commit
+
+---
+
+**Total deviations:** 1 auto-fixed (1 bug — false-green requirement mark)
+**Impact on plan:** None on the delivered code. The correction keeps the requirement signal honest for plans 03-02..03-05, which is the phase's whole purpose.
 
 ## Issues Encountered
 
-None. Two expected-and-correct local FAILs (`P1-WHERE` ENOENT for the Windows `where.exe` path, `P3-VARS` for the three Windows profile variables) are the informational assertions behaving as designed off-Windows; both are correctly excluded from the exit rule.
+None in the two tasks. Two expected-and-correct local FAILs (`P1-WHERE` ENOENT for the Windows `where.exe` path, `P3-VARS` for the three Windows profile variables) are the informational assertions behaving as designed off-Windows; both are correctly excluded from the exit rule.
+
+One tooling issue during state updates: `gsd-tools roadmap update-plan-progress 03` rewrote the **backlog** Phase 999.1 `**Plans:**` line instead of the Phase 3 one. That single line was reverted to its committed text so the ROADMAP diff is scoped to Phase 3; the defect and two pre-existing ROADMAP formatting oddities are logged in [deferred-items.md](./deferred-items.md) rather than fixed here (out of scope for this plan's `files_modified`). Check the backlog section's diff on future `update-plan-progress` runs.
 
 ## Known Stubs
 
@@ -178,6 +198,11 @@ None — no external service configuration required.
 - **Ready for 03-03/03-04:** the per-ID count of exactly 1 and `win32-literal=1` are measured facts, so 03-03's artifact verification and 03-04's mutation of that literal both have a stable target.
 - **Open until a real Windows run (D-13):** every Windows-specific answer is still unmeasured — the darwin run deliberately proves the *instrument*, not the platform. `P0-TMP`, `P1-WHERE` and `P3-VARS` will only produce real answers on `windows-latest`, and `P1-CMD` will only there distinguish the EINVAL / runs / hangs outcomes that select Phases 4-8's spawn architecture.
 - **STATE.md blocker unchanged:** the "LLRT `spawn({env})` env-passthrough on Windows is unverified" entry stays open until the CI run lands; the darwin PASS is evidence about POSIX, not Windows.
+
+## Self-Check: PASSED
+
+- Files: `scripts/windows-llrt-probe.mjs` FOUND, `.gitignore` FOUND, `03-01-SUMMARY.md` FOUND.
+- Commits: `d0137d6` FOUND, `5fc9523` FOUND, `a272c61` FOUND.
 
 ---
 *Phase: 03-ci-spike-prove-llrt-basics-on-windows*

@@ -100,7 +100,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 **Plans**: 5 plans (4 waves)Plans:
 **Wave 1**
 
-- [ ] 03-01-PLAN.md — Write the seven-assertion Node probe (four-surface spawn classifier, D-05/D-06/D-07 exit contract) and ignore its output file
+- [x] 03-01-PLAN.md — Write the seven-assertion Node probe (four-surface spawn classifier, D-05/D-06/D-07 exit contract) and ignore its output file
 - [ ] 03-02-PLAN.md — Write the windows-latest probe workflow (bare triggers, ci.yml-matched pins, D-10 secret gate) and prove its structure against ci.yml
 
 **Wave 2** *(blocked on Wave 1 completion)*
@@ -259,7 +259,7 @@ Parallelism opportunities: Phase 2 may run alongside Phase 3 (both depend only o
 |-------|----------------|--------|-----------|
 | 1. Restore the Verification Signal | 6/6 | Complete    | 2026-08-13 |
 | 2. POSIX Correctness & Hardening | 0/3 | Not started | - |
-| 3. CI Spike — Prove LLRT Basics on Windows | 0/1 | Not started | - |
+| 3. CI Spike — Prove LLRT Basics on Windows | 1/5 | In Progress | - |
 | 4. Platform Foundation | 0/2 | Not started | - |
 | 5. Kill Shell Wrappers | 0/2 | Not started | - |
 | 6. Windows Command Resolution | 0/2 | Not started | - |
