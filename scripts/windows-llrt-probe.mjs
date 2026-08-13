@@ -168,6 +168,18 @@ function spawnCapture(cmd, args, opts = {}, timeoutMs = SPAWN_TIMEOUT_MS) {
       resolve({ surface: "timeout", stdout, stderr, exitCode: null, error: undefined });
     }, timeoutMs);
 
+    // Stream errors are a SEPARATE emitter from child.on("error"), and an
+    // 'error' with no listener is re-thrown as an uncaught exception. That
+    // would reject the top-level await main() and skip the `=== Summary ===`
+    // block entirely, uploading an artifact with zero PASS/FAIL lines on a red
+    // job — evidence destroyed on exactly the run where it matters most. The
+    // reachable trigger is this helper's own timeout path: SIGKILL maps to
+    // TerminateProcess on Windows, and reading a named pipe whose writer was
+    // abruptly terminated is a known ECONNRESET/EPIPE source. Swallowing is
+    // correct here — by the time a pipe tears down, the surface is already
+    // classified and whatever bytes arrived are already in `stdout`/`stderr`.
+    child.stdout?.on("error", () => { /* pipe teardown; the surface is already classified */ });
+    child.stderr?.on("error", () => { /* pipe teardown; the surface is already classified */ });
     child.stdout?.on("data", (d) => { stdout += d.toString(); });
     child.stderr?.on("data", (d) => { stderr += d.toString(); });
     child.on("close", (code) => {
