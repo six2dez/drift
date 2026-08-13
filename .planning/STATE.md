@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 03-01-PLAN.md
-last_updated: "2026-08-13T12:38:00.029Z"
-last_activity: 2026-08-13
+stopped_at: Completed 03-02-PLAN.md
+last_updated: "2026-08-13T12:47:30.000Z"
+last_activity: 2026-08-13 -- Plan 03-02 complete (windows-latest probe workflow, static-only)
 progress:
   total_phases: 21
   completed_phases: 1
   total_plans: 11
-  completed_plans: 7
+  completed_plans: 8
   percent: 5
 ---
 
@@ -26,9 +26,9 @@ See: .planning/PROJECT.md (updated 2026-06-26)
 ## Current Position
 
 Phase: 03 (CI Spike — Prove LLRT Basics on Windows) — EXECUTING
-Plan: 2 of 5
+Plan: 3 of 5
 Status: Ready to execute
-Last activity: 2026-08-13 -- Plan 03-01 complete (probe script + targeted ignore)
+Last activity: 2026-08-13 -- Plan 03-02 complete (windows-latest probe workflow, static-only)
 
 Progress: [█░░░░░░░░░] 10% (1 of 10 milestone phases)
 
@@ -36,21 +36,21 @@ Progress: [█░░░░░░░░░] 10% (1 of 10 milestone phases)
 
 **Velocity:**
 
-- Total plans completed: 7 (plus 1 quick task)
-- Average duration: ~11 min
-- Total execution time: ~1.3 hours
+- Total plans completed: 8 (plus 1 quick task)
+- Average duration: ~10 min
+- Total execution time: ~1.4 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 01 | 6 | - | - |
-| 03 | 1 of 5 | 4min | 4min |
+| 03 | 2 of 5 | 10min | 5min |
 
 **Recent Trend:**
 
-- Last 5 plans: 01-03, 01-04 (12 min), 01-05 (6 min), 01-06 (21 min), 03-01 (4 min, 2 tasks, 2 files)
-- Trend: steady; 01-06 is the longest because it waits on three real CI runs and a three-Node local pre-flight. 03-01 is short because it writes one file and measures it locally — the expensive Phase 3 plans are 03-03 and 03-04, which wait on real `windows-latest` runs.
+- Last 5 plans: 01-04 (12 min), 01-05 (6 min), 01-06 (21 min), 03-01 (4 min, 2 tasks, 2 files), 03-02 (6 min, 2 tasks, 1 file)
+- Trend: steady; 01-06 is the longest because it waits on three real CI runs and a three-Node local pre-flight. 03-01 and 03-02 are short because each writes one file and measures it locally — the expensive Phase 3 plans are 03-03 and 03-04, which wait on real `windows-latest` runs.
 
 *Updated after each plan completion*
 
@@ -73,6 +73,9 @@ Recent decisions affecting current work:
 - [Phase 03]: [03-01]: The probe's env-passthrough result records replace-vs-merge explicitly (darwin: the spawn env option REPLACED the parent block, child reported PATH-ABSENT), because Phases 4-8 cannot recover that from a bare PASS and it decides whether their spawn options must spread ...process.env.
 - [Phase 03]: [03-01]: Probe output uses single emission — pass()/fail() only record, and the === Summary === block (iterating a frozen ASSERTION_IDS array) is the sole producer of PASS/FAIL lines, so a whole-file grep counts exactly 1 per ID and a never-reached assertion emits FAIL ... not reached instead of vanishing.
 - [Phase 03]: [03-01]: CI-02 stays Pending until a real windows-latest run records all seven assertion lines (D-13). All five Phase 3 plans carry requirements: [CI-02], so the executor's default mark-complete after plan 1 of 5 was reverted — building the instrument is not proving the platform.
+- [Phase 03]: [03-02]: The D-10 secret gate branches three ways on grep's status, not two — 0 (match) fails, 1 (clean) passes, and anything else including 2 (missing or unreadable target) fails. grep exits 2 on a renamed file, and an if/else routes that into the pass arm, green-lighting exactly the Phase 4-8 edit the gate exists to catch. Both target paths are additionally asserted with `test -f` before the scan, so a rename fails loudly rather than being inferred from an exit status.
+- [Phase 03]: [03-02]: Every exact-count check over a file that is required to carry "why" comments must be anchored (`^[[:space:]]*key:`) or run over a comment-filtered stream. The workflow's mandated comments quote the very literals its checks count ("no branches filter", "`shell: bash` is mandatory", "`pnpm install --frozen-lockfile`", "keep `error`, not `warn`"), so the naive unanchored forms report a correct file as broken. `>=` threshold checks are left unanchored on purpose — a comment can only push a count above its threshold.
+- [Phase 03]: [03-02]: The probe workflow declares `permissions: contents: read`, a deliberate divergence from ci.yml, which declares none and inherits the write-capable default on same-repo pushes. Artifact upload authenticates with ACTIONS_RUNTIME_TOKEN, so read-only should suffice; plan 03-03's real run is what confirms it. If `Upload probe results` fails on permissions, widen the block and re-run — do not delete the step.
 
 ### Pending Todos
 
@@ -112,8 +115,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-13T12:37:00.295Z
-Stopped at: Completed 03-01-PLAN.md
-Resume file: .planning/phases/03-ci-spike-prove-llrt-basics-on-windows/03-02-PLAN.md
+Last session: 2026-08-13T12:47:30.000Z
+Stopped at: Completed 03-02-PLAN.md
+Resume file: .planning/phases/03-ci-spike-prove-llrt-basics-on-windows/03-03-PLAN.md
 
 **Still untracked:** `IMPROVEMENT-PLAN.md` at the repo root — the June 2026 review document, now fully absorbed into this roadmap. Plan `01-06` did **not** commit or delete it (it is a user file outside that plan's `files_modified`). Instead 01-06 used targeted `git add <path>` rather than `git add -A` on every scratch branch, so the file was never staged and never pushed to the public remote. Its literal "`git status --porcelain` is empty" assertions were satisfied in the path-scoped form. **Decide before the next phase:** commit it, delete it, or add it to `.gitignore` — a bare `git add -A` anywhere would otherwise publish it.
