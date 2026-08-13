@@ -23,7 +23,7 @@
     "lint": "eslint . --max-warnings 0",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write \"packages/**/src/**/*.{vue,ts,js,json}\" \"*.{ts,mjs}\"",
-    "build": "caido-dev build && cp -r packages/backend/assets/* dist/plugin_package/backend/assets/ 2>/dev/null; rm -f dist/plugin_package.zip dist/drift.zip && cd dist/plugin_package && zip -r ../drift.zip . -x '*.DS_Store'",
+    "build": "caido-dev build && cp -r packages/backend/assets/* dist/plugin_package/backend/assets/ 2>/dev/null; rm -f dist/plugin_package.zip dist/drift.zip && cd dist/plugin_package && zip -r ../plugin_package.zip . -x '*.DS_Store'",
     "watch": "caido-dev watch"
   },
   "devDependencies": {

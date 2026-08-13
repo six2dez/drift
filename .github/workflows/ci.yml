@@ -64,6 +64,6 @@ jobs:
         uses: actions/upload-artifact@v5
         with:
           name: drift-plugin
-          path: dist/drift.zip
+          path: dist/plugin_package.zip
           if-no-files-found: error
           retention-days: 14
