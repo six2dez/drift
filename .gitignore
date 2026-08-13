@@ -13,3 +13,11 @@ private_key.pem
 # Local working notes kept out of a public repo. Ignored rather than merely
 # untracked so a stray `git add -A` cannot publish them.
 IMPROVEMENT-PLAN.md
+
+# Tee'd output of the Phase 3 Windows probe, produced by any local
+# `node scripts/windows-llrt-probe.mjs 2>&1 | tee probe-results.txt` run and by
+# a downloaded copy of the CI artifact. Ignored rather than merely untracked so
+# a stray `git add -A` cannot publish it. No leading slash, so a copy landing in
+# a subdirectory is covered too. The durable record is the committed findings
+# document in the phase directory, not this file — the CI copy expires.
+probe-results.txt
