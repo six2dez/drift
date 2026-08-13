@@ -97,13 +97,22 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. The probe records the remaining assertions: `.cmd` direct-spawn behavior (EINVAL / runs / hangs), `where.exe` spawnability + CRLF output parse, bare `"os"` import resolution, `USERPROFILE`/`APPDATA`/`LOCALAPPDATA` presence, and `crypto.randomUUID` availability.
   4. Results are captured as a CI log/artifact that confirms the direct-spawn + env-injection architecture (or triggers the documented `.cmd`-launcher fallback) and feeds back to this roadmap before Phase 4 begins.
 
-**Plans**: 5 plans (4 waves)
-Plans:
+**Plans**: 5 plans (4 waves)Plans:
+**Wave 1**
 
 - [ ] 03-01-PLAN.md — Write the seven-assertion Node probe (four-surface spawn classifier, D-05/D-06/D-07 exit contract) and ignore its output file
 - [ ] 03-02-PLAN.md — Write the windows-latest probe workflow (bare triggers, ci.yml-matched pins, D-10 secret gate) and prove its structure against ci.yml
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 03-03-PLAN.md — Local pre-flight, then run the probe on a real windows-latest host and capture all seven assertion lines with the run URL
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
 - [ ] 03-04-PLAN.md — Falsifiability: break the probe on purpose, prove the job goes red and the artifact still uploads, then revert and tear down
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
 - [ ] 03-05-PLAN.md — Write 03-FINDINGS.md from the measured output and settle the P0-ENV blocker in STATE.md
 
 **Research flag**: YES — this phase IS the research. Its results resolve the LLRT unknowns all other port phases depend on and must feed back before Phase 4.
