@@ -80,6 +80,25 @@ jobs:
         uses: actions/setup-node@v5
         with:
           node-version: '24'
+          # MEASURED, not precautionary. Without this line the step fails with
+          # "Unable to locate executable file: pnpm" and the probe never runs at
+          # all — observed on run 31702174047 (2026-08-13), which died here with
+          # the D-10 gate and the probe both skipped.
+          #
+          # setup-node@v5 defaults package-manager-cache to true and auto-enables
+          # dependency caching whenever package.json carries a packageManager
+          # field; this repo's says pnpm@9.0.0 (package.json:20), so the action
+          # shells out to a pnpm binary that this workflow deliberately never
+          # installs. ci.yml gets away with `cache: pnpm` only because
+          # pnpm/action-setup@v6 runs ahead of it (ci.yml:32-36) — the comment
+          # there says so explicitly. There is no such step here by design, so
+          # the automatic cache has to be turned off rather than fed.
+          #
+          # The input is new in @v5: under @v4 caching was opt-in through `cache:`
+          # alone, which is why ci.yml has no analogous line and why the omission
+          # was not visible until a real run. Do not delete this to "match
+          # ci.yml"; ci.yml is not comparable without a pnpm step.
+          package-manager-cache: false
 
       # Runs before the probe so it fails fast, before anything could be printed.
       # This gate outlives the spike on purpose: Phases 4-8 will edit both of the
