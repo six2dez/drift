@@ -708,20 +708,24 @@ Confidence that the probe is sufficient: HIGH. The OS-level mechanism (`CreatePr
 
 ---
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **Does P1-CMD produce EINVAL in LLRT (not just Node)?**
+All three were settled during planning — Q1 and Q2 by design (the probe is built to
+*measure* them rather than predict them), Q3 by user decision D-02 in `03-CONTEXT.md`.
+Nothing in this section is still open.
+
+1. **Does P1-CMD produce EINVAL in LLRT (not just Node)?** — **(RESOLVED — measured, not predicted)**
    - What we know: Node ≥ 18.20.2 throws EINVAL. LLRT's Rust source does NOT implement this guard — Rust's `std::process::Command` on Windows calls `CreateProcess` directly, which simply fails with `ERROR_BAD_EXE_FORMAT` or similar for `.cmd` files, likely surfacing as a different error code.
    - What's unclear: Exact error LLRT will surface when spawning a `.cmd` directly.
-   - Recommendation: Probe records whatever error occurs. The `cmd.exe /c` design is correct regardless — it is the safest approach even if LLRT doesn't throw EINVAL.
+   - **Resolution:** This is precisely what P1-CMD is designed to answer, and no standalone LLRT Windows binary exists to answer it directly (see the vehicle decision above). The probe records the raw `err.code` and `err.message` and classifies on which of four spawn *surfaces* fired (`throw` / `error` / `close` / `timeout`) rather than on a predicted error code, so any of the possible LLRT or Node errors is a conclusive result. D-07 makes only an *unclassifiable* outcome a failure. The `cmd.exe /c` design is correct regardless — it is the safest approach even if LLRT doesn't throw EINVAL. The measured surface is recorded in `03-FINDINGS.md` and is what Phase 7 builds against.
 
-2. **What exact error does Windows `CreateProcess` return for a `.cmd` file?**
+2. **What exact error does Windows `CreateProcess` return for a `.cmd` file?** — **(RESOLVED — same measurement as Q1)**
    - What we know: Windows `CreateProcess` on a `.cmd` file without `CREATE_NEW_CONSOLE` / shell invocation returns `ERROR_BAD_EXE_FORMAT` (193). Node maps this to EINVAL post-CVE-2024-27980.
    - What's unclear: How LLRT surfaces this Windows error at the JavaScript level — could be EINVAL, ENOENT, or a custom LLRT error.
-   - Recommendation: Probe records the raw `err.code` and `err.message`. Phase 7 plan handles all variants.
+   - **Resolution:** Subsumed by Q1. The probe records the raw `err.code` and `err.message` verbatim and the findings document carries them unedited, so Phase 7 handles the variant that actually occurred rather than all hypothetical variants. Note the probe runs on Node ≥ 24, so the value it records is Node's mapping; LLRT's mapping remains covered by the residual-risk section above.
 
-3. **Is Phase 3 workflow file meant to be permanent or removed after Phase 9?**
-   - Recommendation: Mark it as temporary in comments. Phase 9 creates the permanent `windows-latest` build+vitest job. After Phase 9 is complete and merged, `windows-llrt-probe.yml` can be removed or left as documentation of the spike findings. Decision is deferred to Phase 9.
+3. **Is Phase 3 workflow file meant to be permanent or removed after Phase 9?** — **(RESOLVED by decision D-02)**
+   - **Resolution:** Removed. `03-CONTEXT.md` D-02 settles this: the workflow lives until Phase 9 as an early net while Phases 4-8 write the port code, and is **deleted** when Phase 9 lands CI-01 (the permanent `windows-latest` build+vitest regression job). It is explicit debt with a due date — not an indefinite fixture and not a delete-immediately spike. The earlier recommendation here ("decision is deferred to Phase 9", "can be removed or left as documentation") is superseded and must not be followed: leaving it in place would mean two jobs with overlapping purpose, which D-02 exists to prevent. Both `.github/workflows/windows-llrt-probe.yml` and `scripts/windows-llrt-probe.mjs` carry the Phase 9 deletion date in their own header comments, and the durable record is `03-FINDINGS.md` (D-11), not the workflow. The one property that must *survive* the deletion is D-10's no-secret-material gate, which Phase 9's replacement job carries forward.
 
 ---
 
