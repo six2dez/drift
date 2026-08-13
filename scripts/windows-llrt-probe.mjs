@@ -70,6 +70,29 @@ const GATING_IDS = Object.freeze(["P0-ENV", "P0-TMP", "P1-CMD"]);
 
 const SPAWN_TIMEOUT_MS = 5000;
 
+// Hoisted so the probe contains EXACTLY ONE occurrence of the Windows platform
+// literal. Two assertions need it — P0-TMP's platform guard and P1-CMD's
+// refusal to draw a .cmd conclusion off-platform — and plan 03-04's
+// falsifiability mutation flips this one character sequence and nothing else.
+// Inlining it a second time would give that mutation two sites and silently
+// halve its blast radius.
+const WINDOWS_PLATFORM_ID = "win32";
+
+// The errnos that constitute a conclusive answer about direct .cmd spawning
+// under D-07. EINVAL is Node's CVE-2024-27980 guard (>= 18.20.2); EPERM/EBUSY
+// are a Defender or AppLocker handle on the file; ENOENT and ENOEXEC are the
+// image-activation refusals. Anything outside this set — notably EACCES from a
+// locked-down TEMP — says something about the host, not about .cmd semantics,
+// and must escalate as indeterminate rather than be promoted to an
+// architectural verdict for Phases 4-8.
+const CONCLUSIVE_CMD_ERRNOS = Object.freeze([
+  "EINVAL",
+  "EPERM",
+  "EBUSY",
+  "ENOENT",
+  "ENOEXEC",
+]);
+
 // ── Output grammar: SINGLE EMISSION ─────────────────────────────────
 //
 // pass() and fail() are RECORDERS, not printers. They push onto `results` and
@@ -259,7 +282,7 @@ function assertP0Tmp() {
   const tempDirExists = existsSync(tempDir);
   info("P0-TMP", `drive-letter=${hasDriveLetter} exists-on-disk=${tempDirExists}`);
 
-  if (osPlatform !== "win32") { // single uncommented occurrence of this literal — plan 03-04 mutates exactly it
+  if (osPlatform !== WINDOWS_PLATFORM_ID) { // the literal lives on WINDOWS_PLATFORM_ID — plan 03-04 mutates exactly that one site
     fail("P0-TMP", `os.platform() returned ${JSON.stringify(osPlatform)}, which is not the Windows platform id — this host is not Windows, so the Windows temp-dir assertion cannot be satisfied here`);
     return;
   }
@@ -280,8 +303,17 @@ function assertP0Tmp() {
 // different architecture for Phases 4-8, so a "wrong" answer is not a failure.
 // An outcome the probe cannot CLASSIFY is the failure, because it leaves Phase 4
 // with no architectural basis at all.
+//
+// "Classified" is narrower than "the spawn did something". Two guards keep an
+// unrelated host condition from being promoted to a .cmd verdict: the platform
+// must be Windows (a POSIX exec outcome on a file named .cmd measures the POSIX
+// loader, not Windows), and any error surface must carry an errno from
+// CONCLUSIVE_CMD_ERRNOS. Everything else records FAIL/indeterminate, which is
+// what D-07 asks for — an escalation, not a false conclusive on a gating ID.
 
 async function assertP1Cmd() {
+  const hostPlatform = platform();
+  const onWindows = hostPlatform === WINDOWS_PLATFORM_ID;
   const cmdPath = join(tmpdir(), `probe-test-${Date.now()}.cmd`);
   let written = false;
 
@@ -291,26 +323,44 @@ async function assertP1Cmd() {
       written = true;
     } catch (error) {
       info("P1-CMD", `could not write the probe .cmd at ${cmdPath}: ${describeError(error)}`);
-      fail("P1-CMD", `indeterminate — writing the probe .cmd to ${cmdPath} failed (${describeError(error)}), so no spawn surface was observed at all`);
+      fail("P1-CMD", `indeterminate — writing the probe .cmd to ${cmdPath} on ${hostPlatform} failed (${describeError(error)}), so no spawn surface was observed at all`);
       return;
     }
 
-    info("P1-CMD", `wrote ${cmdPath} with CRLF line endings; spawning it directly with a ${SPAWN_TIMEOUT_MS} ms bound`);
+    info("P1-CMD", `wrote ${cmdPath} with CRLF line endings; spawning it directly on ${hostPlatform} with a ${SPAWN_TIMEOUT_MS} ms bound`);
     const observed = await spawnCapture(cmdPath, [], {}, SPAWN_TIMEOUT_MS);
     // Raw observation first, so it is in the artifact independently of how the
     // classification below turned out.
     info("P1-CMD", `surface=${observed.surface} exit=${observed.exitCode} stdout=${JSON.stringify(observed.stdout)} stderr=${JSON.stringify(observed.stderr)} error=${describeError(observed.error)}`);
 
-    if (observed.surface === "throw") {
-      pass("P1-CMD", `spawn-threw-sync — spawn() threw synchronously with ${describeError(observed.error)} (EINVAL is expected on Node >= 18.20.2 from the CVE-2024-27980 guard; EPERM/EBUSY from a Defender handle and ENOENT are equally conclusive). Phases 4-8 must route .cmd targets through cmd.exe /c`);
-    } else if (observed.surface === "error") {
-      pass("P1-CMD", `spawn-error-event — the child emitted an error event with ${describeError(observed.error)} (conclusive: direct .cmd spawn is not usable on this host, so Phases 4-8 must route .cmd targets through cmd.exe /c)`);
+    // Platform guard FIRST. Off Windows this spawn measured the POSIX loader:
+    // an EACCES from a missing execute bit, or — if the fixture happens to be
+    // executable — /bin/sh running `echo CMD_PROBE_RAN` and producing the
+    // marker. Both would otherwise be recorded as a conclusive .cmd verdict on
+    // a gating ID, which is exactly the false-green the exit contract exists to
+    // prevent.
+    if (!onWindows) {
+      fail("P1-CMD", `indeterminate — this host is ${hostPlatform}, not Windows, so the observed surface=${observed.surface} (${describeError(observed.error)}) is an ordinary POSIX exec outcome for a file that merely has a .cmd suffix and says nothing about how Windows handles a direct .cmd spawn. Only a windows-latest run can answer this; the exit code gates on it deliberately (D-07)`);
+      return;
+    }
+
+    const errno = observed.error?.code;
+    const conclusiveErrno = typeof errno === "string" && CONCLUSIVE_CMD_ERRNOS.includes(errno);
+
+    if (observed.surface === "throw" || observed.surface === "error") {
+      if (!conclusiveErrno) {
+        fail("P1-CMD", `indeterminate — surface=${observed.surface} on ${hostPlatform} with ${describeError(observed.error)}, whose errno is not one D-07 recognises as a .cmd answer (${CONCLUSIVE_CMD_ERRNOS.join(", ")}). An EACCES from a locked-down TEMP or any other host condition describes this machine, not .cmd semantics, so Phase 4 has no architectural basis and the job must break`);
+      } else if (observed.surface === "throw") {
+        pass("P1-CMD", `spawn-threw-sync — on ${hostPlatform}, spawn() threw synchronously with ${describeError(observed.error)} (EINVAL is expected on Node >= 18.20.2 from the CVE-2024-27980 guard; EPERM/EBUSY from a Defender handle, ENOENT and ENOEXEC are equally conclusive). Phases 4-8 must route .cmd targets through cmd.exe /c`);
+      } else {
+        pass("P1-CMD", `spawn-error-event — on ${hostPlatform}, the child emitted an error event with ${describeError(observed.error)} (conclusive: direct .cmd spawn is not usable on this host, so Phases 4-8 must route .cmd targets through cmd.exe /c)`);
+      }
     } else if (observed.surface === "close" && observed.stdout.includes("CMD_PROBE_RAN")) {
-      pass("P1-CMD", `ran — the direct .cmd spawn produced the CMD_PROBE_RAN marker and closed with exit ${observed.exitCode} (conclusive: this runtime has no .cmd guard; cmd.exe /c is still the safer branch for argument handling)`);
+      pass("P1-CMD", `ran — on ${hostPlatform}, the direct .cmd spawn produced the CMD_PROBE_RAN marker and closed with exit ${observed.exitCode} (conclusive: this runtime has no .cmd guard; cmd.exe /c is still the safer branch for argument handling)`);
     } else if (observed.surface === "timeout") {
-      pass("P1-CMD", `hung — the direct .cmd spawn produced no terminal event within ${SPAWN_TIMEOUT_MS} ms and was SIGKILLed (conclusive: direct .cmd spawn is unreliable, so Phases 4-8 must route .cmd targets through cmd.exe /c)`);
+      pass("P1-CMD", `hung — on ${hostPlatform}, the direct .cmd spawn produced no terminal event within ${SPAWN_TIMEOUT_MS} ms and was SIGKILLed (conclusive: direct .cmd spawn is unreliable, so Phases 4-8 must route .cmd targets through cmd.exe /c)`);
     } else {
-      fail("P1-CMD", `indeterminate — surface=${observed.surface} exit=${observed.exitCode} with no CMD_PROBE_RAN marker; stdout=${JSON.stringify(observed.stdout)} stderr=${JSON.stringify(observed.stderr)} error=${describeError(observed.error)}. This is none of D-07's three legitimate outcomes, so Phase 4 has no architectural basis and the job must break`);
+      fail("P1-CMD", `indeterminate — surface=${observed.surface} exit=${observed.exitCode} on ${hostPlatform} with no CMD_PROBE_RAN marker; stdout=${JSON.stringify(observed.stdout)} stderr=${JSON.stringify(observed.stderr)} error=${describeError(observed.error)}. This is none of D-07's three legitimate outcomes, so Phase 4 has no architectural basis and the job must break`);
     }
   } finally {
     if (written) {
