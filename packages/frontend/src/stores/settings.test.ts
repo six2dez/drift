@@ -329,4 +329,50 @@ describe("settings store", () => {
 
     expect(mockSdk.backend.syncCaidoSessionToken).toHaveBeenCalledWith("");
   });
+
+  it("forwards the parsed accessToken when storage holds a real token", async () => {
+    // This is the case that kills the always-`undefined` mutant. Every other
+    // test in this file asserts syncCaidoSessionToken received "", which is
+    // exactly what a permanently broken read produces too — so none of them can
+    // detect a regression in the forwarding direction. This one drives a
+    // present token and pins the trimmed accessToken, not the raw JSON.
+    const getItem = vi.fn(() => JSON.stringify({ accessToken: "  tok-123  " }));
+    vi.stubGlobal("window", { localStorage: { getItem } });
+    const store = useSettingsStore();
+
+    await store.syncCaidoRuntimeContext();
+
+    expect(mockSdk.backend.syncCaidoSessionToken).toHaveBeenCalledWith("tok-123");
+    expect(getItem).toHaveBeenCalledWith("CAIDO_AUTHENTICATION");
+  });
+
+  it("pushes an empty token and warns when the stored value is not valid JSON", async () => {
+    // Covers the malformed-JSON branch in settings.ts. The showToast assertion
+    // is what makes this test die under the always-`undefined` mutation as
+    // well: a broken read returns early on the empty-raw branch and never
+    // reaches the parse, so no warning is ever raised.
+    vi.stubGlobal("window", { localStorage: { getItem: vi.fn(() => "not-json") } });
+    const store = useSettingsStore();
+
+    await store.syncCaidoRuntimeContext();
+
+    expect(mockSdk.backend.syncCaidoSessionToken).toHaveBeenCalledWith("");
+    expect(mockSdk.window.showToast).toHaveBeenCalledWith(
+      expect.stringContaining("Failed to read the current Caido session token"),
+      { variant: "warning" },
+    );
+  });
+
+  it("treats a non-string getItem return as no token", async () => {
+    // A page-injected or polyfilled storage can hand back a non-string, which
+    // the guard's `typeof value === "string"` ternary collapses to undefined.
+    // This test intentionally survives the always-`undefined` mutation because
+    // it asserts "" — it covers a different arm, not the forwarding direction.
+    vi.stubGlobal("window", { localStorage: { getItem: vi.fn(() => 42) } });
+    const store = useSettingsStore();
+
+    await store.syncCaidoRuntimeContext();
+
+    expect(mockSdk.backend.syncCaidoSessionToken).toHaveBeenCalledWith("");
+  });
 });
