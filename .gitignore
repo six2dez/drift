@@ -9,3 +9,7 @@ dist/
 private.pem
 private_key.pem
 *.pem
+
+# Local working notes kept out of a public repo. Ignored rather than merely
+# untracked so a stray `git add -A` cannot publish them.
+IMPROVEMENT-PLAN.md
