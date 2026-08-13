@@ -1,0 +1,161 @@
+# TEMPORARY — DELETED IN PHASE 9 (D-02).
+# This workflow is a de-risking spike with a due date, not a permanent fixture.
+# It is removed in Phase 9, when requirement CI-01 lands the permanent
+# windows-latest build+vitest regression job. The due date is named literally
+# because an undated "temporary" comment becomes permanent: Phase 9, CI-01.
+#
+# Deliberately its own file rather than a job inside ci.yml (D-03). Two reasons:
+# Phase 9 can delete one file without touching the quality gate, and a red probe
+# never pollutes the four Verify (Node N) legs that are the real merge signal.
+#
+# Vehicle caveat (D-08): this job runs Node.js, NOT LLRT. No standalone LLRT
+# Windows binary exists — upstream dropped it at v0.6.0-beta and
+# caido/dependency-llrt publishes no releases — and running Caido headless in CI
+# needs a paid Teams plan. The probe labels its runtime-dependent assertions the
+# same way in its own output; it is stated here as well because a reader lands on
+# the YAML first.
+name: Windows LLRT Primitive Probe
+
+# Bare push/pull_request keys (no branches filter) mean every branch, matching
+# ci.yml:3-8 (D-01). A workflow only runs from the branch it lives on, so
+# filtering to main meant no feature branch was ever verified before merge —
+# Phase 1 removed that filter deliberately. Reintroducing it here would mean the
+# probe never runs on the branch where it is being developed, which makes D-13
+# (a real run producing all seven assertion lines) unreachable without merging to
+# main first.
+on:
+  push:
+  pull_request:
+
+concurrency:
+  # A same-repo PR fires both push and pull_request. Keying on the PR number when
+  # present collapses the two into one cancellable group instead of burning two
+  # Windows runners and producing two artifacts to reconcile. This is ci.yml:14's
+  # expression verbatim, not the older ref-only form; github.workflow differs from
+  # ci.yml's, so the two groups cannot collide.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+# A deliberate divergence from ci.yml, which declares no permissions block and so
+# inherits the default write-capable GITHUB_TOKEN on same-repo pushes. This job
+# only ever needs to read the repository: artifact upload authenticates with
+# ACTIONS_RUNTIME_TOKEN rather than GITHUB_TOKEN, so read-only content access is
+# sufficient. If the real run in plan 03-03 shows "Upload probe results" failing
+# with a permissions error, the correct fix is to widen this block and re-run —
+# not to delete the probe step. Record whichever outcome occurs.
+permissions:
+  contents: read
+
+jobs:
+  windows-llrt-probe:
+    # The job name carries the requirement ID the way ci.yml's legs carry their
+    # discriminating variable.
+    name: Windows LLRT primitive assertions (CI-02)
+    runs-on: windows-latest
+    # A probe assertion can hang — "hangs" is one of P1-CMD's three legitimate
+    # outcomes — and the default 360-minute ceiling would hold a Windows runner
+    # open for that whole time. This job is single-legged, so there is no
+    # strategy/matrix/fail-fast block.
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      # No cache: input, no pnpm/action-setup step and no install step. That is a
+      # deliberate divergence from ci.yml's shape, not something forgotten: the
+      # probe imports Node built-ins only and has zero dependencies, so a
+      # `pnpm install --frozen-lockfile` here would add roughly a minute of
+      # Windows runner time plus a failure surface that could turn this job red
+      # for reasons that say nothing about the seven assertions — exactly the
+      # noise D-03 separates this workflow to avoid. Proving the install path on
+      # Windows is Phase 9's job (CI-01), whose purpose is build and vitest.
+      # D-04's fourth pin, pnpm/action-setup@v6, is therefore unused here; any
+      # future edit that adds pnpm to this workflow must use @v6 to stay aligned
+      # with ci.yml:36.
+      #
+      # Node 24 is Active LTS — the same reasoning ci.yml:59-61 uses to select its
+      # artifact-upload leg — and is far past 18.20.2, so the CVE-2024-27980 .cmd
+      # EINVAL guard that P1-CMD characterises is definitely present.
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+
+      # Runs before the probe so it fails fast, before anything could be printed.
+      # This gate outlives the spike on purpose: Phases 4-8 will edit both of the
+      # files it scans, and re-running on every push is what keeps the property
+      # true through those edits rather than making it a one-time review (D-10).
+      # Plan 03-04 proves the gate actually bites by tripping it deliberately on a
+      # throwaway branch and reading this step's conclusion by name from the API,
+      # so the step name is a contract — keep it stable.
+      - name: Assert no secret material is reachable (D-10)
+        shell: bash
+        run: |
+          # Assert both targets exist first, so a rename or deletion fails loudly
+          # rather than being inferred from an exit status.
+          for f in .github/workflows/windows-llrt-probe.yml scripts/windows-llrt-probe.mjs; do
+            test -f "$f" || { echo "Gate failed: scan target missing: $f"; exit 1; }
+          done
+          # The patterns are written so they do not match their own source text —
+          # as literal text neither contains the string it detects, while as
+          # extended regexes both match it exactly. Do not "clean them up".
+          #
+          # `shell: bash` resolves to `bash --noprofile --norc -eo pipefail {0}`,
+          # so -e is active and a bare non-zero grep would abort this step before
+          # any branch could run. The left side of || is a condition context, so
+          # this form is -e-safe and still captures the status.
+          status=0
+          grep -nE 'CAIDO_(TOKEN)|secret(s)\.' \
+            .github/workflows/windows-llrt-probe.yml \
+            scripts/windows-llrt-probe.mjs || status=$?
+          # Three arms, not two. grep exits 0 on a match, 1 on no match, and 2
+          # when a target is missing or unreadable. An if/else would route that 2
+          # into the pass arm and silently green-light exactly the Phase 4-8 edit
+          # this gate exists to catch. Do NOT collapse the third arm into the
+          # second.
+          if [ "$status" -eq 0 ]; then
+            echo "Gate failed: a Caido token reference or a GitHub secrets expression appears in a scanned file (see the match above)."
+            exit 1
+          elif [ "$status" -eq 1 ]; then
+            echo "Gate passed: no Caido token reference and no GitHub secrets expression in .github/workflows/windows-llrt-probe.yml or scripts/windows-llrt-probe.mjs"
+          else
+            echo "Gate failed: could not read its scan targets (grep status $status)."
+            exit 1
+          fi
+
+      # `shell: bash` is mandatory here and not stylistic. GitHub Actions maps it
+      # to `bash --noprofile --norc -eo pipefail {0}` on every OS including
+      # Windows, and pipefail is what makes the pipeline return the probe's exit
+      # code instead of tee's — under the default pwsh or cmd the probe could
+      # report FAIL and this step would still be green.
+      #
+      # 2>&1 folds stderr into the artifact. The probe writes its counted status
+      # lines to stdout only, but an uncaught runtime error would surface on
+      # stderr and must not be lost.
+      #
+      # Exit-code contract: 0 means both P0 assertions passed and P1-CMD was
+      # conclusive; 1 means P0-ENV failed, P0-TMP failed, or P1-CMD could not be
+      # classified. A non-zero exit here is a legitimate recorded finding rather
+      # than a broken job — D-05 through D-07 define which outcomes gate.
+      - name: Run LLRT Windows primitive probe
+        shell: bash
+        run: node scripts/windows-llrt-probe.mjs 2>&1 | tee probe-results.txt
+
+      # Uploads unconditionally because the results matter most precisely when the
+      # probe exits non-zero; a conditional upload would discard exactly the
+      # evidence Phase 4 needs. if-no-files-found stays `error` rather than
+      # `warn`: a missing results file is the false-green shape D-13 exists to
+      # prevent, because the job would otherwise be green with no evidence at all.
+      # retention-days is 30 because the durable record is the committed findings
+      # document (D-11) and this artifact is only a convenience copy that expires.
+      # The artifact name embeds github.run_number, so plans 03-03 and 03-04 must
+      # resolve the exact name from the run's artifact listing rather than assume
+      # a fixed string when downloading.
+      - name: Upload probe results
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: windows-llrt-probe-${{ github.run_number }}
+          path: probe-results.txt
+          if-no-files-found: error
+          retention-days: 30
