@@ -32,7 +32,7 @@ See: .planning/PROJECT.md (updated 2026-06-26)
 Phase: 01 (restore-the-verification-signal) — EXECUTING
 Plan: 6 of 6 (all waves complete: 01-01..01-06)
 Status: Phase 01 plans all executed — awaiting phase verification. SIG-01, SIG-02 and SIG-03 marked Complete in REQUIREMENTS.md, each backed by a recorded CI run.
-Last activity: 2026-08-12 -- Phase 01 wave 3 complete; matrix green on Node 20/22/24/26, lint gate proven to fail CI, SIG-03f revert-proof passed
+Last activity: 2026-08-13 -- Completed quick task 260813-dc7: closed the SIG-01h forwarding gap (131 -> 134 tests); phase 01 awaiting re-verification
 
 Progress: [██████████] 100%
 
@@ -90,6 +90,13 @@ None yet. Eleven items are parked in the ROADMAP backlog (999.1-999.11): nine fr
 - LLRT `spawn({env})` env-passthrough on Windows is unverified (P0 risk). Phase 3 resolves it; if it fails, the documented fallback is a minimal `.cmd` launcher that `set`s env vars.
 - Gemini-on-Windows MCP reliability has open upstream issues — treat as best-effort, gate Phase 7 on a real-machine check. Codex `${VAR}` expansion in `mcp add` needs CI confirmation.
 - RESOLVED 2026-08-12: the requirement-count discrepancy ("22 v1 requirements" vs 24 enumerated) is reconciled — REQUIREMENTS.md now enumerates and maps 43.
+- RESOLVED 2026-08-13 (quick 260813-dc7): Phase 01 verification gap G1 (SIG-01h) is closed. `readBrowserStorageItem()` was mutation-survivable in the forwarding direction — no test drove a *present* token through it, so a regression killing Caido token pickup would have shipped green. Three append-only cases added to `settings.test.ts` (forwarding, JSON-parse failure, non-string `getItem`). Falsifiability proven, not assumed: with `if (key !== "__never__") return undefined;` at `settings.ts:35` the suite reports **2 failed / 11 passed** (Test C survives by design); mutation reverted and confirmed byte-identical. Suite 131 → **134 tests**, lint still 0/0.
+
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 260813-dc7 | Close the SIG-01h forwarding gap — make the storage guard falsifiable, correct 01-VALIDATION.md | 2026-08-13 | 6d1943d | [260813-dc7-add-a-settings-test-ts-case-driving-a-pr](./quick/260813-dc7-add-a-settings-test-ts-case-driving-a-pr/) |
 
 ## Deferred Items
 
