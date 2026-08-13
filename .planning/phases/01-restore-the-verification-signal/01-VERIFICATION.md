@@ -1,7 +1,10 @@
 ---
 phase: 01-restore-the-verification-signal
 verified: 2026-08-13T09:58:00Z
-status: human_needed
+status: passed
+status_history:
+  - human_needed 2026-08-13T09:58:00Z — Node 20 leg unmeasured (no local binary, branch unpushed)
+  - passed 2026-08-13T10:18:00Z — resolved by CI run 31690000562 on 1cb1cb6; Verify (Node 20) on v20.20.2 reported 23 files / 134 tests
 score: 32/32 must-haves verified
 overrides_applied: 0
 re_verification:

@@ -1,14 +1,18 @@
 ---
-status: partial
+status: resolved
 phase: 01-restore-the-verification-signal
 source: [01-VERIFICATION.md]
 started: 2026-08-13T10:05:00Z
-updated: 2026-08-13T10:05:00Z
+updated: 2026-08-13T10:18:00Z
+resolved_by:
+  run: https://github.com/six2dez/drift/actions/runs/31690000562
+  sha: 1cb1cb6
+  result: all four legs success; Verify (Node 20) on v20.20.2 reported 23 files / 134 tests
 ---
 
 ## Current Test
 
-[awaiting human action — push `fix/security-hotfixes` to trigger the CI matrix]
+[none — resolved by CI run 31690000562]
 
 ## Tests
 
@@ -32,14 +36,22 @@ unmeasured claims.
 
 resolves automatically: yes, on the next push of this branch.
 
-result: [pending]
+result: PASSED — CI run
+[31690000562](https://github.com/six2dez/drift/actions/runs/31690000562) on `1cb1cb6`.
+`Verify (Node 20)` acquired `v20.20.2` and reported **23 files / 134 tests passed**, matching
+the local measurement on 22.23.2 / 24.13.0 / 26.7.0. All four legs concluded `success`.
+
+Incidentally confirmed on the same run: the `Upload plugin artifact` step on the Node 24 leg
+succeeded with `dist/plugin_package.zip` (artifact `drift-plugin`, 600904 bytes). Since that
+step carries `if-no-files-found: error`, it independently proves the `ci.yml` path fix made
+during the `main` merge was both necessary and correct.
 
 ## Summary
 
 total: 1
-passed: 0
+passed: 1
 issues: 0
-pending: 1
+pending: 0
 skipped: 0
 blocked: 0
 
