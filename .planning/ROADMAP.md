@@ -109,7 +109,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 03-04-PLAN.md — Falsifiability: break the probe on purpose, prove the job goes red and the artifact still uploads, then revert and tear down
+- [x] 03-04-PLAN.md — Falsifiability: break the probe on purpose, prove the job goes red and the artifact still uploads, then revert and tear down
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
