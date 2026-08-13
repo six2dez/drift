@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 03-03-PLAN.md
-last_updated: "2026-08-13T13:03:38.028Z"
-last_activity: 2026-08-13 -- Plan 03-03 complete (real windows-latest run, 7/7 PASS, D-13 evidence captured)
+stopped_at: Completed 03-04-PLAN.md
+last_updated: "2026-08-13T13:17:33.906Z"
+last_activity: 2026-08-13 -- Plan 03-04 complete (both verification gates falsified on real windows-latest runs; all scratch branches torn down)
 progress:
   total_phases: 21
   completed_phases: 1
   total_plans: 11
-  completed_plans: 9
+  completed_plans: 10
   percent: 5
 ---
 
@@ -26,9 +26,9 @@ See: .planning/PROJECT.md (updated 2026-06-26)
 ## Current Position
 
 Phase: 03 (CI Spike — Prove LLRT Basics on Windows) — EXECUTING
-Plan: 4 of 5
+Plan: 5 of 5
 Status: Ready to execute
-Last activity: 2026-08-13 -- Plan 03-03 complete (real windows-latest run, 7/7 PASS, D-13 evidence captured)
+Last activity: 2026-08-13 -- Plan 03-04 complete (both verification gates falsified on real windows-latest runs; all scratch branches torn down)
 
 Progress: [█░░░░░░░░░] 10% (1 of 10 milestone phases)
 
@@ -36,21 +36,21 @@ Progress: [█░░░░░░░░░] 10% (1 of 10 milestone phases)
 
 **Velocity:**
 
-- Total plans completed: 9 (plus 1 quick task)
+- Total plans completed: 10 (plus 1 quick task)
 - Average duration: ~10 min
-- Total execution time: ~1.5 hours
+- Total execution time: ~1.7 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 01 | 6 | - | - |
-| 03 | 3 of 5 | 19min | ~6min |
+| 03 | 4 of 5 | 30min | ~8min |
 
 **Recent Trend:**
 
-- Last 5 plans: 01-05 (6 min), 01-06 (21 min), 03-01 (4 min, 2 tasks, 2 files), 03-02 (6 min, 2 tasks, 1 file), 03-03 (9 min, 2 tasks, 1 file, 2 Windows CI runs)
-- Trend: steady; 01-06 is the longest because it waits on three real CI runs and a three-Node local pre-flight. 03-03 came in at 9 min despite needing two real `windows-latest` runs — the Windows probe job completes in 16-18s, so the CI wait is far cheaper than the ubuntu matrix.
+- Last 5 plans: 01-06 (21 min), 03-01 (4 min, 2 tasks, 2 files), 03-02 (6 min, 2 tasks, 1 file), 03-03 (9 min, 2 tasks, 1 file, 2 Windows CI runs), 03-04 (11 min, 3 tasks, 0 files net, 4 CI runs)
+- Trend: steady; 01-06 is the longest because it waits on three real CI runs and a three-Node local pre-flight. 03-03 came in at 9 min despite needing two real `windows-latest` runs — the Windows probe job completes in 16-18s, so the CI wait is far cheaper than the ubuntu matrix. 03-04 waited on four runs (2 Windows probe + 2 ubuntu matrix) and still finished in 11 min for the same reason.
 
 *Updated after each plan completion*
 
@@ -79,7 +79,12 @@ Recent decisions affecting current work:
 - [Phase 03]: [03-03]: `actions/setup-node@v5` defaults `package-manager-cache: true` and auto-enables dependency caching from `package.json`'s `packageManager` field, then shells out to the named package manager — so any Windows job in this repo without a `pnpm/action-setup` step dies at `Setup Node` with `Unable to locate executable file: pnpm`. `ci.yml` is not a counter-example: it runs `pnpm/action-setup@v6` first. The input is new in `@v5` (under `@v4` caching was opt-in via `cache:` alone), so static review against `ci.yml` cannot catch this. The probe workflow sets `package-manager-cache: false` rather than adding a pnpm step, preserving its zero-dependency design.
 - [Phase 03]: [03-03]: On Windows the spawn `env` option does NOT clear `PATH` (child reported `PATH-VISIBLE`), the opposite of the darwin measurement (`PATH-ABSENT`). The mechanism is NOT a merge: libuv `src/win/process.c` `make_program_env()` back-fills exactly eleven `required_vars` from the parent when absent — `HOMEDRIVE, HOMEPATH, LOGONSERVER, PATH, SYSTEMDRIVE, SYSTEMROOT, TEMP, USERDOMAIN, USERNAME, USERPROFILE, WINDIR`. `APPDATA` and `LOCALAPPDATA` are **not** on that list, and those are exactly the variables `command-resolution.ts` needs for the Windows nvm/fnm paths. Phases 4-8 must still spread `...process.env` (or name variables explicitly) for anything outside the eleven; the probe's own "need not spread" wording over-generalises the measurement.
 - [Phase 03]: [03-03]: `os.tmpdir()` on the runner returned the 8.3 short form `C:\Users\RUNNER~1\AppData\Local\Temp` while `USERPROFILE` returned the long form `C:\Users\runneradmin`. Both valid, both on disk, not string-comparable — Phase 4-8 code comparing a temp path against a profile-derived path must normalise first.
-- [Phase 03]: [03-03]: `gh run view --log` prefixes every line with `<job>\t<step>\t<timestamp>`, and BSD `sed` does not interpret `\t` in a character class, so `sed -E 's/^[^\t]*\t[^\t]*\t//'` is a silent no-op on macOS and the following anchored grep returns nothing — indistinguishable from a proof that failed. Strip the prefix with `cut -f3-` (tab is cut's default delimiter) and set `LC_ALL=C` for multi-byte content. This is `[01-06]` issue 2 recurring in a new form.
+- [Phase 03]: [03-03]: `gh run view --log` prefixes every line with `<job>\t<step>\t<timestamp>`, and BSD `sed` does not interpret `\t` in a character class, so `sed -E 's/^[^\t]*\t[^\t]*\t//'` is a silent no-op on macOS and the following anchored grep returns nothing — indistinguishable from a proof that failed. Strip the prefix with `cut -f3-` (tab is cut's default delimiter) and set `LC_ALL=C` for multi-byte content. This is `[01-06]` issue 2 recurring in a new form. **CORRECTED 2026-08-13 (03-04):** `cut -f3-` alone is still incomplete — the timestamp is separated from the content by a *space*, not a tab, so it is part of field 3 and survives the cut, and an anchored grep still returns 0. BSD `sed` also does not interpret `\x1b`, so the ANSI strip is a second silent no-op. The full working form is `cut -f3- | perl -pe 's/\x1b\[[0-9;]*m//g' | perl -pe 's/^\d{4}-\d{2}-\d{2}T[\d:.]+Z //'`. Third recurrence of the same class in three plans — **the durable rule is to validate any log-extraction pipeline against an independently-known nonzero expected count before trusting its result.**
+- [Phase 03]: [03-04]: Falsifying two gates that sit in the same job requires two commits, not one. The D-10 gate step (4) precedes the probe step (5), and a GitHub Actions step with no `if:` defaults to `if: success()`, so a single commit carrying both defects fails at the gate and SKIPS the probe — destroying the probe-exit-path proof, which needs the failing step to be `Run LLRT Windows primitive probe` specifically. Both negative branches were cut from the same baseline `0a05174`, never from each other. Measured, not predicted: the gate-negative run shows that skip directly.
+- [Phase 03]: [03-04]: Deliberate-defect mutations are made only AFTER switching to a throwaway branch, so the defect never exists in a commit on the working branch by construction and the "revert" is a branch switch. Net-zero is then proven by comparing each file's blob hash on the working branch against the value recorded before the edit, backed by a marker `grep -c` returning 0 — never by eyeballing a restore. Both mutations here were destroyed with their branches and survive only in the run records.
+- [Phase 03]: [03-04]: A deliberate defect pushed to a PUBLIC remote must be self-labelling in the artefact a later reader will actually see. The probe mutation targeted P0-TMP rather than P0-ENV because D-05 makes a `FAIL [P0-ENV]` line a project-stopping blocker and a fabricated one in a permanent run record is a trap. The D-10 canary was a YAML comment naming a nonexistent secret and containing the literal `CANARY` plus the plan number, so the text the gate quotes into the public log announces itself — a Caido-token-shaped string was deliberately not used because that is the shape a reader would mistake for a real leak.
+- [Phase 03]: [03-04]: `if: always()` on an upload step is only provable on a RED run — on a green run an unconditional upload and a conditional one are indistinguishable. `if-no-files-found: error` is only provable when the results file is genuinely absent. The two need different runs and neither can be demonstrated by the run that produced the positive result.
+- [Phase 03]: [03-04]: `git ls-remote --heads origin 'scratch/*'` exits **0 whether or not the glob matched**, so a bare `echo "empty=$?"` after it prints 0 even with every scratch branch still alive on the public remote. Teardown must capture the output into a variable and discriminate with `test -z`, and must record the full *unfiltered* `git ls-remote --heads origin` listing alongside it so an empty match is provably empty rather than a mistyped pattern. The same `test -z` form applies to `git status --porcelain`, which also exits 0 regardless of what it printed.
 
 ### Pending Todos
 
@@ -119,10 +124,10 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-13T13:03:38.028Z
-Stopped at: Completed 03-03-PLAN.md
-Resume file: .planning/phases/03-ci-spike-prove-llrt-basics-on-windows/03-04-PLAN.md
+Last session: 2026-08-13T13:17:33.903Z
+Stopped at: Completed 03-04-PLAN.md
+Resume file: .planning/phases/03-ci-spike-prove-llrt-basics-on-windows/03-05-PLAN.md
 
-**Live on the public remote:** `scratch/ci-proof-windows-probe` at `0a05174`, deliberately left in place — plan 03-04 needs it as the baseline for its deliberate-FAIL runs and owns deleting every `scratch/*` branch at the end. `origin/main` is untouched at `2d8cf16`.
+**Live on the public remote: nothing of ours.** Plan 03-04 tore down all three `scratch/*` branches (`ci-proof-windows-probe`, `ci-proof-windows-probe-negative`, `ci-proof-windows-gate-negative`) locally and remotely. Asserted with a `test -z` discrimination over the captured glob (`scratch-glob-empty=0`) plus the full unfiltered listing, which now shows only `main` at `2d8cf16` and the pre-existing, unrelated `fix/security-hotfixes` at `0cd81f3`. `origin/main` was never pushed by this phase and is still `2d8cf16`; local `main` is 19 commits ahead and deliberately unpushed. All five Phase 3 run records still resolve after the deletions.
 
 **Still untracked:** `IMPROVEMENT-PLAN.md` at the repo root — the June 2026 review document, now fully absorbed into this roadmap. Plan `01-06` did **not** commit or delete it (it is a user file outside that plan's `files_modified`). Instead 01-06 used targeted `git add <path>` rather than `git add -A` on every scratch branch, so the file was never staged and never pushed to the public remote. Its literal "`git status --porcelain` is empty" assertions were satisfied in the path-scoped form. **Decide before the next phase:** commit it, delete it, or add it to `.gitignore` — a bare `git add -A` anywhere would otherwise publish it.
