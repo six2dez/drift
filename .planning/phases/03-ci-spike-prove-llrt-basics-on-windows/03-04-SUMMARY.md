@@ -415,6 +415,10 @@ Carried forward:
 | `scratch/*` on origin | `test -z "$(git ls-remote --heads origin 'scratch/*')"` | **`scratch-glob-empty=0`** — none survive |
 | `origin/main` unchanged | `git ls-remote --heads origin main` | `2d8cf16` — **unchanged** |
 | Working tree clean | `git status --porcelain` | *(empty)* |
+| Both scratch commits unreachable from any ref | `git branch -a --contains faff52f` / `… 4e82c2a` | **no output for either — destroyed with their branches, surviving only in the run records** |
+| `docs(03-04)` SUMMARY commit | `git log --oneline --all \| grep b3141a7` | **FOUND** |
+| `docs(03-04)` STATE commit | `git log --oneline --all \| grep 24c37b9` | **FOUND** |
+| `ROADMAP.md` / `REQUIREMENTS.md` byte-identical | `git status --porcelain <paths>` | *(empty)* — CI-02 still `[ ]` / `Pending` at `REQUIREMENTS.md:75` / `:136` |
 
 ---
 *Phase: 03-ci-spike-prove-llrt-basics-on-windows*
