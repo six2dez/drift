@@ -170,9 +170,24 @@ function spawnCapture(cmd, args, opts = {}, timeoutMs = SPAWN_TIMEOUT_MS) {
 // exist on Windows, so this assertion is not confirming an existing mechanism —
 // it is proving the REPLACEMENT mechanism before code is written on top of it.
 
+// Set in the PARENT process only, and deliberately absent from the env block
+// handed to the child. The name matters: libuv's make_program_env()
+// (src/win/process.c) back-fills a fixed eleven-name required_vars[] list —
+// HOMEDRIVE, HOMEPATH, LOGONSERVER, PATH, SYSTEMDRIVE, SYSTEMROOT, TEMP,
+// USERDOMAIN, USERNAME, USERPROFILE, WINDIR — into whatever block the caller
+// supplies, so on Windows every one of those eleven appears in the child even
+// when the block was fully replaced. PATH is on that list, which is why PATH
+// alone cannot discriminate replace-from-merge on the one platform this probe
+// exists to measure. This marker is on neither the required_vars list nor the
+// supplied block, so its presence in the child is the discriminator that
+// carries information on BOTH platforms.
+const PARENT_ONLY_MARKER = "DRIFT_PROBE_PARENT_ONLY";
+process.env[PARENT_ONLY_MARKER] = "1";
+
 const ENV_CHILD_SCRIPT =
   "process.stdout.write((process.env.SENTINEL || 'MISSING') + '|' + " +
-  "(process.env.PATH ? 'PATH-VISIBLE' : 'PATH-ABSENT'))";
+  "(process.env.PATH ? 'PATH-VISIBLE' : 'PATH-ABSENT') + '|' + " +
+  `(process.env.${PARENT_ONLY_MARKER} ? 'PARENT-INHERITED' : 'PARENT-CLEARED'))`;
 
 async function assertP0Env() {
   const sentinel = `drift-probe-sentinel-${Date.now()}`;
@@ -188,13 +203,26 @@ async function assertP0Env() {
   info("P0-ENV", `isolated-env surface=${isolated.surface} exit=${isolated.exitCode} stdout=${JSON.stringify(isolated.stdout)} stderr=${JSON.stringify(isolated.stderr)} error=${describeError(isolated.error)}`);
 
   if (isolatedFields[0] === sentinel) {
-    // Field 2 is what Phases 4-8 cannot recover from a bare PASS: whether the
-    // env option REPLACED the parent block or merged into it decides whether
-    // their spawn options must spread ...process.env.
+    // Fields 2 and 3 are what Phases 4-8 cannot recover from a bare PASS:
+    // whether the env option REPLACED the parent block or merged into it
+    // decides whether their spawn options must spread ...process.env. Field 3
+    // (the parent-only marker) is the discriminator; field 2 (PATH) is recorded
+    // for the record but is NOT evidence either way on Windows, because PATH is
+    // one of libuv's eleven back-filled names.
     const pathVisibility = isolatedFields[1] ?? "UNREPORTED";
-    const inheritance = pathVisibility === "PATH-ABSENT" ? "replaced" : "merged into";
-    info("P0-ENV", `the env option ${inheritance} the parent environment block — child reported ${pathVisibility}, so Phases 4-8 ${pathVisibility === "PATH-ABSENT" ? "MUST spread ...process.env whenever the child needs PATH" : "inherit the parent block and need not spread ...process.env"}`);
-    pass("P0-ENV", `child received SENTINEL=${sentinel} through the spawn env option; that option ${inheritance} the parent environment (child reported ${pathVisibility})`);
+    const parentBlock = isolatedFields[2] ?? "UNREPORTED";
+    let inheritance;
+    if (parentBlock === "PARENT-CLEARED") {
+      inheritance = "replaced";
+    } else if (parentBlock === "PARENT-INHERITED") {
+      inheritance = "merged into";
+    } else {
+      inheritance = "had an UNDETERMINED relationship to";
+    }
+    info("P0-ENV", `on this host (${process.platform}) the env option ${inheritance} the parent environment block: the parent-only marker ${PARENT_ONLY_MARKER} — set in the parent, omitted from the supplied block, and absent from libuv's eleven Windows required_vars — came back ${parentBlock} in the child`);
+    info("P0-ENV", `PATH separately came back ${pathVisibility}, and that field is deliberately NOT the discriminator: PATH is one of the eleven names libuv back-fills on Windows, so a PATH-VISIBLE reading there is manufactured by the back-fill and does not license "the parent block is inherited". Read the marker, not PATH`);
+    info("P0-ENV", `regardless of which way the marker read on this host, Phases 4-8 must pass every variable they need explicitly — { ...process.env, ...driftVars }, never { ...driftVars } — because APPDATA and LOCALAPPDATA, the two command-resolution.ts needs for the Windows nvm/fnm paths, are on neither the supplied block nor libuv's eleven`);
+    pass("P0-ENV", `child received SENTINEL=${sentinel} through the spawn env option; measured on ${process.platform}, that option ${inheritance} the parent environment (parent-only marker ${parentBlock}; PATH ${pathVisibility}, which is back-filled on Windows and therefore not evidence)`);
     return;
   }
 
