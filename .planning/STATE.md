@@ -2,15 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: ready
-stopped_at: Phase 01 COMPLETE — verification passed 32/32; Node 20 UAT closed by CI run 31690000562 on 1cb1cb6 (four legs green, 134 tests); branch merged up to origin/main and carries the Caido store release fix
-last_updated: "2026-08-13T10:20:00.000Z"
-last_activity: 2026-08-13 -- Phase 01 complete and verified; next is Phase 03 (CI spike, LLRT on windows-latest)
+status: verifying
+stopped_at: Phase 3 context gathered
+last_updated: "2026-08-13T10:47:07.716Z"
+last_activity: 2026-08-13 -- Phase 01 verified and marked complete
 progress:
   # total_phases counts the 10 milestone phases only. The SDK's recompute counts
   # the 11 backlog 999.x entries too (21); total_plans is likewise the roadmap's
-  # provisional sum, not the PLAN.md files currently on disk. Re-correct after any
-  # `state planned-phase` / `state patch` / `state begin-phase` / `phase complete` call.
+  # provisional sum, not the PLAN.md files currently on disk. This block is
+  # clobbered by EVERY SDK writer (`state begin-phase`, `phase complete`,
+  # `state record-session`) — re-correct after any of them.
   total_phases: 10
   completed_phases: 1
   total_plans: 18
@@ -112,8 +113,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-12
-Stopped at: Completed 01-06-PLAN.md — all 6 Phase 1 plans executed; three CI runs recorded (31605493233 green matrix, 31605906945 lint proof, 31606402559 revert-proof); SIG-01/02/03 marked Complete
-Resume file: None
+Last session: 2026-08-13T10:47:07.712Z
+Stopped at: Phase 3 context gathered
+Resume file: .planning/phases/03-ci-spike-prove-llrt-basics-on-windows/03-CONTEXT.md
 
 **Still untracked:** `IMPROVEMENT-PLAN.md` at the repo root — the June 2026 review document, now fully absorbed into this roadmap. Plan `01-06` did **not** commit or delete it (it is a user file outside that plan's `files_modified`). Instead 01-06 used targeted `git add <path>` rather than `git add -A` on every scratch branch, so the file was never staged and never pushed to the public remote. Its literal "`git status --porcelain` is empty" assertions were satisfied in the path-scoped form. **Decide before the next phase:** commit it, delete it, or add it to `.gitignore` — a bare `git add -A` anywhere would otherwise publish it.
