@@ -164,11 +164,13 @@ Which phases cover which requirements. Every v1 requirement maps to exactly one 
 | UX-04 | Phase 10 | Pending |
 
 **Coverage:**
+
 - v1 requirements: 43 REQ-IDs (24 original Windows-port IDs + 19 added 2026-08-12: SIG-01…03, COR-01…05, SEC-01…05, PERF-01…04, PRV-05, LIF-02)
 - Mapped to phases: 43
 - Unmapped: 0
 
 **Phase → requirement rollup:**
+
 - Phase 1 (Restore the Verification Signal): SIG-01, SIG-02, SIG-03
 - Phase 2 (POSIX Correctness & Hardening): COR-01, COR-02, COR-03, COR-04, COR-05, SEC-01, SEC-02, SEC-03, SEC-04, SEC-05, PERF-01
 - Phase 3 (CI Spike): CI-02

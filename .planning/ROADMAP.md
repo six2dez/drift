@@ -23,7 +23,7 @@ Two things shape the port's order. First, Caido's LLRT/QuickJS runtime behavior 
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: Restore the Verification Signal** - Green suite on Node 20/22/24/26, real ESLint in CI, CI on every branch
+- [x] **Phase 1: Restore the Verification Signal** - Green suite on Node 20/22/24/26, real ESLint in CI, CI on every branch (completed 2026-08-13)
 - [ ] **Phase 2: POSIX Correctness & Hardening** - Fix `check_scope`, `list_workflows`, settings-churn, token blast radius, and the frontend quick wins
 - [ ] **Phase 3: CI Spike — Prove LLRT Basics on Windows** - Prove the 7 LLRT runtime primitives on `windows-latest` before writing any port code
 - [ ] **Phase 4: Platform Foundation** - Pure `platform.ts`, `os.tmpdir()` everywhere, AV-retry, fail-loud runtime probe, bounded buffers
@@ -244,7 +244,7 @@ Parallelism opportunities: Phase 2 may run alongside Phase 3 (both depend only o
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Restore the Verification Signal | 6/6 | In Progress (all plans executed; awaiting phase verification) |  |
+| 1. Restore the Verification Signal | 6/6 | Complete    | 2026-08-13 |
 | 2. POSIX Correctness & Hardening | 0/3 | Not started | - |
 | 3. CI Spike — Prove LLRT Basics on Windows | 0/1 | Not started | - |
 | 4. Platform Foundation | 0/2 | Not started | - |
@@ -265,7 +265,7 @@ Unsequenced ideas from the 2026-08-12 codebase review. Not ready for active plan
 
 **Goal:** [Captured for future planning] `sendCliMessage` holds an RPC promise open for the entire turn, and Caido's runtime does not deliver `child_process` callbacks or run `setInterval` while an RPC awaits. Every pumping workaround exists because of this: the 1.5 s frontend keep-alive, `activeSelfTestPoll`, `sessionWatchdogs`, and the 250 ms heartbeat. Returning a `turnId` immediately and delivering results over the existing event channel would delete the whole problem class (~300 lines). Deliberately sequenced after the port — it collides head-on with Phases 5 and 8.
 **Requirements:** TBD
-**Plans:** 5/6 plans executed
+**Plans:** 6/6 plans complete
 
 Plans:
 

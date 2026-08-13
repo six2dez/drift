@@ -2,20 +2,20 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: executing
-stopped_at: Completed 01-06-PLAN.md — all 6 Phase 1 plans executed; SIG-01/02/03 closed on real CI evidence
-last_updated: "2026-08-12T14:32:00.000Z"
-last_activity: 2026-08-12 -- Phase 01 wave 3 complete; three CI runs recorded, SIG-03f revert-proof passed
+status: ready
+stopped_at: Phase 01 COMPLETE — verification passed 32/32; Node 20 UAT closed by CI run 31690000562 on 1cb1cb6 (four legs green, 134 tests); branch merged up to origin/main and carries the Caido store release fix
+last_updated: "2026-08-13T10:20:00.000Z"
+last_activity: 2026-08-13 -- Phase 01 complete and verified; next is Phase 03 (CI spike, LLRT on windows-latest)
 progress:
   # total_phases counts the 10 milestone phases only. The SDK's recompute counts
   # the 11 backlog 999.x entries too (21); total_plans is likewise the roadmap's
   # provisional sum, not the PLAN.md files currently on disk. Re-correct after any
-  # `state planned-phase` / `state patch` / `state begin-phase` call.
+  # `state planned-phase` / `state patch` / `state begin-phase` / `phase complete` call.
   total_phases: 10
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 18
   completed_plans: 6
-  percent: 33
+  percent: 10
 ---
 
 # Project State
@@ -25,22 +25,22 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-26)
 
 **Core value:** The user's local AI CLI must reliably start, attach to Caido via the MCP server, and run tools against live Caido data — on native Windows as well as macOS/Linux.
-**Current focus:** Phase 01 — restore-the-verification-signal
+**Current focus:** Phase 03 — CI spike: prove LLRT basics on windows-latest
 
 ## Current Position
 
-Phase: 01 (restore-the-verification-signal) — EXECUTING
-Plan: 6 of 6 (all waves complete: 01-01..01-06)
-Status: Phase 01 plans all executed — awaiting phase verification. SIG-01, SIG-02 and SIG-03 marked Complete in REQUIREMENTS.md, each backed by a recorded CI run.
-Last activity: 2026-08-13 -- Completed quick task 260813-dc7: closed the SIG-01h forwarding gap (131 -> 134 tests); phase 01 awaiting re-verification
+Phase: 03 (ci-spike-prove-llrt-basics-on-windows)
+Plan: Not started
+Status: Phase 01 COMPLETE — verification passed 32/32, SIG-01/02/03 closed on recorded CI evidence. Ready to discuss/plan Phase 03.
+Last activity: 2026-08-13 -- Phase 01 verified and marked complete
 
-Progress: [██████████] 100%
+Progress: [█░░░░░░░░░] 10% (1 of 10 milestone phases)
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 6
+- Total plans completed: 6 (plus 1 quick task)
 - Average duration: ~12 min
 - Total execution time: ~1.2 hours
 
@@ -48,7 +48,7 @@ Progress: [██████████] 100%
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| 01 | 6 | ~72 min | ~12 min |
+| 01 | 6 | - | - |
 
 **Recent Trend:**
 
