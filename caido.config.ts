@@ -12,7 +12,8 @@ const id = "drift";
 export default defineConfig({
   id,
   name: "Drift",
-  description: "Security copilot for manual web security testing in Caido (MCP + local CLI)",
+  description:
+    "Security copilot for manual web security testing in Caido (MCP + local CLI)",
   version: "0.1.0",
   author: {
     name: "six2dez",

@@ -1,5 +1,5 @@
 import type { DefineAPI, SDK, DefineEvents } from "caido:plugin";
-import { readFile, writeFile, open as openFile, stat, mkdir, rm, rename } from "fs/promises";
+import { readFile, writeFile, open as openFile, stat, mkdir, rm, rename, readdir } from "fs/promises";
 import { spawn, type ChildProcessWithoutNullStreams } from "child_process";
 import { Buffer } from "buffer";
 import path from "path";
@@ -93,6 +93,16 @@ let pluginPath = "";
 let assetsPath = "";
 let currentSettings: Settings = { ...DEFAULT_SETTINGS };
 let currentChats: StoredChat[] = [];
+// Resolves once persisted settings + chats have finished loading. Handlers that
+// read or write currentSettings/currentChats await this so an early RPC — the
+// frontend pushes settings and loads chats during its own init — cannot race
+// the initial load. Before this gate, the load's late `.then` could clobber
+// freshly-pushed settings, or getChats could return an empty list and make the
+// UI auto-create a chat that hides the persisted ones.
+let markDataReady: () => void = () => {};
+const dataReady: Promise<void> = new Promise((resolve) => {
+  markDataReady = resolve;
+});
 const cliSessions = new Map<string, string>();        // chatId → cliSessionId (resume)
 let lastSpawnArgs: string[] = [];                     // for diagnostics
 const activeProcesses = new Map<string, ChildProcessWithoutNullStreams>(); // sessionId → ChildProcess
@@ -250,9 +260,12 @@ async function fileExists(p: string): Promise<boolean> {
 }
 
 async function writeTemp(dir: string, name: string, content: string): Promise<string> {
-  await mkdir(dir, { recursive: true });
+  await mkdir(dir, { recursive: true, mode: 0o700 });
   const fp = path.join(dir, name);
-  await writeFile(fp, content);
+  // 0o600: these temp files can carry the Caido token (e.g. the Copilot MCP
+  // config embeds it). The 0o700 parent dir already blocks other users, but
+  // restrict the file too as defense-in-depth.
+  await writeFile(fp, content, { mode: 0o600 });
   return fp;
 }
 
@@ -293,7 +306,8 @@ async function writeLaunchScript(
   const scriptPath = path.join(mcpTempDir, name);
   const tempScriptPath = `${scriptPath}.tmp`;
   const content = renderExportExecScript(command, args, envVars);
-  await writeFile(tempScriptPath, content);
+  // 0o700: launch scripts export the Caido token and must be executable.
+  await writeFile(tempScriptPath, content, { mode: 0o700 });
   const chmodResult = await spawnAndWait("chmod", ["+x", tempScriptPath]);
   if (chmodResult.code !== 0) {
     await rm(tempScriptPath, { force: true });
@@ -573,6 +587,10 @@ function buildMcpRuntimeEnv(input: {
     ...(getMcpContextFilePath() !== undefined
       ? { DRIFT_CONTEXT_FILE: getMcpContextFilePath()! }
       : {}),
+    // Signals to the MCP server that the allowlist is intentionally configured.
+    // With this set, an empty DRIFT_ALLOWED_TOOLS means "deny all" (every group
+    // disabled), not "allow all". See getAvailableTools() in mcp-server.mjs.
+    DRIFT_ALLOWLIST_ACTIVE: "1",
     DRIFT_ALLOWED_TOOLS: toolPolicy.allowedToolNames.join(","),
     DRIFT_CONFIRMATION_REQUIRED_TOOLS: toolPolicy.confirmationRequiredToolNames.join(","),
     DRIFT_CONFIRM_SENSITIVE_ACTIONS: toolPolicy.confirmSensitiveActions ? "1" : "0",
@@ -591,7 +609,7 @@ async function createSessionRuntimeFiles(sessionId: string): Promise<{
 } | undefined> {
   if (mcpTempDir === undefined) return undefined;
 
-  await mkdir(mcpTempDir, { recursive: true });
+  await mkdir(mcpTempDir, { recursive: true, mode: 0o700 });
   const activityFilePath = path.join(mcpTempDir, `mcp-activity-${sessionId}.jsonl`);
   const approvalsFilePath = path.join(mcpTempDir, `mcp-approvals-${sessionId}.json`);
   await writeFile(activityFilePath, "");
@@ -689,7 +707,7 @@ async function writeApprovalDecision(
   approvalId: string,
   approved: boolean,
 ): Promise<void> {
-  let current: Record<string, ApprovalDecision> = {};
+  let current: Record<string, ApprovalDecision>;
   try {
     const raw = await readFile(approvalsFilePath, "utf-8");
     current = JSON.parse(raw) as Record<string, ApprovalDecision>;
@@ -747,6 +765,8 @@ async function writeMcpWrapper(
     renderExportExecScript(nodeExecutable, [mcpScriptPath], runtimeEnv, {
       passThroughArgs: true,
     }),
+    // 0o700: the wrapper exports the Caido token and must be executable.
+    { mode: 0o700 },
   );
   const chmodResult = await spawnAndWait("chmod", ["+x", tempWrapperPath]);
   if (chmodResult.code !== 0) {
@@ -943,7 +963,8 @@ async function refreshProjectContext(sdk: BackendSDK): Promise<void> {
 
 // ── API: Settings ───────────────────────────────────────────────────
 
-function getSettings(_sdk: BackendSDK): Result<Settings> {
+async function getSettings(_sdk: BackendSDK): Promise<Result<Settings>> {
+  await dataReady;
   return ok(currentSettings);
 }
 
@@ -951,6 +972,7 @@ async function updateSettings(
   sdk: BackendSDK,
   input: Partial<Settings>
 ): Promise<Result<Settings>> {
+  await dataReady;
   const resetCliSessions =
     input.caidoApi !== undefined ||
     input.mcp !== undefined;
@@ -1648,6 +1670,27 @@ async function cleanupMcpRuntime(
   await publishMcpStatus(sdk);
 }
 
+// Remove orphaned /tmp/drift-mcp-* dirs left by a previous run that did not
+// stop cleanly (crash, hard kill). Those dirs hold the token-bearing wrapper
+// scripts, so leaking them is a credential-exposure risk. Safe to run here:
+// startMcpServer is only entered when MCP is not already running, so any
+// existing drift-mcp-* dir other than the (about-to-be-replaced) current one
+// is genuinely orphaned.
+async function sweepOrphanedMcpTempDirs(sdk: BackendSDK): Promise<void> {
+  try {
+    const entries = await readdir("/tmp");
+    await Promise.all(
+      entries
+        .filter((name) => name.startsWith("drift-mcp-"))
+        .map((name) => path.join("/tmp", name))
+        .filter((dir) => dir !== mcpTempDir)
+        .map((dir) => rm(dir, { recursive: true, force: true }).catch(() => undefined)),
+    );
+  } catch (error) {
+    sdk.console.error(`[drift] Failed to sweep orphaned MCP temp dirs: ${String(error)}`);
+  }
+}
+
 async function startMcpServer(sdk: BackendSDK): Promise<Result<McpServerInfo>> {
   // Check prerequisites
   const caidoToken = getEffectiveCaidoToken();
@@ -1664,10 +1707,14 @@ async function startMcpServer(sdk: BackendSDK): Promise<Result<McpServerInfo>> {
     return err("MCP server script not found in plugin assets.");
   }
 
+  await sweepOrphanedMcpTempDirs(sdk);
+
   // Use /tmp for MCP configs - Caido plugin path has spaces ("Application Support")
-  // which breaks Claude Code's --mcp-config path parsing
+  // which breaks Claude Code's --mcp-config path parsing.
+  // 0o700 so other local users cannot read the token-bearing wrapper/config
+  // files written inside.
   mcpTempDir = `/tmp/drift-mcp-${genUUID()}`;
-  await mkdir(mcpTempDir, { recursive: true });
+  await mkdir(mcpTempDir, { recursive: true, mode: 0o700 });
 
   const mcpScriptLocal = path.join(mcpTempDir, "mcp-server.mjs");
   await writeFile(mcpScriptLocal, await readFile(mcpScript, "utf-8"));
@@ -1720,15 +1767,18 @@ async function stopMcpServer(sdk: BackendSDK): Promise<Result<void>> {
 
 // ── API: Chats ──────────────────────────────────────────────────────
 
-function getChat(_sdk: BackendSDK, chatId: string): Result<StoredChat | undefined> {
+async function getChat(_sdk: BackendSDK, chatId: string): Promise<Result<StoredChat | undefined>> {
+  await dataReady;
   return ok(currentChats.find((c) => c.id === chatId));
 }
 
-function getChats(_sdk: BackendSDK): Result<StoredChat[]> {
+async function getChats(_sdk: BackendSDK): Promise<Result<StoredChat[]>> {
+  await dataReady;
   return ok(currentChats);
 }
 
 async function saveChat(_sdk: BackendSDK, chat: StoredChat): Promise<Result<void>> {
+  await dataReady;
   const idx = currentChats.findIndex((c) => c.id === chat.id);
   if (idx >= 0) {
     currentChats[idx] = chat;
@@ -1741,6 +1791,7 @@ async function saveChat(_sdk: BackendSDK, chat: StoredChat): Promise<Result<void
 }
 
 async function deleteChat(_sdk: BackendSDK, chatId: string): Promise<Result<void>> {
+  await dataReady;
   currentChats = currentChats.filter((c) => c.id !== chatId);
   cliSessions.delete(chatId);
   for (const [sessionId, snapshot] of sessionSnapshots.entries()) {
@@ -1769,6 +1820,7 @@ async function createCliSession(
   sdk: BackendSDK,
   input: { providerId: string; chatId: string }
 ): Promise<Result<string>> {
+  await dataReady;
   const status = await checkProvider(input.providerId);
   if (!status.available) {
     return err(formatProviderUnavailableMessage(input.providerId, `CLI not available: ${status.error}`));
@@ -1803,6 +1855,7 @@ async function sendCliMessage(
   }
 ): Promise<Result<SendCliMessageOutput>> {
   try {
+    await dataReady;
     await refreshProjectContext(sdk);
 
     const chat = currentChats.find((c) => c.id === input.chatId);
@@ -1866,10 +1919,10 @@ async function sendCliMessage(
 
     switch (providerId) {
       case "claude-cli": {
-        const claudeAllowedTools =
-          toolPolicy.allowedToolNames.length > 0
-            ? toolPolicy.allowedToolNames
-            : MCP_TOOL_NAMES;
+        // Use exactly the policy's allowed tools. An empty list (every group
+        // disabled) must restrict Claude to no Drift tools — never fall back to
+        // the full set, which would invert the user's deny-all intent.
+        const claudeAllowedTools = toolPolicy.allowedToolNames;
         const mcpScriptPath = getTempMcpScriptPath();
         const hasMcpAttached = mcpScriptPath !== undefined;
 
@@ -2909,14 +2962,16 @@ export function init(sdk: SDK<API, BackendEvents>) {
   // Load persisted data. Unknown keys from legacy installs (e.g. the
   // removed `scanner` block) are ignored by the type and dropped on
   // the next save.
-  loadJson<Settings>("settings", DEFAULT_SETTINGS).then((s) => {
-    currentSettings = { ...DEFAULT_SETTINGS, ...s };
-    sdk.console.log("[drift] settings loaded");
-  });
-  loadJson<StoredChat[]>("chats", []).then((c) => {
-    currentChats = c;
-    sdk.console.log(`[drift] ${c.length} chats loaded`);
-  });
+  void Promise.all([
+    loadJson<Settings>("settings", DEFAULT_SETTINGS).then((s) => {
+      currentSettings = { ...DEFAULT_SETTINGS, ...s };
+      sdk.console.log("[drift] settings loaded");
+    }),
+    loadJson<StoredChat[]>("chats", []).then((c) => {
+      currentChats = c;
+      sdk.console.log(`[drift] ${c.length} chats loaded`);
+    }),
+  ]).finally(() => markDataReady());
 
   // Register APIs
   sdk.api.register("getSettings", getSettings);

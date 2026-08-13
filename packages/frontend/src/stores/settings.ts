@@ -22,6 +22,27 @@ type ReadinessCheck = {
   detail: string;
   nextAction: string;
 };
+type BrowserStorage = { getItem: (key: string) => string | null };
+
+// Reads one key from the host's local storage.
+// Drift's frontend runs inside a Caido webview where storage can be absent,
+// disabled by enterprise policy, or throw on property access (restricted
+// origins, Safari private mode). Node >= 25 test environments hit the same
+// "absent" path. Every failure collapses to `undefined` so a missing token
+// degrades to "not signed in" instead of aborting syncCaidoRuntimeContext()
+// and, with it, the entire send-a-message flow.
+function readBrowserStorageItem(key: string): string | undefined {
+  try {
+    const storage = (globalThis as { window?: { localStorage?: BrowserStorage } })
+      .window?.localStorage;
+    if (storage === undefined || storage === null) return undefined;
+    if (typeof storage.getItem !== "function") return undefined;
+    const value = storage.getItem(key);
+    return typeof value === "string" ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 export const useSettingsStore = defineStore("settings", () => {
   const sdk = useSDK();
@@ -69,13 +90,13 @@ export const useSettingsStore = defineStore("settings", () => {
   }
 
   async function syncCaidoSessionToken() {
-    const raw = window.localStorage.getItem("CAIDO_AUTHENTICATION");
-    if (raw === null || raw.trim() === "") {
+    const raw = readBrowserStorageItem("CAIDO_AUTHENTICATION");
+    if (raw === undefined || raw.trim() === "") {
       await pushCaidoSessionToken("");
       return;
     }
 
-    let token = "";
+    let token: string;
     try {
       const parsed = JSON.parse(raw) as { accessToken?: string };
       token = typeof parsed.accessToken === "string"

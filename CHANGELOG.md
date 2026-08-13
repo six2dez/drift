@@ -5,6 +5,22 @@ All notable changes to Drift are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Security
+
+- **Deny-by-default MCP allowlist.** Disabling every tool-permission group left the allowlist empty, which the embedded MCP server treated as "allow all" — inverting the user's intent and exposing all tools. Empty now means deny-all (gated behind a `DRIFT_ALLOWLIST_ACTIVE` flag so the unconfigured standalone server still works); Claude's `--allowedTools` no longer falls back to the full tool set either. Covered by new `mcp-server.allowlist.test.ts`.
+- **Hardened temp-file handling.** The `/tmp/drift-mcp-<uuid>` dir is created `0o700`, token-bearing wrapper/launch scripts `0o700`, and other token-carrying temp files `0o600`, so other local users can no longer read the Caido session token. Orphaned `drift-mcp-*` dirs from an unclean shutdown are swept on MCP start.
+
+### Fixed
+
+- **Init race.** Settings and chats loaded without being awaited, so an early RPC could clobber freshly-pushed settings or surface an empty chat list (causing the UI to auto-create a chat that hid persisted ones). State handlers now await the initial load.
+- **Cross-chat streaming/error bleed.** A turn started in one chat could paint its streaming bubble or error banner into another chat after switching mid-turn. Streaming output and errors are now scoped to the chat that owns the turn.
+
+### Added
+
+- Tool-safety settings now warn when every permission group is disabled, clarifying that the MCP server attaches but exposes no tools.
+
 ## [0.1.0] — 2026-04-16
 
 First public release.

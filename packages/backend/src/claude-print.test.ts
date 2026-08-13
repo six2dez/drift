@@ -214,7 +214,7 @@ describe("claude print parsing", () => {
   });
 
   it("treats message_stop with end_turn as a valid completion even without result", () => {
-    let state = consumeClaudePrintChunk(
+    const state = consumeClaudePrintChunk(
       createClaudePrintState(),
       `${JSON.stringify({
         type: "stream_event",

@@ -1,30 +1,44 @@
 name: CI
 
+# Bare push/pull_request keys (no branches filter) mean every branch. A workflow
+# only runs from the branch it lives on, so filtering to main meant no feature
+# branch was ever verified before merge.
 on:
   push:
-    branches: [main]
   pull_request:
-    branches: [main]
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  # A same-repo PR fires both push and pull_request. Keying on the PR number when
+  # present collapses the two into one cancellable group instead of running the
+  # whole matrix twice.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
   verify:
-    name: Typecheck, test, build
+    name: Verify (Node ${{ matrix.node }})
     runs-on: ubuntu-latest
+    strategy:
+      # Never let one leg cancel another: a version-specific failure has to stay
+      # distinguishable from a universal one. That distinction is the whole point
+      # of this matrix.
+      fail-fast: false
+      matrix:
+        node: ['20', '22', '24', '26']
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
+      # Must stay ahead of Setup Node, whose pnpm store cache needs the pnpm
+      # binary to already exist. No version input: pnpm 9.0.0 is derived from
+      # package.json's packageManager field.
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
-          node-version: 20
+          node-version: ${{ matrix.node }}
           cache: pnpm
 
       - name: Install dependencies
@@ -33,16 +47,23 @@ jobs:
       - name: Typecheck
         run: pnpm -r typecheck
 
+      - name: Lint
+        run: pnpm lint
+
       - name: Test
         run: pnpm exec vitest run
 
       - name: Build
         run: pnpm build
 
+      # The build runs on every leg because it is real signal; only the upload is
+      # restricted to one, because upload-artifact returns 409 on duplicate
+      # artifact names across a matrix. Node 24 is Active LTS.
       - name: Upload plugin artifact
-        uses: actions/upload-artifact@v4
+        if: matrix.node == '24'
+        uses: actions/upload-artifact@v5
         with:
           name: drift-plugin
-          path: dist/drift.zip
+          path: dist/plugin_package.zip
           if-no-files-found: error
           retention-days: 14
