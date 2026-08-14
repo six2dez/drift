@@ -98,10 +98,14 @@ import { withFsRetry } from "./fs-retry";
 import { createActivityCursor, readActivityTick } from "./activity-tail";
 import {
   appendBounded,
+  buildTruncationMarker,
   createBoundedBuffer,
+  drainCompleteLines,
   renderBoundedBuffer,
   CLI_STDERR_MAX_CHARS,
   CLI_STDOUT_MAX_CHARS,
+  MCP_SELFTEST_LINE_MAX_CHARS,
+  MCP_SELFTEST_STDERR_MAX_CHARS,
   SPAWN_STDERR_MAX_CHARS,
   SPAWN_STDOUT_MAX_CHARS,
 } from "./bounded-buffer";
@@ -1531,8 +1535,28 @@ async function callMcpMethod(
       }
     };
 
+    // NOT a BoundedBuffer, and it must not become one. This is a line-DRAIN
+    // buffer: complete lines are parsed out of it and only the trailing partial
+    // survives. Head/tail/both retention would drop the middle of a JSON-RPC
+    // line stream and corrupt the protocol framing, producing a frame that
+    // parses as neither the first message nor the second. Its hazard is an
+    // unterminated remainder, not total volume, so it gets drainCompleteLines
+    // and that function's own remainder cap instead.
     let stdoutBuffer = "";
-    let stderr = "";
+    let stdoutDroppedChars = 0;
+    // Tail retention, for the same reason as the other two stderr sites: this
+    // string is the text of the rejection thrown from activeSelfTestPoll below
+    // and from the close handler, and the LAST error is the actionable one while
+    // warnings pile up ahead of it.
+    //
+    // The site is deliberately NOT exempted on the strength of the <=10 s timeout
+    // just below. That timeout plus proc.kill("SIGKILL") bounds the exposure
+    // WINDOW, not the VOLUME: a child writing at pipe speed for ten seconds is a
+    // multi-hundred-megabyte allocation in a single-threaded runtime.
+    let stderr = createBoundedBuffer({
+      maxChars: MCP_SELFTEST_STDERR_MAX_CHARS,
+      retention: "tail",
+    });
     let settled = false;
     const startedAt = Date.now();
     const timeout = setTimeout(() => {
@@ -1579,7 +1603,7 @@ async function callMcpMethod(
       }
       reject(
         new Error(
-          stderr.trim() ||
+          renderBoundedBuffer(stderr).trim() ||
           `MCP helper exited (code ${String(procRef.exitCode ?? "n/a")}${hasSignal ? `, signal ${String(procRef.signalCode)}` : ""}) before responding to ${methodName}.`,
         ),
       );
@@ -1599,14 +1623,38 @@ async function callMcpMethod(
     };
 
     proc.stdout?.on("data", (chunk: Buffer) => {
-      stdoutBuffer += chunk.toString();
-      let newlineIndex = stdoutBuffer.indexOf("\n");
-      while (newlineIndex !== -1) {
-        const line = stdoutBuffer.slice(0, newlineIndex).trim();
-        stdoutBuffer = stdoutBuffer.slice(newlineIndex + 1);
-        newlineIndex = stdoutBuffer.indexOf("\n");
-        if (line === "") continue;
-
+      // One split per chunk. The loop this replaces re-copied the whole
+      // remainder and rescanned it from index 0 once PER LINE, which is O(k*n)
+      // for a chunk of k lines and n characters, on the same single-threaded
+      // event loop the RPC keep-alive above depends on.
+      const drain = drainCompleteLines({
+        buffered: stdoutBuffer,
+        chunk: chunk.toString(),
+        maxRemainderChars: MCP_SELFTEST_LINE_MAX_CHARS,
+      });
+      stdoutBuffer = drain.remainder;
+      if (drain.droppedChars > 0) {
+        // Routed into stderr on purpose: both reject paths already read stderr,
+        // so an oversized unterminated stdout line becomes VISIBLE in the error
+        // the user sees, carrying its byte count, instead of leaving a silent
+        // hole. That is PERF-04's marked truncation for this site, with no new
+        // plumbing. The remainder is dropped WHOLE rather than truncated,
+        // because a truncated JSON-RPC line is unparseable and would be
+        // swallowed by the tolerant catch below.
+        //
+        // The marker carries the CUMULATIVE total rather than this drain's
+        // delta, matching what renderBoundedBuffer does for every other site:
+        // successive markers then read as one monotonic record whose last value
+        // is the answer, instead of N deltas a reader has to add up.
+        stdoutDroppedChars += drain.droppedChars;
+        stderr = appendBounded(stderr, buildTruncationMarker(stdoutDroppedChars));
+      }
+      // Iterating every drained line even after finish() resolves is the
+      // pre-existing behaviour, preserved deliberately: finish is idempotent
+      // (it returns early once settled is true), so the extras no-op.
+      for (const line of drain.lines) {
+        // drainCompleteLines already trims and drops empty lines, so the old
+        // `if (line === "") continue;` guard would now be dead code.
         let parsed: JsonRpcResponse;
         try {
           parsed = JSON.parse(line) as JsonRpcResponse;
@@ -1626,7 +1674,7 @@ async function callMcpMethod(
     });
 
     proc.stderr?.on("data", (chunk: Buffer) => {
-      stderr += chunk.toString();
+      stderr = appendBounded(stderr, chunk.toString());
     });
 
     proc.on("error", (error: Error) => {
@@ -1637,7 +1685,7 @@ async function callMcpMethod(
       if (settled) return;
       finish(() =>
         reject(
-          new Error(stderr.trim() || stdoutBuffer.trim() || "MCP helper exited before responding."),
+          new Error(renderBoundedBuffer(stderr).trim() || stdoutBuffer.trim() || "MCP helper exited before responding."),
         ),
       );
     });
