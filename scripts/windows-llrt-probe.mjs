@@ -30,9 +30,21 @@
  *
  * Credential handling: none. The one secret-shaped value is a synthetic
  * sentinel of the form drift-probe-sentinel-<timestamp>, generated in-process.
- * The probe never reads a Caido credential, and it never enumerates or dumps
- * the environment — the three Windows variables P3-VARS reports are named
- * explicitly, one by one (D-10).
+ * The probe never reads a Caido credential, and it never PRINTS an environment
+ * value other than the three Windows profile variables P3-VARS names explicitly
+ * (D-10).
+ *
+ * It does NOT claim never to read the environment, because one path does:
+ * P0-ENV's merged retry spreads process.env into a CHILD's env block, which is
+ * the only way to separate "the env option was ignored" from "a cleared block
+ * breaks the child". On a hosted runner that block carries ACTIONS_RUNTIME_TOKEN
+ * and everything else the Actions runtime injects, so the distinction matters —
+ * but nothing leaks through it: that child's entire stdout is three derived
+ * fields (this probe's own sentinel echoed back, a PATH-present boolean, and a
+ * parent-marker-present boolean), and P0-ENV's failure details JSON.stringify
+ * only that stdout. The wording is kept exact because D-10 is a CI-gated
+ * contract in this repo, and a header that overstates it misinforms whoever
+ * edits the retry path next.
  */
 
 import { spawn } from "node:child_process";
