@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: "Completed 04-02 (fs-retry.ts + fs-retry.test.ts); next: 04-03"
-last_updated: "2026-08-14T12:22:18.850Z"
-last_activity: 2026-08-14 -- 04-02 complete (pure fs-retry.ts ladder + 13-case fs-retry.test.ts)
+stopped_at: "Completed 04-03 (runtime-probe.ts + runtime-probe.test.ts); next: 04-04"
+last_updated: "2026-08-14T12:39:40.377Z"
+last_activity: 2026-08-14 -- 04-03 complete (pure runtime-probe.ts report/message/ladder + 16-case runtime-probe.test.ts)
 progress:
   total_phases: 21
   completed_phases: 2
   total_plans: 22
-  completed_plans: 13
+  completed_plans: 14
   percent: 10
 ---
 
@@ -26,9 +26,9 @@ See: .planning/PROJECT.md (updated 2026-06-26)
 ## Current Position
 
 Phase: 4 (Platform Foundation) — EXECUTING
-Plan: 3 of 11
+Plan: 4 of 11
 Status: Executing Phase 4
-Last activity: 2026-08-14 -- 04-02 complete (pure fs-retry.ts ladder + 13-case fs-retry.test.ts)
+Last activity: 2026-08-14 -- 04-03 complete (pure runtime-probe.ts report/message/ladder + 16-case runtime-probe.test.ts)
 
 Progress: [██░░░░░░░░] 20% (2 of 10 milestone phases)
 
@@ -46,11 +46,11 @@ Progress: [██░░░░░░░░] 20% (2 of 10 milestone phases)
 |-------|-------|-------|----------|
 | 01 | 6 | - | - |
 | 03 | 5 | - | - |
-| 04 | 2 of 11 | - | - |
+| 04 | 3 of 11 | - | - |
 
 **Recent Trend:**
 
-- Last 5 plans: 03-03 (9 min, 2 tasks, 1 file, 2 Windows CI runs), 03-04 (11 min, 3 tasks, 0 files net, 4 CI runs), 03-05 (8 min, 2 tasks, 2 files, 0 CI runs — evidence transcription only), 04-01 (10 min, 2 tasks, 2 files, 0 CI runs — a pure module and its unit tests, verified entirely locally), 04-02 (7 min, 2 tasks, 2 files, 0 CI runs — same shape as 04-01, and faster because the pure-module + sibling-test pattern was already established)
+- Last 5 plans: 03-04 (11 min, 3 tasks, 0 files net, 4 CI runs), 03-05 (8 min, 2 tasks, 2 files, 0 CI runs — evidence transcription only), 04-01 (10 min, 2 tasks, 2 files, 0 CI runs — a pure module and its unit tests, verified entirely locally), 04-02 (7 min, 2 tasks, 2 files, 0 CI runs — same shape as 04-01, and faster because the pure-module + sibling-test pattern was already established), 04-03 (9 min, 2 tasks + 1 legibility fix, 2 files, 0 CI runs — the third pure-module plan in a row; the extra 2 min went on the mandated manual read of the rendered failure message, which is what found the fix)
 - Trend: steady; 01-06 is the longest (21 min) because it waits on three real CI runs and a three-Node local pre-flight. 03-03 came in at 9 min despite needing two real `windows-latest` runs — the Windows probe job completes in 16-18s, so the CI wait is far cheaper than the ubuntu matrix. 03-04 waited on four runs (2 Windows probe + 2 ubuntu matrix) and still finished in 11 min for the same reason. 03-05 burned no runner at all: it only re-queried the six existing run records and transcribed their measured output.
 
 *Updated after each plan completion*
@@ -94,6 +94,9 @@ Recent decisions affecting current work:
 - [Phase 04]: [04-02]: fs-retry.ts imports nothing and does no I/O — the sleep is an INJECTED parameter, which is the only way SC-3's ladder is assertable: a real Defender lock cannot be induced deterministically on any CI runner, so the proof is reading back what the orchestrator asked to sleep for ([50,100] on success at the third attempt, the full [50,100,200,400,750] on give-up).
 - [Phase 04]: [04-02]: RUN-04 was NOT marked complete. withFsRetry has zero production call sites — plans 04-08 (which wraps the real mkdir+writeFile at index.ts:1717-1720) and 04-11 carry the same id. Same call 04-01 made for RUN-03/CMP-02/RUN-05 and Phase 3 made for CI-02: building the instrument is not shipping the behaviour.
 - [Phase 04]: [04-02]: The transient-FS set is an allow-list (EPERM/EBUSY/EACCES/UNKNOWN, from libuv src/win/error.c), never a deny-list. ENOSPC and EROFS are excluded on purpose so a full or read-only volume produces an honest error immediately instead of a 1.5 s stall on every MCP start (T-04-11); ENOENT is excluded because a missing parent is a real bug.
+- [Phase 04]: [04-03]: runtime-probe.ts imports exactly one thing — path — and the grep pair that proves it (^import returns 1, ^import path from "path";$ returns 1) IS the D-02 claim in mechanical form. No os (the single read stays in index.ts so an LLRT gap is a loud MCP-start error, not a module-evaluation throw that kills the whole plugin), no fs (normalizePathForCompare's rungs are INJECTED because that surface is unproven under LLRT), no ./platform (raw strings and booleans only, which is what let it build in the same wave as platform.ts).
+- [Phase 04]: [04-03]: The probe report distinguishes 'not probed' from 'absent' by construction. Plan 04-08 cannot probe realpath ladder rung 1 at all — that needs a module-scope bare "fs" import which is not source-verified for Caido's LLRT and would kill the plugin at load — so buildProbeReport takes a realpathRungNote carrying the weaker claim verbatim, and a test forbids the word 'absent' in that detail. A report written to be pasted into a public bug report must never assert a measurement Drift did not make.
+- [Phase 04]: [04-03]: RUN-05 was NOT marked complete. All eight runtime-probe.ts exports have zero production call sites; index.ts has no probe, no os import, and nothing fails loud at MCP start yet. Plans 04-08 and 04-11 carry the same id. Third consecutive Phase 4 plan making this call after 04-01 (RUN-03/CMP-02/RUN-05) and 04-02 (RUN-04), matching Phase 3's CI-02 precedent.
 
 ### Pending Todos
 
@@ -133,9 +136,9 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-14T12:21:59.308Z
-Stopped at: Completed 04-02 (fs-retry.ts + fs-retry.test.ts); next: 04-03
-Resume file: .planning/phases/04-platform-foundation/04-03-PLAN.md
+Last session: 2026-08-14T12:39:27.821Z
+Stopped at: Completed 04-03 (runtime-probe.ts + runtime-probe.test.ts); next: 04-04
+Resume file: .planning/phases/04-platform-foundation/04-04-PLAN.md
 
 **Live on the public remote: nothing of ours.** Plan 03-04 tore down all three `scratch/*` branches (`ci-proof-windows-probe`, `ci-proof-windows-probe-negative`, `ci-proof-windows-gate-negative`) locally and remotely. Asserted with a `test -z` discrimination over the captured glob (`scratch-glob-empty=0`) plus the full unfiltered listing, which now shows only `main` at `2d8cf16` and the pre-existing, unrelated `fix/security-hotfixes` at `0cd81f3`. `origin/main` was never pushed by this phase and is still `2d8cf16`; local `main` is 23 commits ahead and deliberately unpushed. **Re-verified 2026-08-13 (plan 03-05):** the remote still lists only `main` `2d8cf16` and the pre-existing `fix/security-hotfixes` `0cd81f3`, and all eight Phase 3 run records (4 probe + 4 `CI` control) still resolve with their recorded conclusions — which is what makes the URLs in `03-FINDINGS.md` valid citations after the branches were deleted. The probe **artifacts** do not survive: they expire 2026-09-12, which is why D-11 required the committed findings document.
 
