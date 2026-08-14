@@ -1,0 +1,25 @@
+# Prettier's reach in this repo is the explicit glob list in package.json's
+# `format` script, not a directory walk. This file narrows that reach where the
+# decision needs to be recorded rather than inferred.
+
+# scripts/windows-llrt-probe.mjs — the Phase 3 Windows/LLRT primitive probe.
+#
+# scripts/*.mjs is inside `pnpm format`'s glob so the directory is covered going
+# forward; this one file is deliberately exempt from it.
+#
+# The probe is a temporary CI diagnostic with a scheduled delete date: it and its
+# workflow are removed in Phase 9 when CI-01 lands the permanent windows-latest
+# regression job (D-02). Its entire product is an archived artifact of measured
+# conclusions, which makes it worth keeping diffable against the exact blob that
+# produced the banked run.
+#
+# Prettier's reflow here is semantics-preserving — measured: it only expands call
+# arguments and object literals vertically and never alters a template literal's
+# contents, so the probe's single-emission output grammar is untouched. But it
+# rewrites 21 hunks (+240/-59 lines, 599 -> 780) of a 599-line file. Burying a
+# handful of reviewed fixes under a mechanical rewrite of the whole file costs
+# more than the formatting gains on a file that is deleted in a few phases.
+#
+# Recorded here rather than left as an accident of the glob (code review WR-07).
+# Delete this entry together with the probe in Phase 9.
+scripts/windows-llrt-probe.mjs
