@@ -41,7 +41,7 @@ import { spawn } from "node:child_process";
 // runtime. Rewriting this to "node:os" would make P2-OS assert nothing. Every
 // other import in this file uses the node: prefix.
 import { tmpdir, platform } from "os";
-import { existsSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, realpathSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 // Named import rather than a default `crypto` import, so the readonly global
 // `crypto` is not shadowed — P3-UUID has to test the globalThis surface and the
@@ -292,7 +292,27 @@ function assertP0Tmp() {
 
   const hasDriveLetter = /^[A-Za-z]:[\\/]/.test(tempDir);
   const tempDirExists = existsSync(tempDir);
-  info("P0-TMP", `drive-letter=${hasDriveLetter} exists-on-disk=${tempDirExists}`);
+
+  // Windows can hand back the 8.3 SHORT form. The measured windows-latest run
+  // did exactly that: os.tmpdir() was C:\Users\RUNNER~1\AppData\Local\Temp
+  // while USERPROFILE was the long C:\Users\runneradmin. Both name the same
+  // directory and both are legal, but they are NOT string-comparable — a
+  // startsWith or === against a profile-derived path silently returns false.
+  // That hazard was caught only by a human reading the raw value out of an INFO
+  // line; classifying it here is what puts it in the summary line, which is the
+  // part of the artifact Phases 4-8 actually read.
+  //
+  // REPORTING ONLY: a short path is legal and working, so this must not change
+  // P0-TMP's gating outcome (D-06). It annotates the PASS detail; it never
+  // converts a pass into a fail.
+  const isShortName = /~\d(?=[\\/]|$)/.test(tempDir);
+  let resolvedTempDir = tempDir;
+  try {
+    resolvedTempDir = realpathSync.native(tempDir);
+  } catch (error) {
+    info("P0-TMP", `realpathSync.native(${JSON.stringify(tempDir)}) failed (${describeError(error)}), so the long-form expansion below falls back to the raw value`);
+  }
+  info("P0-TMP", `drive-letter=${hasDriveLetter} exists-on-disk=${tempDirExists} short-8.3-form=${isShortName} realpath-native=${JSON.stringify(resolvedTempDir)}`);
 
   if (osPlatform !== WINDOWS_PLATFORM_ID) { // the literal lives on WINDOWS_PLATFORM_ID — plan 03-04 mutates exactly that one site
     fail("P0-TMP", `os.platform() returned ${JSON.stringify(osPlatform)}, which is not the Windows platform id — this host is not Windows, so the Windows temp-dir assertion cannot be satisfied here`);
@@ -306,7 +326,10 @@ function assertP0Tmp() {
     fail("P0-TMP", `os.tmpdir() returned ${JSON.stringify(tempDir)} but that path does not exist on disk`);
     return;
   }
-  pass("P0-TMP", `platform is Windows and os.tmpdir()=${JSON.stringify(tempDir)} is drive-lettered and exists on disk`);
+  const shortFormNote = isShortName
+    ? ` — WARNING: this is the 8.3 SHORT form and expands to ${JSON.stringify(resolvedTempDir)}. The two spellings are not string-comparable, and USERPROFILE/APPDATA/LOCALAPPDATA come back in the LONG form, so Phases 4-8 must normalise both sides (realpathSync.native) before any startsWith or === against a profile-derived path`
+    : ` (not an 8.3 short path; realpath-native agrees at ${JSON.stringify(resolvedTempDir)})`;
+  pass("P0-TMP", `platform is Windows and os.tmpdir()=${JSON.stringify(tempDir)} is drive-lettered and exists on disk${shortFormNote}`);
 }
 
 // ── P1-CMD: direct .cmd spawn behaviour (conclusive-or-fail, D-07) ──
