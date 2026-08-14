@@ -160,7 +160,7 @@ Plans:
 - [x] 04-04-PLAN.md — `activity-tail.ts` + tests: PERF-02's byte cursor, partial-line carry, and the exact-length `Buffer.alloc` the LLRT `copy_from_slice` constraint demands
 - [x] 04-05-PLAN.md — `bounded-buffer.ts` + tests: PERF-04 site A — `appendBounded` with three retention policies and **five** exported caps covering **six** total-volume accumulator sites (the sixth, `resolveCommand`'s `out`, reuses `SPAWN_STDOUT_MAX_CHARS`), plus `drainCompleteLines` for the one line-drain site. Corrected from "four per-site caps": the inventory grep is blind to `index.ts:862` and `:1268`
 - [x] 04-06-PLAN.md — `claude-print.ts` bound + split-once refactor: PERF-04 site B, the 4 MiB drop path and the O(n^2) slicing fix
-- [ ] 04-07-PLAN.md — `resolution-cache.ts` + tests: PERF-03's TTL cache with an injected clock, negative caching, and signature invalidation
+- [x] 04-07-PLAN.md — `resolution-cache.ts` + tests: PERF-03's TTL cache with an injected clock, negative caching, and signature invalidation
 
 **Wave 2** *(blocked on 04-01, 04-02, 04-03)*
 
@@ -308,7 +308,7 @@ Parallelism opportunities: Phase 2 may run alongside Phase 3 (both depend only o
 | 1. Restore the Verification Signal | 6/6 | Complete    | 2026-08-13 |
 | 2. POSIX Correctness & Hardening | 0/3 | Not started | - |
 | 3. CI Spike — Prove LLRT Basics on Windows | 5/5 | Complete    | 2026-08-14 |
-| 4. Platform Foundation | 6/11 | In Progress | - |
+| 4. Platform Foundation | 7/11 | In Progress | - |
 | 5. Kill Shell Wrappers | 0/2 | Not started | - |
 | 6. Windows Command Resolution | 0/2 | Not started | - |
 | 7. Provider Spawn & Registration | 0/3 | Not started | - |

@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: "Completed 04-06 (claude-print.ts bounded + split-once; claude-print.test.ts 10 -> 18 cases); next: 04-07"
-last_updated: "2026-08-14T13:26:22.858Z"
-last_activity: "2026-08-14 -- 04-06 complete (PERF-04 site B: claude-print.ts line buffer bounded at 4 MiB with a counted whole-drop + the per-line indexOf/slice loop replaced by one split; claude-print.test.ts 10 -> 18 cases, additions only)"
+stopped_at: "Completed 04-07 (resolution-cache.ts + tests: PERF-03 TTL cache with an injected clock); Wave 1 complete; next: 04-08"
+last_updated: "2026-08-14T13:41:09.271Z"
+last_activity: "2026-08-14 -- 04-07 complete (PERF-03: resolution-cache.ts, a bounded TTL cache with an INJECTED clock, negative caching under a distinct 30 s TTL, whole-cache invalidation on any providers[*].command change, and an always-refreshing bypass; 10-case sibling suite; wave 1 closed)"
 progress:
   total_phases: 21
   completed_phases: 2
   total_plans: 22
-  completed_plans: 17
+  completed_plans: 18
   percent: 10
 ---
 
@@ -26,9 +26,9 @@ See: .planning/PROJECT.md (updated 2026-06-26)
 ## Current Position
 
 Phase: 4 (Platform Foundation) — EXECUTING
-Plan: 7 of 11
+Plan: 8 of 11
 Status: Executing Phase 4
-Last activity: 2026-08-14 -- 04-06 complete (PERF-04 site B: claude-print.ts line buffer bounded at 4 MiB with a counted whole-drop + the per-line indexOf/slice loop replaced by one split; claude-print.test.ts 10 -> 18 cases, additions only)
+Last activity: 2026-08-14 -- 04-07 complete (PERF-03: resolution-cache.ts, a bounded TTL cache with an INJECTED clock, negative caching under a distinct 30 s TTL, whole-cache invalidation on any providers[*].command change, and an always-refreshing bypass; 10-case sibling suite; wave 1 closed)
 
 Progress: [██░░░░░░░░] 20% (2 of 10 milestone phases)
 
@@ -36,9 +36,9 @@ Progress: [██░░░░░░░░] 20% (2 of 10 milestone phases)
 
 **Velocity:**
 
-- Total plans completed: 21 (plus 1 quick task)
+- Total plans completed: 22 (plus 1 quick task)
 - Average duration: ~10 min
-- Total execution time: ~2.5 hours
+- Total execution time: ~2.7 hours
 
 **By Phase:**
 
@@ -46,11 +46,11 @@ Progress: [██░░░░░░░░] 20% (2 of 10 milestone phases)
 |-------|-------|-------|----------|
 | 01 | 6 | - | - |
 | 03 | 5 | - | - |
-| 04 | 6 of 11 | - | - |
+| 04 | 7 of 11 | - | - |
 
 **Recent Trend:**
 
-- Last 5 plans: 04-02 (7 min, 2 tasks, 2 files, 0 CI runs — same shape as 04-01, and faster because the pure-module + sibling-test pattern was already established), 04-03 (9 min, 2 tasks + 1 legibility fix, 2 files, 0 CI runs — the third pure-module plan in a row; the extra 2 min went on the mandated manual read of the rendered failure message, which is what found the fix), 04-04 (7 min, 2 tasks, 2 files, 0 CI runs — the fourth pure-module plan in a row and the fastest yet; the only new work was the byte-level UTF-8 reasoning, and both tasks passed their own verify on the first run), 04-05 (9 min, 2 tasks, 2 files, 0 CI runs — the largest single task in the phase, deliberately unsplit because splitting would force two tasks to write one file; both tasks passed their own verify on the first run and the 16-case suite was green on its first run), 04-06 (10 min, 2 tasks + 1 cap-symmetry addition, 2 files, 0 CI runs — the FIRST Phase 4 plan to modify an existing, production-wired file rather than create a new one; the extra time went on proving the refactor additions-only and hand-aligning the new lines to Prettier instead of running --write over 999.11's pre-existing debt)
+- Last 5 plans: 04-03 (9 min, 2 tasks + 1 legibility fix, 2 files, 0 CI runs — the third pure-module plan in a row; the extra 2 min went on the mandated manual read of the rendered failure message, which is what found the fix), 04-04 (7 min, 2 tasks, 2 files, 0 CI runs — the fourth pure-module plan in a row and the fastest yet; the only new work was the byte-level UTF-8 reasoning, and both tasks passed their own verify on the first run), 04-05 (9 min, 2 tasks, 2 files, 0 CI runs — the largest single task in the phase, deliberately unsplit because splitting would force two tasks to write one file; both tasks passed their own verify on the first run and the 16-case suite was green on its first run), 04-06 (10 min, 2 tasks + 1 cap-symmetry addition, 2 files, 0 CI runs — the FIRST Phase 4 plan to modify an existing, production-wired file rather than create a new one; the extra time went on proving the refactor additions-only and hand-aligning the new lines to Prettier instead of running --write over 999.11's pre-existing debt), 04-07 (11 min, 2 tasks, 2 files, 0 CI runs — closes wave 1; both tasks passed their own verify on the first run and the 10-case suite was green on its first run, and the extra minute went on a pre-commit NUL byte that had silently disabled every grep gate over the module plus a standalone tsc run proving 04-10's literal call shapes compile against the shipped API)
 - Trend: steady; 01-06 is the longest (21 min) because it waits on three real CI runs and a three-Node local pre-flight. 03-03 came in at 9 min despite needing two real `windows-latest` runs — the Windows probe job completes in 16-18s, so the CI wait is far cheaper than the ubuntu matrix. 03-04 waited on four runs (2 Windows probe + 2 ubuntu matrix) and still finished in 11 min for the same reason. 03-05 burned no runner at all: it only re-queried the six existing run records and transcribed their measured output.
 
 *Updated after each plan completion*
@@ -113,6 +113,15 @@ Recent decisions affecting current work:
 - [Phase 04]: [04-06]: The split-once refactor's proof is 0 DELETIONS in git diff plus a single-chunk-vs-byte-by-byte equivalence test, not 'the suite still passes'. A refactor can keep a suite green by also editing it, so the additions-only property (git diff --numstat reports 261 0) is the load-bearing evidence and the 10 pre-existing it titles were compared byte-for-byte against HEAD~2.
 - [Phase 04]: [04-06]: claude-print.test.ts gained a SECOND import block from ./claude-print instead of an edit to the existing one. Editing the first import would put a modified line inside the 393-line behaviour-identity proof that 04-VALIDATION.md's regression row grades as additions-only. Legal ESM, comment explains the constraint, and it must not be merged back while that row is the gate.
 - [Phase 04]: [04-06]: prettier --write was deliberately NOT run on either file. Both are inside pnpm format's glob but are part of backlog 999.11's pre-existing debt, so --write would reformat pre-existing lines and destroy the additions-only property. Instead the three new lines prettier would have reflowed were hand-aligned to its output, verified by prettier-ing a scratch COPY and confirming every remaining delta lands on a pre-existing line.
+- [Phase 04]: [04-07]: resolution-cache.ts uses the state-object shape (createResolutionCacheState(): PlainObject + free functions), NOT 04-RESEARCH's createResolutionCache({ now, ttlMs }) closure factory. 04-PATTERNS.md § No Analog Found is explicit that the backend has ZERO closure-factory precedent (they exist only in the frontend's Pinia stores) while claude-print.ts:129-144 and bounded-buffer.ts:47-58 are the proven backend shape. Consequences: now stays an explicit per-call parameter so no test reasons about a captured clock, and state.entries.size / state.clears are directly assertable.
+- [Phase 04]: [04-07]: The clock is an INJECTED per-call parameter and the module reads no wall clock at all. That is why the plan DELETED its Date.now() grep gate as duplicative: -t "expires" fails deterministically under any wall-clock implementation because it primes at now = 0 and re-reads at POSITIVE_TTL + 1 with under a millisecond of real elapsed time. A Date.now() storedAt keeps the entry live (1 call not 2); a Date.now() comparison expires the entry in -t "within TTL" (2 calls not 1). One of the two fails either way, so the test IS the gate.
+- [Phase 04]: [04-07]: The TTL is chosen per ENTRY POLARITY, not per cache: readResolutionCache picks negativeTtlMs or positiveTtlMs from the entry's own value, so a 45-second-old miss is expired while the same age on a hit is live. The -t "negative" case asserts RESOLUTION_NEGATIVE_TTL_MS + 1 < RESOLUTION_POSITIVE_TTL_MS as a guarded PREMISE before relying on that point, so the two TTLs are distinguished by assertion rather than assumed to differ.
+- [Phase 04]: [04-07]: resolveWithCache's bypass always re-resolves AND always rewrites. Skipping only the read would leave the stale value for the next caller, so the user who pressed the manual Check button after installing a CLI would see the fresh answer once and the stale one on the very next turn. The load-bearing assertion is the THIRD one in the bypass case (a later non-bypass call returns the refreshed value), not the obvious 'the resolver ran'.
+- [Phase 04]: [04-07]: Invalidation clears the WHOLE cache on any providers[*].command change (ROADMAP SC-6), never per-key: per-key invites a missed key, and the entry easiest to forget is node, whose staleness breaks MCP start rather than one provider's badge. buildProviderCommandSignature SORTS the provider ids — without the sort a settings object rebuilt with different key order clears on every save and PERF-03 becomes a pessimisation that still passes a naive 'it invalidates' test. The plan replaced its grep -c '.sort(' gate with -t "stable signature" for exactly that reason.
+- [Phase 04]: [04-07]: describeResolutionCache emits key names, ages in seconds, a positive/negative marker and the clear count — and NO cached value at all, which is stricter than T-04-04's ceiling (that entry would permit a resolved binary path since getDiagnostics already surfaces nodeExecutable at index.ts:2796). The clears counter is in that line specifically so a cache invalidating on every save shows up in diagnostics as a number instead of unexplained slowness. 04-10 must NOT log the signature string: it carries a NUL sentinel for any provider configured without a command.
+- [Phase 04]: [04-07]: PERF-03 was NOT marked complete. grep for resolution-cache/resolveWithCache in index.ts returns nothing: lastNodeExecutable is still the infinite never-invalidated cache at :119 and resolveCommand at :848 still has none, so all twelve exports have zero production call sites. Plan 04-10 carries the wiring. Seventh consecutive Phase 4 plan making this call after 04-01, 04-02, 04-03, 04-04, 04-05 and 04-06, matching Phase 3's CI-02 precedent.
+- [Phase 04]: [04-07]: Plan 04-10's five literal call shapes were compiled against the shipped API with a standalone tsc --strict --noUncheckedIndexedAccess run BEFORE wave 1 closed, and exit 0. Confirmed assignable: Settings["providers"] (Record<string, { command: string; enabled: boolean }>) into buildProviderCommandSignature's Record<string, { command?: string } | undefined> | undefined, and getNodeExecutable (() => Promise<string | undefined>) directly as the resolve callback. No signature change is needed in 04-10.
+- [Phase 04]: [04-07]: A raw NUL byte in a source file makes git AND grep classify it as binary, so every grep gate over that file returns nothing — which reads as a pass on any 'grep returns 0' gate — while typecheck and eslint --max-warnings 0 both exit 0. Caught pre-commit in resolution-cache.ts's missing-command sentinel and replaced with the source escape. Note perl -0pi cannot fix it (-0 sets $/ to NUL so the pattern never spans a record; -0777 is the slurp form) and grep -an is what exposes it.
 
 ### Pending Todos
 
@@ -152,9 +161,9 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-14T13:22:50.328Z
-Stopped at: Completed 04-06 (claude-print.ts bounded + split-once; claude-print.test.ts 10 -> 18 cases); next: 04-07
-Resume file: .planning/phases/04-platform-foundation/04-07-PLAN.md
+Last session: 2026-08-14T13:41:09.266Z
+Stopped at: Completed 04-07 (resolution-cache.ts + tests: PERF-03 TTL cache with an injected clock); Wave 1 complete; next: 04-08
+Resume file: .planning/phases/04-platform-foundation/04-08-PLAN.md
 
 **Live on the public remote: nothing of ours.** Plan 03-04 tore down all three `scratch/*` branches (`ci-proof-windows-probe`, `ci-proof-windows-probe-negative`, `ci-proof-windows-gate-negative`) locally and remotely. Asserted with a `test -z` discrimination over the captured glob (`scratch-glob-empty=0`) plus the full unfiltered listing, which now shows only `main` at `2d8cf16` and the pre-existing, unrelated `fix/security-hotfixes` at `0cd81f3`. `origin/main` was never pushed by this phase and is still `2d8cf16`; local `main` is 23 commits ahead and deliberately unpushed. **Re-verified 2026-08-13 (plan 03-05):** the remote still lists only `main` `2d8cf16` and the pre-existing `fix/security-hotfixes` `0cd81f3`, and all eight Phase 3 run records (4 probe + 4 `CI` control) still resolve with their recorded conclusions — which is what makes the URLs in `03-FINDINGS.md` valid citations after the branches were deleted. The probe **artifacts** do not survive: they expire 2026-09-12, which is why D-11 required the committed findings document.
 
