@@ -104,10 +104,32 @@ jobs:
       # This gate outlives the spike on purpose: Phases 4-8 will edit both of the
       # files it scans, and re-running on every push is what keeps the property
       # true through those edits rather than making it a one-time review (D-10).
-      # Plan 03-04 proves the gate actually bites by tripping it deliberately on a
-      # throwaway branch and reading this step's conclusion by name from the API,
-      # so the step name is a contract — keep it stable.
-      - name: Assert no secret material is reachable (D-10)
+      #
+      # The step name states exactly what the two patterns below can prove — a
+      # Caido token reference and a GitHub secrets expression — and nothing
+      # wider. It deliberately no longer claims "no secret material is
+      # reachable", which was the previous name: a literal credential pasted
+      # into either file (a bare JWT, a hex blob, a Bearer header) is the
+      # likeliest real accident and this grep cannot see it, and neither can it
+      # see bracket-indexed expressions or env-var indirection. Overstating the
+      # guarantee is worse than the gap, because Phases 4-8 inherit this gate as
+      # standing protection and would trust it further than it reaches. The
+      # echo in the pass arm below has always been scoped this way; the name now
+      # matches it verbatim.
+      #
+      # The patterns themselves are deliberately NOT widened. They are written to
+      # be self-non-matching against their own source text, and that property is
+      # load-bearing: a pattern that matched this file would fail the gate
+      # permanently. Fix the name, not the regex.
+      #
+      # Plan 03-04 proved the gate bites, by tripping it deliberately on a
+      # throwaway branch and reading this step's conclusion by name from the API.
+      # That plan is complete and its run records are archived, which is what
+      # makes this rename safe — but the name remains a contract for anything
+      # that reads step conclusions from the API in future. The archived 03-0x
+      # summaries quote the old name; they are accurate records of runs that
+      # really did use it and are deliberately left unedited.
+      - name: Assert no Caido token reference and no GitHub secrets expression (D-10)
         shell: bash
         run: |
           # Assert both targets exist first, so a rename or deletion fails loudly
