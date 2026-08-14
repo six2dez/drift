@@ -1,8 +1,32 @@
 import type { DefineAPI, SDK, DefineEvents } from "caido:plugin";
 import { readFile, writeFile, open as openFile, stat, mkdir, rm, rename, readdir } from "fs/promises";
+// A second statement against the SAME specifier the line above already uses, and
+// the only source for the rung-2 presence check in `detectRealpathRung`. A
+// NAMESPACE import is deliberate: it tolerates a missing member as `undefined`,
+// whereas a named import of an absent export is an ESM link error — and
+// `realpath` is verified absent from caido/dependency-llrt@main's fs module
+// (and from Caido's own @caido/quickjs-types surface). "fs/promises" is safe to
+// name because shipped 0.1.0 already imports from it on the line above, so it is
+// proven-resolvable under Caido's LLRT rather than assumed. `no-duplicate-imports`
+// is not enabled in eslint.config.mjs, so the second statement is fine.
+//
+// The bare "fs" / "node:fs" specifier is deliberately NOT imported anywhere in
+// this file. It has no source-verified resolution under Caido's LLRT, a static
+// ESM import cannot be wrapped in try/catch, and an unresolvable module-scope
+// specifier kills the ENTIRE plugin at load on every platform — the exact
+// failure mode D-02 exists to prevent. Its only would-be consumer is the rung-1
+// (realpathSync.native) presence check, whose answer is already known from the
+// fork's source, so rung 1 is reported as "not probed" instead of measured.
+import * as fsPromisesNs from "fs/promises";
 import { spawn, type ChildProcessWithoutNullStreams } from "child_process";
 import { Buffer } from "buffer";
 import path from "path";
+// The FIRST `os` import in the backend source. Phase 3's P2-OS measured that the
+// bare "os" specifier resolves, and 04-RESEARCH.md § Environment Availability
+// records it as this phase's single hard dependency, with D-05's hard-fail as
+// the agreed handling. The import STATEMENT is fine — D-02 forbids a
+// module-scope `os.*` CALL, not the import; see the Runtime probe section below.
+import os from "os";
 import {
   type CliSessionReasonCode,
   type CliSessionStateEvent,
@@ -64,6 +88,19 @@ import {
   getClaudePrintRecoveryMode,
 } from "./claude-print";
 import { getPersistenceDbHandle, type PersistenceDbHandle } from "./persistence";
+import {
+  getSweepRoots,
+  getTempRoot,
+  normalizePlatform,
+  type Platform,
+} from "./platform";
+import { withFsRetry } from "./fs-retry";
+import {
+  buildProbeReport,
+  formatProbeFailure,
+  type ProbeReport,
+  type RealpathRung,
+} from "./runtime-probe";
 
 // ── Types (inline to avoid Zod which crashes QuickJS) ──────────────
 
@@ -162,6 +199,257 @@ type ApprovalDecision = {
   approved: boolean;
   decidedAt: number;
 };
+
+// ── Runtime probe ───────────────────────────────────────────────────
+
+type HostFacts = { platform: Platform; tmpdir: string };
+
+// D-08's sentinel, matching runtime-probe.ts. Rendered for any version source
+// whose read threw, so the block a bug reporter pastes has a line for every
+// field rather than a hole.
+const VERSION_UNAVAILABLE = "unavailable";
+
+// D-02: the ONE cache of the single `os` read this file performs. Every
+// downstream site — the orphan sweep, the temp-dir path, the debug-log path —
+// reads this and never touches `os` again.
+//
+// Rejected alternative, and it is the load-bearing part: a module-level
+// `const HOST = { platform: os.platform(), tmpdir: os.tmpdir() }` evaluated at
+// plugin load means that if Caido's LLRT lacks `os`, the throw happens during
+// MODULE EVALUATION and the entire Drift plugin dies — chat and settings
+// included, and the frontend renders a dead panel — while RUN-05 never gets to
+// speak. Reading lazily inside the probe degrades the same gap to a loud,
+// actionable MCP-start error and makes the probe authoritative rather than
+// decorative: it is the only code that can observe the failure.
+let host: HostFacts | undefined;
+
+// The last report the probe built. Built on the SUCCESS path as well as the
+// failure path, so getDiagnostics always has something to show (D-06: every
+// result, gating or not, lands in both the probe message and getDiagnostics).
+let lastProbeReport: ProbeReport | undefined;
+
+// How many attempts RUN-04's ladder needed for the real first write. Surfaced in
+// getDiagnostics because a real Defender lock is not inducible in CI on any
+// runner: this count in a support bundle is what tells a future reader whether
+// the 1,500 ms ladder was long enough, so FS_RETRY_DELAYS_MS can be widened on
+// evidence rather than on a guess.
+let lastFirstWriteAttempts = 0;
+
+// Passed to buildProbeReport as `realpathRungNote` and rendered verbatim.
+//
+// The distinction is load-bearing and must survive review: "not probed" is NOT
+// the same claim as "absent". Probing rung 1 would require a module-scope import
+// of the bare "fs" specifier, which the import block above explains is
+// forbidden, so Drift never measures it. A report whose entire purpose is to be
+// pasted into a public bug report as evidence must not assert a measurement
+// Drift did not make; the absence claim is therefore attributed to the source
+// analysis that produced it, never to this probe.
+//
+// ASCII only — no em dash, no section sign. This string is emitted into the MCP
+// status panel, into sdk.console and into a GitHub issue body, and a cp1252
+// Windows console wants plain ASCII. Same discipline as runtime-probe.ts.
+const REALPATH_NATIVE_PROBE_NOTE =
+  'realpathSync.native: not probed - Drift does not import the bare "fs" specifier at module scope (D-02); 04-RESEARCH.md section Environment Availability records it as absent from caido/dependency-llrt@main';
+
+// D-08's version block. In the absence of any Caido version — sdk.meta exposes
+// only db(), path() and assetsPath() — this is the closest available substitute
+// rather than an omission, and it is exactly what a Windows bug reporter should
+// paste into an issue.
+//
+// Every read is INDIVIDUALLY guarded and renders "unavailable" on failure, so a
+// single throwing source cannot blank the rest of the block. `process` is
+// reached through the same `globalThis` guard shape already used at
+// index.ts:890-894 and :2838-2844 — never a bare `process.` reference, which
+// would be a ReferenceError rather than an `undefined` in a runtime that does
+// not define it. Caido's own @caido/quickjs-types declares no `process` global
+// at all, so the guard is a hard requirement here, not defensive padding.
+//
+// `pluginVersion` is the existing module variable, already populated at init by
+// the existing detectPluginVersion() (index.ts:455) — this reads that cache
+// rather than adding a second manifest reader.
+function readVersionBlock(): Record<string, string> {
+  const runtimeProcess = globalThis as typeof globalThis & {
+    process?: {
+      version?: string;
+      versions?: Record<string, string | undefined>;
+    };
+  };
+
+  const guarded = (read: () => string | undefined): string => {
+    try {
+      const value = read();
+      return typeof value === "string" && value.trim() !== ""
+        ? value.trim()
+        : VERSION_UNAVAILABLE;
+    } catch {
+      return VERSION_UNAVAILABLE;
+    }
+  };
+
+  // The two `os` reads are written as their own lexical try blocks rather than
+  // routed through `guarded`, so that "every os call site sits inside a try" is
+  // checkable by reading this function instead of by following a callback into a
+  // helper. They are two blocks rather than one so a throw from either still
+  // leaves the other readable.
+  let osPlatform = VERSION_UNAVAILABLE;
+  try {
+    osPlatform = os.platform();
+  } catch {
+    // D-05: an absent `os` must not break the version block itself. The block is
+    // what makes the probe failure reportable, so it degrades rather than throws.
+  }
+
+  let osRelease = VERSION_UNAVAILABLE;
+  try {
+    osRelease = os.release();
+  } catch {
+    // Same reasoning as osPlatform above.
+  }
+
+  return {
+    driftVersion:
+      pluginVersion.trim() === "" ? VERSION_UNAVAILABLE : pluginVersion.trim(),
+    processVersion: guarded(() => runtimeProcess.process?.version),
+    // process.versions.node === "0.0.0" under LLRT is a FREE LLRT-vs-Node
+    // discriminator for bug reports — it costs nothing to carry and answers
+    // "which runtime was this?" without a Caido version the SDK does not expose.
+    versionsNode: guarded(() => runtimeProcess.process?.versions?.["node"]),
+    versionsLlrt: guarded(() => runtimeProcess.process?.versions?.["llrt"]),
+    osPlatform,
+    osRelease,
+  };
+}
+
+// A PRESENCE check only: no filesystem call, no path, no I/O. It probes rungs 2
+// and 3 of D-04's ladder exclusively and can NEVER return the rung-1 value,
+// because probing rung 1 would need a module-scope import of the bare "fs"
+// specifier (see the import block for why that is forbidden).
+//
+// Under Caido the rung reached is expected to be `path.resolve`: there is no
+// realpath symbol anywhere in caido/dependency-llrt@main's fs module, and none
+// in Caido's own @caido/quickjs-types either. That is the expected answer rather
+// than a failure, it is the answer Phase 6 designs against, and it is the
+// highest-value single field in the whole probe report.
+function detectRealpathRung(): RealpathRung {
+  try {
+    // Read through an unknown-shaped view because `realpath` is not declared on
+    // Caido's `fs/promises` type surface at all. That makes this a genuine
+    // runtime presence probe rather than a call into something the compiler
+    // already believes exists.
+    const candidate = (fsPromisesNs as unknown as { realpath?: unknown })
+      .realpath;
+    if (typeof candidate === "function") return "fs.realpath";
+  } catch {
+    // A namespace member read cannot normally throw, but an exotic module
+    // namespace could. Fall through to the bottom rung rather than escaping.
+  }
+  return "path.resolve";
+}
+
+// Presence BOOLEANS only, read by NAME — never the values, and never an
+// enumeration of the environment (T-04-04). These land in a report that is
+// pasted into public bug reports, and the values contain the user's real account
+// name. Phase 3's P3-VARS confirmed all three are present and non-empty in the
+// parent process on windows-latest; this reports whether they survived into
+// Caido's own process.
+function readWindowsEnvPresence(): Record<string, boolean> {
+  const runtimeProcess = globalThis as typeof globalThis & {
+    process?: { env?: Record<string, string | undefined> };
+  };
+
+  const isPresent = (value: string | undefined): boolean =>
+    typeof value === "string" && value.trim() !== "";
+
+  try {
+    const env = runtimeProcess.process?.env;
+    return {
+      USERPROFILE: isPresent(env?.USERPROFILE),
+      APPDATA: isPresent(env?.APPDATA),
+      LOCALAPPDATA: isPresent(env?.LOCALAPPDATA),
+    };
+  } catch {
+    return { USERPROFILE: false, APPDATA: false, LOCALAPPDATA: false };
+  }
+}
+
+// RUN-05. The single `os` read of the whole backend, and the only place
+// os.platform() / os.tmpdir() are called.
+function probeRuntime(): Result<HostFacts> {
+  let rawPlatform: string | undefined;
+  let tmpdir: string | undefined;
+  try {
+    rawPlatform = os.platform();
+    tmpdir = os.tmpdir();
+  } catch {
+    // Fall through with both undefined — D-05 turns that into the hard failure
+    // below rather than a silent degrade.
+  }
+
+  const normalized = normalizePlatform(rawPlatform);
+  // The explicit string/empty check stays: a runtime can hand back a non-string
+  // or an empty string without throwing, and either would produce a temp path
+  // rooted at nothing.
+  const facts =
+    normalized !== undefined && typeof tmpdir === "string" && tmpdir !== ""
+      ? { platform: normalized, tmpdir }
+      : undefined;
+
+  // Built on BOTH paths, so getDiagnostics always has a report to flatten.
+  lastProbeReport = buildProbeReport({
+    rawPlatform,
+    normalizedPlatform: normalized,
+    tmpdir,
+    tempRoot: facts === undefined ? undefined : getTempRoot(facts),
+    realpathRung: detectRealpathRung(),
+    realpathRungNote: REALPATH_NATIVE_PROBE_NOTE,
+    windowsEnvPresent:
+      normalized === "win32" ? readWindowsEnvPresence() : undefined,
+    version: readVersionBlock(),
+  });
+
+  if (facts === undefined) {
+    // D-05: this arm is taken on EVERY OS. There is no platform === "darwin"
+    // fallback to a hardcoded temp path, because if `os` is genuinely absent
+    // from Caido's LLRT the POSIX path cannot reach os.tmpdir() either — and
+    // silently falling back would ship a build whose Windows path is dead while
+    // POSIX quietly works, which is the exact failure mode this milestone exists
+    // to kill and the one that let the reported bug ship in the first place.
+    return err(formatProbeFailure(lastProbeReport));
+  }
+
+  host = facts;
+  return ok(facts);
+}
+
+/** Generate a short lowercase-hex directory token without the crypto module */
+// 20 lowercase hex characters, using the same Math.random hex-loop idiom as
+// genUUID (index.ts:829+). genUUID itself is NOT modified and is NOT replaced by
+// crypto.randomUUID: Phase 3's P3-UUID is the one assertion of seven with zero
+// source-level LLRT confirmation in either direction, so it licenses nothing.
+// SC-3's shortening changes the CONSUMER, not the generator.
+//
+// MAX_PATH arithmetic — 259 usable characters, and Drift controls neither the
+// LongPathsEnabled DWORD nor the longPathAware manifest, because the process is
+// Caido's. The directory component shrinks from `drift-mcp-<36-char UUID>` (47
+// characters with its separator) to `drift-mcp-<20 hex>` (31), saving 16, which
+// moves the worst-case constructed path from about 124 characters to about 108.
+//
+// Security floor, stated explicitly so a later "tidy-up" cannot erode it:
+//   * do NOT shorten below 16 hex characters;
+//   * do NOT change the `drift-mcp-` prefix — the orphan sweep filters on
+//     name.startsWith("drift-mcp-"), so renaming it would silently orphan every
+//     pre-upgrade token-bearing directory (T-04-02);
+//   * the real entropy is bounded by Math.random's PRNG state rather than by the
+//     string length, which is precisely why shortening costs nothing here and
+//     why a longer string would not buy any of it back.
+function genShortToken(): string {
+  const hex = "0123456789abcdef";
+  let token = "";
+  for (let i = 0; i < 20; i++) {
+    token += hex[(Math.random() * 16) | 0];
+  }
+  return token;
+}
 
 // ── Persistence ─────────────────────────────────────────────────────
 
@@ -334,7 +622,14 @@ function renderExportExecScript(
 
 function getSessionDebugLogPath(sessionId: string): string | undefined {
   if (!currentSettings.debugLogging) return undefined;
-  return `/tmp/drift-session-${sessionId}.log`;
+  // D-02 populates `host` only at MCP start, but a chat turn can run with MCP
+  // never started. `debugLogging` is opt-in, so silently skipping the log is
+  // acceptable and strictly better than reintroducing a hardcoded temp path that
+  // is not even a valid path on Windows.
+  if (host === undefined) return undefined;
+  // path.join, never template concatenation — see the note at the mcpTempDir
+  // assignment in startMcpServer.
+  return path.join(getTempRoot(host), `drift-session-${sessionId}.log`);
 }
 
 function summarizeDebugChunk(text: string, maxChars = DEBUG_CHUNK_PREVIEW_CHARS): string {
@@ -842,6 +1137,19 @@ function genUUID(): string {
   }
   return uuid;
 }
+
+// genUUID's last production call site was the mcpTempDir name, which SC-3
+// shortened to genShortToken()'s 20 hex characters for MAX_PATH headroom. The
+// hex loop above is PRESERVED BYTE-FOR-BYTE anyway: Phase 3's P3-UUID is the one
+// assertion of seven with zero source-level LLRT confirmation in either
+// direction, so nothing licenses replacing it with crypto.randomUUID, and the
+// port still needs a UUID generator that is known to work under QuickJS/LLRT.
+//
+// This re-export exists only so `noUnusedLocals` (tsconfig) and
+// `@typescript-eslint/no-unused-vars` (eslint --max-warnings 0) do not force the
+// deletion the preservation rule forbids. It is a bookkeeping statement, not an
+// API: nothing imports index.ts. Delete it the moment a caller reappears.
+export { genUUID };
 
 // ── CLI resolution ──────────────────────────────────────────────────
 
@@ -1670,24 +1978,38 @@ async function cleanupMcpRuntime(
   await publishMcpStatus(sdk);
 }
 
-// Remove orphaned /tmp/drift-mcp-* dirs left by a previous run that did not
-// stop cleanly (crash, hard kill). Those dirs hold the token-bearing wrapper
+// Remove orphaned drift-mcp-* dirs left by a previous run that did not stop
+// cleanly (crash, hard kill). Those dirs hold the token-bearing wrapper
 // scripts, so leaking them is a credential-exposure risk. Safe to run here:
 // startMcpServer is only entered when MCP is not already running, so any
 // existing drift-mcp-* dir other than the (about-to-be-replaced) current one
 // is genuinely orphaned.
-async function sweepOrphanedMcpTempDirs(sdk: BackendSDK): Promise<void> {
-  try {
-    const entries = await readdir("/tmp");
-    await Promise.all(
-      entries
-        .filter((name) => name.startsWith("drift-mcp-"))
-        .map((name) => path.join("/tmp", name))
-        .filter((dir) => dir !== mcpTempDir)
-        .map((dir) => rm(dir, { recursive: true, force: true }).catch(() => undefined)),
-    );
-  } catch (error) {
-    sdk.console.error(`[drift] Failed to sweep orphaned MCP temp dirs: ${String(error)}`);
+//
+// The roots come from getSweepRoots(hostFacts), which on non-win32 adds the
+// LEGACY arm (CMP-02 / T-04-02) — and that arm is the security-relevant half:
+// the shipped 0.1.0 wrote drift-mcp-* into a hardcoded temp path, while on macOS
+// os.tmpdir() resolves under /var/folders/…, so without the second root those
+// token-bearing directories would never be swept again after upgrade.
+//
+// Each root gets its OWN try/catch, so a missing or unreadable legacy root
+// cannot abort the sweep of the real one.
+async function sweepOrphanedMcpTempDirs(
+  sdk: BackendSDK,
+  hostFacts: HostFacts,
+): Promise<void> {
+  for (const root of getSweepRoots(hostFacts)) {
+    try {
+      const entries = await readdir(root);
+      await Promise.all(
+        entries
+          .filter((name) => name.startsWith("drift-mcp-"))
+          .map((name) => path.join(root, name))
+          .filter((dir) => dir !== mcpTempDir)
+          .map((dir) => rm(dir, { recursive: true, force: true }).catch(() => undefined)),
+      );
+    } catch (error) {
+      sdk.console.error(`[drift] Failed to sweep orphaned MCP temp dirs in ${root}: ${String(error)}`);
+    }
   }
 }
 
@@ -1707,17 +2029,69 @@ async function startMcpServer(sdk: BackendSDK): Promise<Result<McpServerInfo>> {
     return err("MCP server script not found in plugin assets.");
   }
 
-  await sweepOrphanedMcpTempDirs(sdk);
+  // RUN-05. ORDER MATTERS: the probe runs FIRST, before the sweep and before
+  // mcpTempDir is assigned, because everything below it now needs host.tmpdir.
+  const probe = probeRuntime();
+  if (probe.kind === "Error") {
+    await cleanupMcpRuntime(sdk, "error", probe.error);
+    return err(probe.error);
+  }
 
-  // Use /tmp for MCP configs - Caido plugin path has spaces ("Application Support")
+  // The sweep moved below the probe for the reason above; it used to run here
+  // with mcpTempDir still undefined. Its existing `dir !== mcpTempDir` guard was
+  // therefore already comparing against undefined at this point, and stays
+  // harmless, because every candidate it compares is a string.
+  await sweepOrphanedMcpTempDirs(sdk, probe.value);
+
+  // Stage the MCP runtime under the resolved temp root rather than under the
+  // plugin asset path - the Caido plugin path has spaces ("Application Support")
   // which breaks Claude Code's --mcp-config path parsing.
   // 0o700 so other local users cannot read the token-bearing wrapper/config
   // files written inside.
-  mcpTempDir = `/tmp/drift-mcp-${genUUID()}`;
-  await mkdir(mcpTempDir, { recursive: true, mode: 0o700 });
+  //
+  // ALWAYS path.join, never template concatenation: LLRT's os.tmpdir() is
+  // std::env::temp_dir() (GetTempPath2 on Windows, $TMPDIR on macOS) and can
+  // return a path that already ends in a separator, while Node has stripped
+  // trailing separators since v2.0.0. path.join normalises it; a template
+  // literal would produce C:\...\Temp\/drift-mcp-x.
+  mcpTempDir = path.join(getTempRoot(probe.value), `drift-mcp-${genShortToken()}`);
 
   const mcpScriptLocal = path.join(mcpTempDir, "mcp-server.mjs");
-  await writeFile(mcpScriptLocal, await readFile(mcpScript, "utf-8"));
+
+  // D-07: the probe WRAPS THE REAL FIRST WRITE, so RUN-04's retry ladder and
+  // RUN-05's assertion are one mechanism. There is NO separate canary file: a
+  // canary can itself trip the anti-virus write-then-access race it exists to
+  // detect - a false negative on precisely the machines that matter - and this
+  // write is the failure users actually hit, because a read-only or
+  // Defender-locked temp dir passes a stat()-only check and then dies at the
+  // copy with the cryptic error RUN-05 exists to replace.
+  //
+  // Both `mode:` options stay UNCONDITIONAL. LLRT's set_mode is a total no-op
+  // returning Ok(()) on non-unix and Node silently ignores mode on Windows, so a
+  // platform !== "win32" guard would double the branch count for zero behaviour
+  // change while risking a POSIX regression (T-04-30).
+  const written = await withFsRetry(
+    async () => {
+      await mkdir(mcpTempDir!, { recursive: true, mode: 0o700 });
+      await writeFile(mcpScriptLocal, await readFile(mcpScript, "utf-8"));
+    },
+    {
+      onRetry: (info) => {
+        sdk.console.error(
+          `[drift] Transient filesystem error staging the MCP server (attempt ${String(info.attempt)}, code ${info.code}); retrying in ${String(info.delayMs)}ms`,
+        );
+      },
+    },
+  );
+  lastFirstWriteAttempts = written.attempts;
+  if (written.kind === "Error") {
+    const message = formatProbeFailure(lastProbeReport!, {
+      firstWriteError: written.error,
+      firstWriteAttempts: written.attempts,
+    });
+    await cleanupMcpRuntime(sdk, "error", message);
+    return err(message);
+  }
 
   await refreshProjectContext(sdk);
 
@@ -2776,6 +3150,12 @@ async function getDiagnostics(_sdk: BackendSDK): Promise<Result<Record<string, s
     mcpTempDir: mcpTempDir ?? "not set (MCP not started)",
     mcpTempScript: mcpTempScript ?? "not set (MCP not started)",
     mcpContextFile: getMcpContextFilePath() ?? "not set (MCP not started)",
+    // RUN-04's agreed mitigation for the one behaviour that is not inducible in
+    // CI on any runner: a real Defender lock. With the attempt count in the
+    // support bundle, the reporter's next bug report answers whether the
+    // 1,500 ms ladder was long enough, and FS_RETRY_DELAYS_MS can then be
+    // widened on evidence instead of on a guess.
+    mcpFirstWriteAttempts: String(lastFirstWriteAttempts),
     caidoApiUrl: currentSettings.caidoApi.url,
     caidoApiTokenSet: getEffectiveCaidoToken() !== "" ? "yes" : "no",
     caidoTokenSource: getCaidoTokenSource(),
