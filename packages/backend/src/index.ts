@@ -116,6 +116,10 @@ import {
   type ProbeReport,
   type RealpathRung,
 } from "./runtime-probe";
+import {
+  createResolutionCacheState,
+  resolveWithCache,
+} from "./resolution-cache";
 
 // ── Types (inline to avoid Zod which crashes QuickJS) ──────────────
 
@@ -168,7 +172,16 @@ let activeSelfTestPoll: (() => void) | undefined;
 let mcpTempDir: string | undefined;
 let mcpAuthState: McpAuthState = "unknown";
 let mcpAuthMessage = "";
-let lastNodeExecutable = "";
+// PERF-03. One cache for BOTH binary-resolution paths — the provider path
+// (resolveCommand), which had no cache at all and re-ran spawn("which") plus the
+// version-manager directory walk on every check, and the node path, which used
+// to carry a module-level `let lastNodeExecutable = ""` — an INFINITE,
+// never-invalidated cache that survived settings saves, MCP restarts and
+// provider-command changes. Two caches for one concern is the inconsistency this
+// singleton exists to remove: for node it is a TIGHTENING, for providers it is
+// genuinely new. Bounded at 5 min positive / 30 s negative and cleared whole on
+// any providers[*].command change.
+const resolutionCache = createResolutionCacheState();
 let lastNodeSearchCandidates: string[] = [];
 let sessionCaidoToken = "";
 let mcpContextWriteChain: Promise<void> = Promise.resolve();
@@ -1183,46 +1196,82 @@ export { genUUID };
 
 // ── CLI resolution ──────────────────────────────────────────────────
 
-async function resolveCommand(command: string): Promise<string | undefined> {
+async function resolveCommand(
+  command: string,
+  options?: { bypassCache?: boolean },
+): Promise<string | undefined> {
+  // Deliberately OUTSIDE the cache. This is a single fileExists call, not worth
+  // an entry, and caching it would let a deleted or replaced absolute path
+  // linger for the whole positive TTL (T-04-25).
   if (path.isAbsolute(command)) {
     return await fileExists(command) ? command : undefined;
   }
-  const pathResolution = await new Promise<string | undefined>((resolve) => {
-    const child = spawn("which", [command]);
-    let out = "";
-    let settled = false;
-    const timeout = setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      try { child.kill("SIGKILL"); } catch { /* ignore */ }
-      resolve(undefined);
-    }, 1000);
-    child.stdout?.on("data", (d: Buffer) => { out += d.toString(); });
-    child.on("close", (code) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timeout);
-      resolve(code === 0 && out.trim() !== "" ? out.trim() : undefined);
-    });
-    child.on("error", () => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timeout);
-      resolve(undefined);
-    });
+  // PERF-03. Everything below — the which/where.exe spawn, the candidate build
+  // and the fileExists loop — is the expensive part, and it is unchanged except
+  // for being moved into the resolver callback. Date.now() is read HERE and
+  // never inside resolution-cache.ts, which is what keeps that module's expiry
+  // tests deterministic.
+  return await resolveWithCache(resolutionCache, {
+    key: `cmd:${command}`,
+    now: Date.now(),
+    bypass: options?.bypassCache,
+    resolve: async () => {
+      const pathResolution = await new Promise<string | undefined>((resolve) => {
+        const child = spawn("which", [command]);
+        // PERF-04 site 7 — the accumulator every earlier inventory in this phase
+        // missed, because `grep -n "stdout += "` is structurally blind to a
+        // variable named `out`. Bounded rather than EXCLUDED: the tempting
+        // exemption ("it is only `which`, the output is one short path, and the
+        // 1-second timeout below caps it") is the same argument this phase
+        // explicitly rejects for callMcpMethod — a timeout bounds the exposure
+        // WINDOW, not the VOLUME, and shipping that reading in one place while
+        // rejecting it in the other turns an inconsistency into a precedent.
+        // SPAWN_STDOUT_MAX_CHARS with head retention is reused rather than
+        // adding a seventh constant: this consumer reads the HEAD of the output,
+        // identically to spawnAndWait's stdout.
+        let out = createBoundedBuffer({
+          maxChars: SPAWN_STDOUT_MAX_CHARS,
+          retention: "head",
+        });
+        let settled = false;
+        const timeout = setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          try { child.kill("SIGKILL"); } catch { /* ignore */ }
+          resolve(undefined);
+        }, 1000);
+        child.stdout?.on("data", (d: Buffer) => { out = appendBounded(out, d.toString()); });
+        child.on("close", (code) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timeout);
+          // Read once. Below the cap the rendered value is byte-identical to the
+          // string this used to accumulate, so the returned path is unchanged
+          // for every real input — a which hit is one short line.
+          const resolved = renderBoundedBuffer(out).trim();
+          resolve(code === 0 && resolved !== "" ? resolved : undefined);
+        });
+        child.on("error", () => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timeout);
+          resolve(undefined);
+        });
+      });
+
+      const candidates = await getCommandExecutableCandidates({
+        command,
+        pathResolution,
+        homeDirs: getKnownHomeDirs(),
+      });
+
+      for (const candidate of candidates) {
+        if (await fileExists(candidate)) return candidate;
+      }
+
+      return undefined;
+    },
   });
-
-  const candidates = await getCommandExecutableCandidates({
-    command,
-    pathResolution,
-    homeDirs: getKnownHomeDirs(),
-  });
-
-  for (const candidate of candidates) {
-    if (await fileExists(candidate)) return candidate;
-  }
-
-  return undefined;
 }
 
 function getKnownHomeDirs(): string[] {
@@ -1237,12 +1286,15 @@ function getKnownHomeDirs(): string[] {
   ].filter((value): value is string => typeof value === "string" && value.trim() !== "");
 }
 
-async function checkProvider(id: string): Promise<ProviderStatus> {
+async function checkProvider(
+  id: string,
+  options?: { bypassCache?: boolean },
+): Promise<ProviderStatus> {
   const config = currentSettings.providers[id];
   if (!config?.enabled || !config?.command) {
     return { id, available: false, error: "Disabled" };
   }
-  const resolved = await resolveCommand(config.command);
+  const resolved = await resolveCommand(config.command, options);
   if (resolved === undefined) {
       return {
         id,
@@ -1435,7 +1487,11 @@ async function syncCaidoHistoryContext(
 
 async function getProviderStatuses(_sdk: BackendSDK): Promise<Result<ProviderStatus[]>> {
   const ids = ["claude-cli", "gemini-cli", "codex-cli", "copilot-cli"];
-  const statuses = await Promise.all(ids.map(checkProvider));
+  // Wrapped, not point-free. Array.prototype.map passes `index: number` as the
+  // callback's SECOND argument, and once checkProvider takes an options object
+  // there the point-free form is a hard TS2345. Same wrapper form already in use
+  // in tryRegisterMcpForProviders. This call keeps the default cached behaviour.
+  const statuses = await Promise.all(ids.map((id) => checkProvider(id)));
   return ok(statuses);
 }
 
@@ -1443,7 +1499,11 @@ async function checkProviderAvailability(
   _sdk: BackendSDK,
   providerId: string
 ): Promise<Result<ProviderStatus>> {
-  return ok(await checkProvider(providerId));
+  // The user's manual "Check" button — pressed by exactly the person who just
+  // installed a CLI. A cached miss here would make PERF-03 a bug rather than an
+  // optimisation, so this one path always re-resolves AND refreshes the entry.
+  // It is the escape hatch that makes any TTL choice defensible (T-04-21).
+  return ok(await checkProvider(providerId, { bypassCache: true }));
 }
 
 // ── API: MCP ────────────────────────────────────────────────────────
@@ -1952,17 +2012,41 @@ async function getNodeExecutable(): Promise<string | undefined> {
     if (!(await fileExists(candidate))) continue;
     const result = await spawnAndWait(candidate, ["--version"]);
     if (result.code === 0) {
-      lastNodeExecutable = candidate;
       return candidate;
     }
   }
 
-  lastNodeExecutable = "";
   return undefined;
 }
 
+// The ONE place that knows the node cache key, so a later rename cannot miss a
+// site and silently split the cache in two.
+//
+// After PERF-03 the same binary is reachable under TWO keys, and that is not
+// double caching, because the two keys hold DIFFERENT values:
+//
+//   node      the VALIDATED executable — a candidate that both exists and whose
+//             `--version` exited 0, produced by getNodeExecutable. AUTHORITATIVE:
+//             it is the path Drift actually spawns, and the only value
+//             requireNodeExecutable and getDiagnostics may read.
+//   cmd:node  the raw `which node` PATH hit, UNVALIDATED — it may not even be
+//             executable. Produced by resolveCommand("node") below as one INPUT
+//             to getNodeExecutableCandidates' candidate list, never an answer.
+//             Never read it as "the Node executable" (T-04-29).
+//
+// The nesting is therefore a saving, not a duplication: a miss on the outer key
+// costs at most a CACHED inner hit instead of a second which spawn.
+async function getCachedNodeExecutable(): Promise<string | undefined> {
+  return await resolveWithCache(resolutionCache, { key: "node", now: Date.now(), resolve: getNodeExecutable });
+}
+
 async function requireNodeExecutable(): Promise<Result<string>> {
-  const nodeExecutable = lastNodeExecutable || await getNodeExecutable();
+  // PERF-03, and note the change of CHARACTER: this used to read the module
+  // variable lastNodeExecutable, an infinite, never-invalidated cache that
+  // survived settings saves, MCP restarts and provider-command changes. Routing
+  // it through the shared cache TIGHTENS an existing cache into a bounded one —
+  // it does not add caching where there was none.
+  const nodeExecutable = await getCachedNodeExecutable();
   if (nodeExecutable === undefined) return err(NODE_EXECUTABLE_ERROR);
   return ok(nodeExecutable);
 }
@@ -3317,7 +3401,13 @@ async function getDiagnostics(_sdk: BackendSDK): Promise<Result<Record<string, s
     toolPolicy: getCurrentMcpToolPolicy(),
   }).effectiveContext;
   const toolPolicy = getCurrentMcpToolPolicy();
-  const nodeExecutable = await getNodeExecutable();
+  // PERF-03. This was an UNCONDITIONAL direct call to the resolver, so without
+  // this edit the support-bundle path would bypass the cache entirely and pay a
+  // full which spawn plus a version-manager walk plus a node --version spawn on
+  // every render — exactly the cost PERF-03 exists to remove. Behaviour is
+  // unchanged: on a cold cache it still resolves, so the surfaced value is the
+  // same. Reads the authoritative validated key, never the raw PATH hit.
+  const nodeExecutable = await getCachedNodeExecutable();
   const info: Record<string, string> = {
     pluginPath,
     assetsPath,
