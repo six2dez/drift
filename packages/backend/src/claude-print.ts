@@ -1,3 +1,25 @@
+// ── PERF-04 site B: the ceiling on ClaudePrintState.buffer ──────────
+//
+// The hazard at THIS site is not total volume. A buffer that contains newlines
+// drains naturally through the single split in consumeClaudePrintChunk, so the
+// only unbounded case is one never-terminated line — and Claude's stdout carries
+// target-application content, so that ceiling has to be explicit rather than
+// implied by the model's good behaviour.
+//
+// Deliberately the same 4 MiB, and the same drop-whole-and-count policy, as plan
+// 04-04's ACTIVITY_PARTIAL_MAX_BYTES (activity-tail.ts) and plan 04-05's
+// MCP_SELFTEST_LINE_MAX_CHARS (bounded-buffer.ts). All three bound the identical
+// hazard shape, and three different numbers for one hazard is how the next
+// reader concludes that one of them was an oversight. 4 MiB is deliberately
+// generous: a legitimate `tool_result` content block can be large, and dropping
+// a real one is worse than holding it briefly.
+//
+// The asymmetry that IS intended: this counts UTF-16 code units, because this
+// buffer is a `string`, whereas activity-tail.ts counts BYTES, because its
+// remainder must stay a `Buffer` to survive a multi-byte sequence split across a
+// read boundary.
+export const CLAUDE_LINE_BUFFER_MAX_CHARS = 4 * 1024 * 1024;
+
 type ClaudeRawUsage = {
   input_tokens?: number;
   output_tokens?: number;
@@ -88,6 +110,10 @@ function mergeUsage(
 
 export type ClaudePrintState = {
   buffer: string;
+  // Cumulative count of characters thrown away because `buffer` reached
+  // CLAUDE_LINE_BUFFER_MAX_CHARS with no terminating newline. Lives beside the
+  // buffer it describes so a reader cannot find one without the other.
+  droppedChars: number;
   sessionId: string;
   streamedText: string;
   assistantText: string;
@@ -103,6 +129,7 @@ export type ClaudePrintState = {
 export function createClaudePrintState(): ClaudePrintState {
   return {
     buffer: "",
+    droppedChars: 0,
     sessionId: "",
     streamedText: "",
     assistantText: "",
@@ -145,19 +172,36 @@ export function consumeClaudePrintChunk(
     onSessionId?: (sessionId: string) => void;
   },
 ): ClaudePrintState {
-  let nextState: ClaudePrintState = {
-    ...state,
-    buffer: state.buffer + chunk,
-  };
+  // Split ONCE per chunk. The form this replaces rescanned from index 0 and
+  // copied the whole remainder for EVERY line, plus one object spread per line —
+  // O(k·n) for a chunk of k lines and n characters, and Claude's stream-json
+  // emits k routinely in the 10-50 range. Caido's runtime is single-threaded and
+  // that same event loop runs the RPC keep-alive the whole watchdog pattern
+  // depends on, so this CPU cost is an availability problem (T-04-06), not a
+  // cosmetic one — at least as urgent as the memory bound applied just below.
+  const combined = state.buffer + chunk;
+  const parts = combined.split("\n");
+  const trailing = parts.pop() ?? "";
 
-  let newlineIndex = nextState.buffer.indexOf("\n");
-  while (newlineIndex !== -1) {
-    const line = nextState.buffer.slice(0, newlineIndex).trim();
-    nextState = {
-      ...nextState,
-      buffer: nextState.buffer.slice(newlineIndex + 1),
-    };
-    newlineIndex = nextState.buffer.indexOf("\n");
+  // The bound is on the POST-SPLIT remainder, never on `combined`: everything
+  // before the last newline is a complete line that is about to be emitted, and
+  // bounding the concatenation would throw those away too.
+  //
+  // The over-cap remainder is dropped WHOLE and counted, never truncated and
+  // parsed: a truncated JSON line is unparseable and the `catch { continue; }`
+  // below would swallow it, converting a visible, counted drop into a silent
+  // hole in the answer.
+  const dropped =
+    trailing.length > CLAUDE_LINE_BUFFER_MAX_CHARS ? trailing.length : 0;
+  const remainder = dropped > 0 ? "" : trailing;
+
+  // Starts as `state` itself rather than a spread of it: the loop below never
+  // reads `.buffer`, so there is nothing to keep in sync while it runs, and the
+  // single spread after the loop is what makes the returned object a new one.
+  let nextState: ClaudePrintState = state;
+
+  for (const raw of parts) {
+    const line = raw.trim();
 
     if (line === "") continue;
 
@@ -316,15 +360,40 @@ export function consumeClaudePrintChunk(
     }
   }
 
+  // ONE state spread per chunk, after the loop, instead of one per line.
+  nextState = {
+    ...nextState,
+    buffer: remainder,
+    droppedChars: nextState.droppedChars + dropped,
+  };
+
   return nextState;
 }
 
 export function finalizeClaudePrintOutput(state: ClaudePrintState): string {
-  return state.finalText || state.streamedText.trim() || state.assistantText.trim();
+  const output =
+    state.finalText || state.streamedText.trim() || state.assistantText.trim();
+  // The `> 0` guard is load-bearing: it guarantees this function returns exactly
+  // what it returned before for every input that dropped nothing, which is the
+  // behaviour-identical property the existing 393-line suite grades.
+  //
+  // The notice says "bytes" while droppedChars counts UTF-16 code units — the
+  // same deliberate wording as bounded-buffer.ts's truncation marker. It is a
+  // greppable support-bundle token and this stream is ASCII-dominated, so the
+  // two numbers coincide in practice; the discrepancy is recorded here rather
+  // than being silently wrong.
+  if (state.droppedChars > 0) {
+    return `${output}\n…[drift: dropped ${String(state.droppedChars)} bytes of unterminated Claude stream output]`;
+  }
+  return output;
 }
 
 export function getClaudePrintUsage(state: ClaudePrintState): ClaudeUsage | undefined {
   return state.usage;
+}
+
+export function getClaudePrintDroppedChars(state: ClaudePrintState): number {
+  return state.droppedChars;
 }
 
 export function getClaudePrintRecoveryMode(
