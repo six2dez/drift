@@ -2,10 +2,10 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: verifying
-stopped_at: Completed 03-05-PLAN.md
-last_updated: "2026-08-13T13:29:19.811Z"
-last_activity: 2026-08-13 -- Plan 03-05 complete (CI-02 verdict recorded in 03-FINDINGS.md; Phase 3 complete)
+status: ready
+stopped_at: Phase 03 complete and verified (status passed)
+last_updated: "2026-08-14T07:35:57.940Z"
+last_activity: 2026-08-14
 progress:
   total_phases: 21
   completed_phases: 2
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-26)
 
 **Core value:** The user's local AI CLI must reliably start, attach to Caido via the MCP server, and run tools against live Caido data — on native Windows as well as macOS/Linux.
-**Current focus:** Phase 03 — CI Spike — Prove LLRT Basics on Windows
+**Current focus:** Phase 4 — Platform Foundation (Phase 3 complete 2026-08-14)
 
 ## Current Position
 
-Phase: 03 (CI Spike — Prove LLRT Basics on Windows) — COMPLETE
-Plan: 5 of 5
-Status: Phase complete — ready for verification. CI-02 proven on a real `windows-latest` run and recorded in `03-FINDINGS.md`
-Last activity: 2026-08-13 -- Plan 03-05 complete (CI-02 verdict recorded: 7/7 assertions PASS at exit 0 on windows-latest; env-passthrough blocker resolved with the libuv eleven-name bound; `cmd.exe /c` mandatory for `.cmd` targets)
+Phase: 4
+Plan: Not started
+Status: Phase 3 complete and verified (`03-VERIFICATION.md` status `passed`, 40/40 must-haves, all 5 human-UAT items resolved). CI-02 proven on real `windows-latest` runs and recorded in `03-FINDINGS.md`. Ready to plan Phase 4 — note its new success criteria 9 and 10, which encode Phase 3's measured `{ ...process.env, ...driftVars }` and `realpathSync.native` requirements.
+Last activity: 2026-08-14
 
 Progress: [██░░░░░░░░] 20% (2 of 10 milestone phases)
 
@@ -36,7 +36,7 @@ Progress: [██░░░░░░░░] 20% (2 of 10 milestone phases)
 
 **Velocity:**
 
-- Total plans completed: 11 (plus 1 quick task)
+- Total plans completed: 16 (plus 1 quick task)
 - Average duration: ~10 min
 - Total execution time: ~1.8 hours
 
@@ -45,7 +45,7 @@ Progress: [██░░░░░░░░] 20% (2 of 10 milestone phases)
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 01 | 6 | - | - |
-| 03 | 5 of 5 | 38min | ~8min |
+| 03 | 5 | - | - |
 
 **Recent Trend:**
 

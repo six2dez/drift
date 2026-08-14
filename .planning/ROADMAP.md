@@ -25,7 +25,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Restore the Verification Signal** - Green suite on Node 20/22/24/26, real ESLint in CI, CI on every branch (completed 2026-08-13)
 - [ ] **Phase 2: POSIX Correctness & Hardening** - Fix `check_scope`, `list_workflows`, settings-churn, token blast radius, and the frontend quick wins
-- [ ] **Phase 3: CI Spike — Prove LLRT Basics on Windows** - Prove the 7 LLRT runtime primitives on `windows-latest` before writing any port code
+- [x] **Phase 3: CI Spike — Prove LLRT Basics on Windows** - Prove the 7 LLRT runtime primitives on `windows-latest` before writing any port code (completed 2026-08-14)
 - [ ] **Phase 4: Platform Foundation** - Pure `platform.ts`, `os.tmpdir()` everywhere, AV-retry, fail-loud runtime probe, bounded buffers
 - [ ] **Phase 5: Kill Shell Wrappers** - Direct `node` spawn + `env` injection; the headline bug fix; health check green on Windows
 - [ ] **Phase 6: Windows Command Resolution** - `where`/`PATHEXT`/install-location discovery of `node.exe` and provider CLIs
@@ -127,6 +127,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 | [31780073574](https://github.com/six2dez/drift/actions/runs/31780073574) | Re-run after code-review fixes — **authoritative for P0-ENV/P0-TMP** | success |
 
 Three results bind the later phases, and Phase 4's criteria below encode the first:
+
 1. **The spawn `env` option REPLACES the parent block on Windows, as on POSIX** (measured: parent-only marker returned `PARENT-CLEARED`). libuv back-fills only eleven `required_vars`; `APPDATA`/`LOCALAPPDATA` are not among them.
 2. **Direct `.cmd` spawn is unusable** — Node ≥ 18.20.2 throws `EINVAL` synchronously from the CVE-2024-27980 guard. A `cmd.exe /c` branch is mandatory, and a `try`/`catch` around `spawn()` is required, not just an `error` handler.
 3. **`os.tmpdir()` returns the 8.3 short form** (`C:\Users\RUNNER~1\...`) while `USERPROFILE`/`APPDATA`/`LOCALAPPDATA` return long form — not string-comparable; normalise with `realpathSync.native` before any `startsWith`/`===`.
@@ -225,6 +226,7 @@ Three results bind the later phases, and Phase 4's criteria below encode the fir
 
   1. A `windows-latest` CI job builds the plugin and runs vitest, with action pins matching `ci.yml` as it exists then — currently `pnpm/action-setup@v6` + `actions/setup-node@v5` (Phase 1 replaced the `@v4` pins this criterion originally named; `@v4` also drags in the deprecated Node 20 actions runtime) — `cache: pnpm`, and `shell: bash` pinned on cross-platform steps. Note from Phase 3: `actions/setup-node@v5` defaults `package-manager-cache: true` and auto-enables pnpm caching from `packageManager`, which fails the job at `Setup Node` unless `pnpm/action-setup` runs first or the input is set to `false`.
   1a. The **D-10 no-secret-material gate** from Phase 3's probe workflow is carried forward into this job rather than dropped when `windows-llrt-probe.yml` is deleted (D-02). It must keep its three-branch form: `grep` status 0 = match → fail, status 1 = clean → pass, anything else (including a missing or unreadable target) → fail. It is the only part of Phase 3 observed to bite ([run 31703717548](https://github.com/six2dez/drift/actions/runs/31703717548)) and the only part Phases 4-8 depend on silently.
+
   2. A repo `.gitattributes` (`* text=auto eol=lf`) is in place and snapshot assertions are `\r?\n`-tolerant, so Windows CI passes for code reasons, not line-ending artifacts.
   3. The `mcp-server.*.test.ts` integration spawn tests actually execute on the Windows runner and pass.
   4. The full `ubuntu/macos/windows` matrix is green and the Windows job is required for merge.
@@ -276,7 +278,7 @@ Parallelism opportunities: Phase 2 may run alongside Phase 3 (both depend only o
 |-------|----------------|--------|-----------|
 | 1. Restore the Verification Signal | 6/6 | Complete    | 2026-08-13 |
 | 2. POSIX Correctness & Hardening | 0/3 | Not started | - |
-| 3. CI Spike — Prove LLRT Basics on Windows | 1/5 | In Progress | - |
+| 3. CI Spike — Prove LLRT Basics on Windows | 5/5 | Complete    | 2026-08-14 |
 | 4. Platform Foundation | 0/2 | Not started | - |
 | 5. Kill Shell Wrappers | 0/2 | Not started | - |
 | 6. Windows Command Resolution | 0/2 | Not started | - |
@@ -295,7 +297,7 @@ Unsequenced ideas from the 2026-08-12 codebase review. Not ready for active plan
 
 **Goal:** [Captured for future planning] `sendCliMessage` holds an RPC promise open for the entire turn, and Caido's runtime does not deliver `child_process` callbacks or run `setInterval` while an RPC awaits. Every pumping workaround exists because of this: the 1.5 s frontend keep-alive, `activeSelfTestPoll`, `sessionWatchdogs`, and the 250 ms heartbeat. Returning a `turnId` immediately and delivering results over the existing event channel would delete the whole problem class (~300 lines). Deliberately sequenced after the port — it collides head-on with Phases 5 and 8.
 **Requirements:** TBD
-**Plans:** 6/6 plans complete
+**Plans:** 5/5 plans complete
 
 Plans:
 
