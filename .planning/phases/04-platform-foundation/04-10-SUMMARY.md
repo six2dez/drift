@@ -197,6 +197,14 @@ No blocking issues in the source work. Both tasks passed `pnpm typecheck`, `pnpm
 - **Verification:** `git diff` against the committed baseline reduced to exactly the intended lines; `grep -c '^\*\*Plans:\*\* 0 plans$'` → `11`, `grep -c 'plans executed'` → `0`.
 - **Carry-forward, unchanged:** one plan remains in this phase and it will hit this. **Snapshot before, diff after** — a count-only check does not catch the trailing-cell mangling. Ordering matters: the helper counts `*-SUMMARY.md` files on disk, so it must run *after* the summary is written.
 
+**1b. [Rule 1 - Bug] The ROADMAP's own one-line descriptor for this plan did not mention PERF-04 site 7**
+
+- **Found during:** the ROADMAP diff above (not a task)
+- **Issue:** Wave 4's entry read `04-10-PLAN.md — index.ts: PERF-03 wiring — one cache for both resolution paths, invalidation on provider-command change, bypass on the manual Check button`. Accurate as far as it went, but silent about the second half of what this plan shipped. Wave 3's entry explicitly hands site 7 to 04-10 ("Site 7, `resolveCommand`'s `out`, is 04-10's"), so a 04-11 executor scanning the roadmap would find the hand-off recorded and the completion not — the exact shape that makes someone re-derive or re-do it. Third instance of this class in the phase, after 04-05's "four per-site caps" and 04-09's "four bounded accumulators".
+- **Fix:** Extended the descriptor to name the site-7 bound, the phase-wide `out += \|stderr += ` pattern reaching `0`, the deletion of the infinite `lastNodeExecutable` (so a reader sees this was a tightening for node, not a new cache), and the `getDiagnostics` rewire.
+- **Files modified:** `.planning/ROADMAP.md`
+- **Why this was in scope:** documentation-only, one line, describing the plan just executed, inside a file this step was already repairing — the precedent 04-05 and 04-09 both set and recorded.
+
 **2. [Rule 1 - Bug] `state advance-plan` and `state record-metric` left the same residues 04-02 through 04-09 recorded**
 
 - **Found during:** post-summary state updates (not a task)

@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: "Completed 04-09 (PERF-02 offset read + PERF-04 bounded accumulators wired into index.ts); next: 04-10"
-last_updated: "2026-08-14T14:27:24.590Z"
-last_activity: "2026-08-14 -- 04-09 complete (PERF-02/PERF-04 integration: activity-tail.ts and bounded-buffer.ts go from zero production call sites to wired; flushActivities reads only newly appended bytes through readActivityTick behind a closure-local per-session cursor whose drop baseline is captured BEFORE the read; six of index.ts's seven accumulator sites bounded — five via appendBounded, one via drainCompleteLines, which also kills callMcpMethod's O(k*n) per-line rescan; site 7 left for 04-10; suite unchanged at 245 tests)"
+stopped_at: "Completed 04-10 (PERF-03's resolution cache wired into index.ts + PERF-04 site 7); next: 04-11"
+last_updated: "2026-08-14T14:45:45.254Z"
+last_activity: "2026-08-14 -- 04-10 complete (PERF-03 integration: resolution-cache.ts goes from twelve exports with zero production call sites to wired; both binary-resolution paths now go through one bounded cache — the infinite lastNodeExecutable is deleted, so for node it is a TIGHTENING — with whole-cache invalidation on any providers[*].command change seeded at init, a bypass threaded to the manual Check button through all three levels, and getDiagnostics rewired off its UNCONDITIONAL direct resolver call; PERF-04's seventh and last site, resolveCommand's out, bounded in the same edit so the phase-wide out += |stderr += pattern reaches 0; suite unchanged at 245 tests)"
 progress:
   total_phases: 21
   completed_phases: 2
   total_plans: 22
-  completed_plans: 20
+  completed_plans: 21
   percent: 10
 ---
 
@@ -26,9 +26,9 @@ See: .planning/PROJECT.md (updated 2026-06-26)
 ## Current Position
 
 Phase: 4 (Platform Foundation) — EXECUTING
-Plan: 10 of 11
+Plan: 11 of 11
 Status: Executing Phase 4
-Last activity: 2026-08-14 -- 04-09 complete (PERF-02/PERF-04 integration: activity-tail.ts and bounded-buffer.ts go from zero production call sites to wired; flushActivities reads only newly appended bytes through readActivityTick behind a closure-local per-session cursor whose drop baseline is captured BEFORE the read; six of index.ts's seven accumulator sites bounded — five via appendBounded, one via drainCompleteLines, which also kills callMcpMethod's O(k*n) per-line rescan; site 7 left for 04-10; suite unchanged at 245 tests)
+Last activity: 2026-08-14 -- 04-10 complete (PERF-03 integration: resolution-cache.ts goes from twelve exports with zero production call sites to wired; both binary-resolution paths now go through one bounded cache — the infinite lastNodeExecutable is deleted, so for node it is a TIGHTENING — with whole-cache invalidation on any providers[*].command change seeded at init, a bypass threaded to the manual Check button through all three levels, and getDiagnostics rewired off its UNCONDITIONAL direct resolver call; PERF-04's seventh and last site, resolveCommand's out, bounded in the same edit so the phase-wide out += |stderr += pattern reaches 0; suite unchanged at 245 tests)
 
 Progress: [██░░░░░░░░] 20% (2 of 10 milestone phases)
 
@@ -36,9 +36,9 @@ Progress: [██░░░░░░░░] 20% (2 of 10 milestone phases)
 
 **Velocity:**
 
-- Total plans completed: 24 (plus 1 quick task)
+- Total plans completed: 25 (plus 1 quick task)
 - Average duration: ~10 min
-- Total execution time: ~3.3 hours
+- Total execution time: ~3.5 hours
 
 **By Phase:**
 
@@ -46,11 +46,11 @@ Progress: [██░░░░░░░░] 20% (2 of 10 milestone phases)
 |-------|-------|-------|----------|
 | 01 | 6 | - | - |
 | 03 | 5 | - | - |
-| 04 | 9 of 11 | - | - |
+| 04 | 10 of 11 | - | - |
 
 **Recent Trend:**
 
-- Last 5 plans: 04-05 (9 min, 2 tasks, 2 files, 0 CI runs — the largest single task in the phase, deliberately unsplit because splitting would force two tasks to write one file; both tasks passed their own verify on the first run and the 16-case suite was green on its first run), 04-06 (10 min, 2 tasks + 1 cap-symmetry addition, 2 files, 0 CI runs — the FIRST Phase 4 plan to modify an existing, production-wired file rather than create a new one; the extra time went on proving the refactor additions-only and hand-aligning the new lines to Prettier instead of running --write over 999.11's pre-existing debt), 04-07 (11 min, 2 tasks, 2 files, 0 CI runs — closes wave 1; both tasks passed their own verify on the first run and the 10-case suite was green on its first run, and the extra minute went on a pre-commit NUL byte that had silently disabled every grep gate over the module plus a standalone tsc run proving 04-10's literal call shapes compile against the shipped API), 04-08 (25 min, 3 tasks in 2 commits, 1 file, 0 CI runs - the SECOND Phase 4 plan to modify a production-wired file and the first to touch index.ts; the extra time went on three blocking compile issues the plan did not anticipate (the task 1/2 split is not separately compilable under noUnusedLocals, task 2 stranded genUUID, and Caido's own fs/promises type surface has no realpath) plus an end-to-end render of the RUN-05 failure message), 04-09 (10 min, 3 tasks, 1 file, 0 CI runs - the THIRD Phase 4 plan to modify a production-wired file and the second to touch index.ts; the plan's four planner passes and four verification passes paid off, with every gate satisfiable as written and only one blocking issue - the plan's write-only stdoutDroppedChars passes tsc --noUnusedLocals but fails @typescript-eslint/no-unused-vars, so the truncation marker now carries the cumulative total)
+- Last 5 plans: 04-06 (10 min, 2 tasks + 1 cap-symmetry addition, 2 files, 0 CI runs — the FIRST Phase 4 plan to modify an existing, production-wired file rather than create a new one; the extra time went on proving the refactor additions-only and hand-aligning the new lines to Prettier instead of running --write over 999.11's pre-existing debt), 04-07 (11 min, 2 tasks, 2 files, 0 CI runs — closes wave 1; both tasks passed their own verify on the first run and the 10-case suite was green on its first run, and the extra minute went on a pre-commit NUL byte that had silently disabled every grep gate over the module plus a standalone tsc run proving 04-10's literal call shapes compile against the shipped API), 04-08 (25 min, 3 tasks in 2 commits, 1 file, 0 CI runs - the SECOND Phase 4 plan to modify a production-wired file and the first to touch index.ts; the extra time went on three blocking compile issues the plan did not anticipate (the task 1/2 split is not separately compilable under noUnusedLocals, task 2 stranded genUUID, and Caido's own fs/promises type surface has no realpath) plus an end-to-end render of the RUN-05 failure message), 04-09 (10 min, 3 tasks, 1 file, 0 CI runs - the THIRD Phase 4 plan to modify a production-wired file and the second to touch index.ts; the plan's four planner passes and four verification passes paid off, with every gate satisfiable as written and only one blocking issue - the plan's write-only stdoutDroppedChars passes tsc --noUnusedLocals but fails @typescript-eslint/no-unused-vars, so the truncation marker now carries the cumulative total), 04-10 (9 min, 2 tasks, 1 file, 0 CI runs - the FOURTH Phase 4 plan to modify a production-wired file and the third to touch index.ts, and the last autonomous plan of the phase; no blocking compile or lint issue at all, but two exact-count gates were silently zeroed by Prettier-shaped argument wraps that typecheck, eslint and the suite all pass — caught only by running the gates — and the invalidation hook was moved ahead of the MCP-refresh branch after measuring that the frontend pushes the whole settings object)
 - Trend: steady; 01-06 is the longest (21 min) because it waits on three real CI runs and a three-Node local pre-flight. 03-03 came in at 9 min despite needing two real `windows-latest` runs — the Windows probe job completes in 16-18s, so the CI wait is far cheaper than the ubuntu matrix. 03-04 waited on four runs (2 Windows probe + 2 ubuntu matrix) and still finished in 11 min for the same reason. 03-05 burned no runner at all: it only re-queried the six existing run records and transcribed their measured output.
 
 *Updated after each plan completion*
@@ -132,6 +132,11 @@ Recent decisions affecting current work:
 - [Phase 04]: [04-09]: callMcpMethod's stdoutBuffer stays a plain string drained by drainCompleteLines — head/tail/both retention on a JSON-RPC line stream drops the middle of a frame and corrupts the protocol framing
 - [Phase 04]: [04-09]: [Rule 3] the plan's write-only stdoutDroppedChars passes tsc --noUnusedLocals (compound assignment counts as a read) but fails @typescript-eslint/no-unused-vars at --max-warnings 0; fixed by making the truncation marker carry the cumulative total, which matches renderBoundedBuffer's contract at every other site
 - [Phase 04]: [04-09]: PERF-02 is code-complete but PERF-04 is not — site 7 (resolveCommand's out) belongs to plan 04-10, so neither ID was marked complete; 04-11's Gate 7 grades the phase-wide accumulator claim
+- [Phase 04]: [04-10]: The resolution-cache invalidation hook sits IMMEDIATELY after updateSettings' merge, ahead of the MCP-refresh branches, not next to the session-reset flag the plan named as its textual neighbour. refreshActiveMcpRuntime calls requireNodeExecutable, whose candidate list is built from the provider commands, and bakes the result into a freshly written wrapper — and settings.ts:338 pushes the WHOLE settings object, so input.caidoApi !== undefined is true on every save from the UI. Clearing after that branch would spawn from exactly the stale entry T-04-20 exists to prevent. Every stated acceptance criterion still holds.
+- [Phase 04]: [04-10]: No separately captured pre-merge signature local. syncResolutionCacheSignature already holds the pre-merge signature in state.signature (seeded at init, re-synced on every save), so the comparison genuinely spans the merge; a captured local would have no reader and would fail @typescript-eslint/no-unused-vars at --max-warnings 0 — task 2's own verify. 04-09's stdoutDroppedChars lesson applied preventively rather than after a red lint run.
+- [Phase 04]: [04-10]: Two keys reach the same Node binary and that is NOT double caching — node holds the VALIDATED executable (a candidate that exists and whose --version exited 0), cmd:node holds the raw unvalidated which hit used only as a candidate INPUT. getCachedNodeExecutable is the single { key literal } call site so a rename cannot split the cache in two, and the two-key table is a source comment rather than folklore (T-04-29).
+- [Phase 04]: [04-10]: When a plan's acceptance gate anchors on a CALL FORM (fn(firstArg), the formatting of that call is load-bearing: a Prettier-shaped argument wrap zeroed two exact-count gates here while typecheck, eslint and the suite all stayed green. The multi-line { key: node } object read 0 instead of 1 and the wrapped syncResolutionCacheSignature call read 0 instead of 2. Run the gate; do not infer it from the diff.
+- [Phase 04]: [04-10]: PERF-03 and PERF-04 are both now code-complete but neither was marked. index.ts has zero direct test coverage, so both rest on static gates plus unit-proven mechanisms; 04-11 is the phase verification plan, carries both IDs and grades the phase-wide claim. Tenth consecutive Phase 4 plan deferring the traceability write. Consolidated recommendation to 04-11: PERF-02, PERF-03 and PERF-04 can all be marked once Gate 7 confirms seven of seven accumulator sites.
 
 ### Pending Todos
 
@@ -171,9 +176,9 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-14T14:27:24.585Z
-Stopped at: Completed 04-09 (PERF-02 offset read + PERF-04 bounded accumulators wired into index.ts); next: 04-10
-Resume file: .planning/phases/04-platform-foundation/04-10-PLAN.md
+Last session: 2026-08-14T14:45:45.250Z
+Stopped at: Completed 04-10 (PERF-03's resolution cache wired into index.ts + PERF-04 site 7); next: 04-11
+Resume file: .planning/phases/04-platform-foundation/04-11-PLAN.md
 
 **Live on the public remote: nothing of ours.** Plan 03-04 tore down all three `scratch/*` branches (`ci-proof-windows-probe`, `ci-proof-windows-probe-negative`, `ci-proof-windows-gate-negative`) locally and remotely. Asserted with a `test -z` discrimination over the captured glob (`scratch-glob-empty=0`) plus the full unfiltered listing, which now shows only `main` at `2d8cf16` and the pre-existing, unrelated `fix/security-hotfixes` at `0cd81f3`. `origin/main` was never pushed by this phase and is still `2d8cf16`; local `main` is 23 commits ahead and deliberately unpushed. **Re-verified 2026-08-13 (plan 03-05):** the remote still lists only `main` `2d8cf16` and the pre-existing `fix/security-hotfixes` `0cd81f3`, and all eight Phase 3 run records (4 probe + 4 `CI` control) still resolve with their recorded conclusions — which is what makes the URLs in `03-FINDINGS.md` valid citations after the branches were deleted. The probe **artifacts** do not survive: they expire 2026-09-12, which is why D-11 required the committed findings document.
 

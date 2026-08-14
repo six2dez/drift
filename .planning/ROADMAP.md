@@ -172,7 +172,7 @@ Plans:
 
 **Wave 4** *(blocked on 04-07, 04-09)*
 
-- [ ] 04-10-PLAN.md — `index.ts`: PERF-03 wiring — one cache for both resolution paths, invalidation on provider-command change, bypass on the manual Check button
+- [x] 04-10-PLAN.md — `index.ts`: PERF-03 wiring — one cache for both resolution paths (deleting the infinite `lastNodeExecutable`, so for node it is a **tightening**), invalidation on provider-command change, bypass on the manual Check button, and `getDiagnostics` rewired off its direct resolver call. **Also PERF-04's seventh and last site** — `resolveCommand`'s `out`, the one the inventory grep is blind to — bounded in the same edit, so the phase-wide `out += \|stderr += ` pattern now reaches `0` and 04-11's Gate 7 grades seven of seven
 
 **Wave 5** *(blocked on 04-06, 04-10)*
 
@@ -308,7 +308,7 @@ Parallelism opportunities: Phase 2 may run alongside Phase 3 (both depend only o
 | 1. Restore the Verification Signal | 6/6 | Complete    | 2026-08-13 |
 | 2. POSIX Correctness & Hardening | 0/3 | Not started | - |
 | 3. CI Spike — Prove LLRT Basics on Windows | 5/5 | Complete    | 2026-08-14 |
-| 4. Platform Foundation | 9/11 | In Progress | - |
+| 4. Platform Foundation | 10/11 | In Progress | - |
 | 5. Kill Shell Wrappers | 0/2 | Not started | - |
 | 6. Windows Command Resolution | 0/2 | Not started | - |
 | 7. Provider Spawn & Registration | 0/3 | Not started | - |
