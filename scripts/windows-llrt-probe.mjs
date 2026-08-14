@@ -41,7 +41,7 @@ import { spawn } from "node:child_process";
 // runtime. Rewriting this to "node:os" would make P2-OS assert nothing. Every
 // other import in this file uses the node: prefix.
 import { tmpdir, platform } from "os";
-import { existsSync, realpathSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 // Named import rather than a default `crypto` import, so the readonly global
 // `crypto` is not shadowed — P3-UUID has to test the globalThis surface and the
@@ -349,13 +349,34 @@ function assertP0Tmp() {
 async function assertP1Cmd() {
   const hostPlatform = platform();
   const onWindows = hostPlatform === WINDOWS_PLATFORM_ID;
-  const cmdPath = join(tmpdir(), `probe-test-${Date.now()}.cmd`);
-  let written = false;
+  // The fixture is written and then EXECUTED, so where it lives and who can
+  // reach it matters. The predecessor of this block used
+  // join(tmpdir(), `probe-test-${Date.now()}.cmd`) with writeFileSync's
+  // defaults: a guessable name, flag "w", and mode 0o666 & ~umask -> 0o644. On
+  // Linux tmpdir() is the shared, world-writable /tmp, which made that
+  // CWE-377/CWE-367 — another local user could pre-create the path as a symlink
+  // and have the probe clobber the target, or win the write-then-spawn race and
+  // get the probe to execute content they control.
+  //
+  // Three changes close it. mkdtempSync creates a private parent directory
+  // atomically with an unpredictable suffix and mode 0o700. Flag "wx" makes the
+  // write exclusive-create, so it fails loudly instead of following anything
+  // pre-planted. Mode 0o700 matches what CLAUDE.md codifies for this repo
+  // ("Directories holding sensitive temp files: 0o700 ... Executable launch
+  // scripts and wrappers: 0o700").
+  let cmdDir;
+  try {
+    cmdDir = mkdtempSync(join(tmpdir(), "drift-probe-"));
+  } catch (error) {
+    info("P1-CMD", `could not create a private temp directory under ${tmpdir()}: ${describeError(error)}`);
+    fail("P1-CMD", `indeterminate — creating the private 0o700 temp directory for the probe .cmd under ${tmpdir()} on ${hostPlatform} failed (${describeError(error)}), so no spawn surface was observed at all`);
+    return;
+  }
+  const cmdPath = join(cmdDir, "probe-test.cmd");
 
   try {
     try {
-      writeFileSync(cmdPath, "@echo off\r\necho CMD_PROBE_RAN\r\n");
-      written = true;
+      writeFileSync(cmdPath, "@echo off\r\necho CMD_PROBE_RAN\r\n", { flag: "wx", mode: 0o700 });
     } catch (error) {
       info("P1-CMD", `could not write the probe .cmd at ${cmdPath}: ${describeError(error)}`);
       fail("P1-CMD", `indeterminate — writing the probe .cmd to ${cmdPath} on ${hostPlatform} failed (${describeError(error)}), so no spawn surface was observed at all`);
@@ -398,9 +419,14 @@ async function assertP1Cmd() {
       fail("P1-CMD", `indeterminate — surface=${observed.surface} exit=${observed.exitCode} on ${hostPlatform} with no CMD_PROBE_RAN marker; stdout=${JSON.stringify(observed.stdout)} stderr=${JSON.stringify(observed.stderr)} error=${describeError(observed.error)}. This is none of D-07's three legitimate outcomes, so Phase 4 has no architectural basis and the job must break`);
     }
   } finally {
-    if (written) {
-      try { unlinkSync(cmdPath); } catch { /* ignore */ }
-    }
+    // Removes the fixture and its private parent in one call. recursive+force
+    // also makes the "the write never happened" path a no-op, which is why the
+    // old `written` flag is gone. Swallowed deliberately: cleanup must never
+    // mask the assertion's own outcome, and on Windows unlinking a file whose
+    // SIGKILLed cmd.exe still holds a handle can fail with EBUSY/EPERM. What
+    // would leak is now a 0o700 directory rather than a world-readable
+    // executable sitting directly in the shared temp root.
+    try { rmSync(cmdDir, { recursive: true, force: true }); } catch { /* ignore */ }
   }
 }
 
