@@ -55,8 +55,14 @@ import { readdir, stat } from "fs/promises";
 import path from "path";
 ```
 
-`platform.ts` is I/O-free per SC-1 → it should import **only** `path`. Do **not** import `os` here (D-02: `os` is
-read in exactly one place, and that place is `index.ts`).
+`platform.ts` is I/O-free per SC-1 → **it imports nothing at all.** Do **not** import `os` here (D-02: `os` is
+read in exactly one place, and that place is `index.ts`), and do **not** import `path` either. None of D-01's
+nine exports needs `path` — `getTempRoot` strips trailing separators with explicit string logic *because*
+`path` resolves to the POSIX flavour on the Linux test runner and would not strip a Windows-shaped trailing
+backslash. An unused `import path from "path"` is a hard build failure here, not a style nit: tsconfig sets
+`noUnusedLocals` (TS6133) and `pnpm lint` runs `eslint . --max-warnings 0` with
+`@typescript-eslint/no-unused-vars` at `error`. Follow the import *style* above only in modules that actually
+need an import (`runtime-probe.ts` does — it uses `path.resolve` as the D-04 ladder's bottom rung).
 
 **Object-param signature pattern** (`command-resolution.ts:105–118`) — this is the exact shape D-01 mandates:
 

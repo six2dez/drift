@@ -187,7 +187,7 @@ Phase 4 is a brownfield plumbing phase with an unusual property: **its riskiest 
 | OS-difference decisions (temp root, which/where, home-dir env names, executable extensions) | **Pure helper module** (`platform.ts`) | — | Platform is an injected parameter → Linux CI proves Windows behaviour (the only validation vehicle that exists) |
 | Reading `os.platform()` / `os.tmpdir()` | **Caido backend runtime** (`index.ts`, inside `startMcpServer`) | — | D-02: exactly one site, guarded, cached; module-eval-time reads would kill the whole plugin |
 | Transient-FS-error classification + backoff schedule | **Pure helper** (`fs-retry.ts`) | `index.ts` performs the actual `mkdir`/`writeFile`/`rename` | The *decision* ("is this retryable, how long do I wait") is pure; the syscall is not |
-| Activity-file offset + partial-line state | **Pure helper** (`activity-tail.ts`) | `index.ts` owns `open`/`read`/`close` | Mirrors `claude-print.ts` exactly — the repo's proven pattern for a stateful stream parser |
+| Activity-file offset + partial-line state | **Pure helper** (`activity-tail.ts`) | **`activity-tail.ts` owns the per-tick `open`/`stat`/`read`/`close`, with `open` injectable; `index.ts` keeps dedupe (`seenActivityIds`) and re-entrancy (`readingActivities`)** | Mirrors `claude-print.ts` for the *pure* decisions (`planActivityRead`, `consumeActivityChunk` are separately exported and separately tested). **Amended during planning (plan 04-04):** the per-tick handle moved out of `index.ts` because `index.ts` has zero direct test coverage, and `04-VALIDATION.md:86–87` grades the truncation-reset and no-new-bytes behaviours as *integration* tests against a real `mkdtemp` file. Owning that I/O in a testable module is what moves those two rows from bucket **N** to bucket **L** — the explicit purpose of this whole map. Handle lifetime is one tick (open→close per read), because a handle held across ticks blocks `rm(activityFilePath)` at `finalize()` on Windows with `EBUSY` |
 | Buffer bounding + truncation marking | **Pure helper** (`bounded-buffer.ts`) | `index.ts` calls it in the `data` handlers | Pure string/byte arithmetic; the only reason it is not pure today is that it is inline |
 | Binary-resolution caching | **Pure helper** (cache keying/TTL with injected clock) | `index.ts` owns `spawn("which")` + `stat` | Injected `now()` makes TTL expiry deterministic in tests |
 | Runtime probe report + failure message | **Pure helper** (`runtime-probe.ts` formatter) | `index.ts` collects the facts | The formatter is what a bug reporter pastes; it must be snapshot-tested |
@@ -1079,32 +1079,35 @@ These three tests are the entire CMP-02 proof, and every one of them runs on the
 
 ---
 
-## Open Questions
+## Open Questions (RESOLVED)
+
+All five were closed during planning. Each Recommendation below is prefixed `RESOLVED:` and names
+the plan that implements it. Nothing in this section is still open.
 
 1. **Does Caido's shipped LLRT build match `caido/dependency-llrt@main`?**
    - What we know: the fork exists, is not archived, last pushed 2026-04-22, and its Rust source declares every primitive Phase 4 depends on. Its own `API.md` is demonstrably stale relative to that source.
    - What's unclear: which commit Caido actually bundles, and whether Caido's plugin sandbox restricts module access on top of what LLRT exposes.
-   - Recommendation: **do not treat source analysis as measurement.** Every Phase 4 plan carries Phase 3's vehicle caveat verbatim. The probe's *reported* (non-gating) fields are the mechanism that will answer this the first time a real user runs it — design the report so the answer is legible.
+   - **RESOLVED:** **do not treat source analysis as measurement.** Every Phase 4 plan carries Phase 3's vehicle caveat verbatim (plans 04-08 § objective and § output, 04-11). The probe's *reported* (non-gating) fields are the mechanism that will answer this the first time a real user runs it — design the report so the answer is legible.
 
 2. **Is `realpath` genuinely absent from Caido's LLRT, or merely undocumented like `open`?**
    - What we know: `open`, `lstat`, `path.sep`, `path.relative` are all absent from `API.md` but present in the source. `realpath` is absent from **both** — no `realpath` symbol anywhere in `modules/llrt_fs/`.
    - What's unclear: nothing, for upstream `main`. Only whether Caido's build adds it.
-   - Recommendation: build D-04's ladder assuming it lands on `path.resolve` under Caido. Have the probe **report** which rung was reached (`realpathSync.native` / `fs.realpath` / `path.resolve`) so Phase 6 designs against the measured answer rather than the hoped one. **This is the highest-value single field in the probe report.**
+   - **RESOLVED:** build D-04's ladder assuming it lands on `path.resolve` under Caido (plan 04-03 ships the ladder; plan 04-08 probes rungs 2-3 only and reports rung 1 as `not probed` rather than `absent`, because probing it would need a module-scope import of the unverified bare `"fs"` specifier). Have the probe **report** which rung was reached (`realpathSync.native` / `fs.realpath` / `path.resolve`) so Phase 6 designs against the measured answer rather than the hoped one. **This is the highest-value single field in the probe report.**
 
 3. **Can the RUN-04 ladder ever be observed firing on real hardware?**
    - What we know: the mechanism is unit-provable with an injected error. A real Defender lock cannot be induced deterministically on a GitHub runner.
    - What's unclear: whether the chosen delays are long enough on a cold, heavily-scanned machine.
-   - Recommendation: log every retry attempt through `sdk.console` with the code and the attempt index, and put the retry count in `getDiagnostics`. Then the reporter's next bug report answers it for free. Treat the delay array as tunable-on-evidence.
+   - **RESOLVED:** log every retry attempt through `sdk.console` with the code and the attempt index, and put the retry count in `getDiagnostics` (plan 04-02's `onRetry` hook and `attempts` count; plan 04-08 task 3 surfaces `mcpFirstWriteAttempts`). Then the reporter's next bug report answers it for free. Treat the delay array as tunable-on-evidence.
 
 4. **Should Phase 4 add a `windows-latest` CI leg, or wait for Phase 9's CI-01?**
    - What we know: CI-01 is Phase 9. Phase 3's probe workflow still exists but is scoped to the seven assertions and is deleted in Phase 9.
    - What's unclear: whether the planner considers Phase 4's Windows-only assertions (real `os.tmpdir()` shape, real path lengths) worth pulling CI-01 forward.
-   - Recommendation: **do not pull CI-01 forward.** With the pure/impure split, everything Phase 4 needs to prove is Linux-provable, and the genuinely Windows-only facts were already measured by Phase 3's P0-TMP. Adding a Windows leg here duplicates Phase 9's scope for marginal signal.
+   - **RESOLVED:** **do not pull CI-01 forward.** No Phase 4 plan adds a CI leg. With the pure/impure split, everything Phase 4 needs to prove is Linux-provable, and the genuinely Windows-only facts were already measured by Phase 3's P0-TMP. Adding a Windows leg here duplicates Phase 9's scope for marginal signal.
 
 5. **Does `mcp-runtime.ts` need a companion change for the trailing-separator case?**
    - What we know: `serializeMcpRuntimeContext` writes paths into `mcp-context.json`, consumed by `mcp-server.mjs` under real Node.
    - What's unclear: nothing found — the context file carries project/filter identifiers, not temp paths (verified by reading `buildMcpRuntimeEnv` at `index.ts:577`).
-   - Recommendation: no change. Recorded so the planner does not re-derive it.
+   - **RESOLVED:** no change. `mcp-runtime.ts` is untouched by every Phase 4 plan. Recorded so a later phase does not re-derive it.
 
 ---
 

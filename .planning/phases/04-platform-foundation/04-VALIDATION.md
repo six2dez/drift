@@ -36,7 +36,7 @@ exactly one bucket:
 
 | Bucket | Meaning | Count |
 |---|---|---|
-| **L** | Provable on the existing Linux/macOS runner, because `platform` is an injected parameter | **33** |
+| **L** | Provable on the existing Linux/macOS runner, because `platform` is an injected parameter | **37** |
 | **W** | Needs a Windows runner this phase does not have | **2** — both already answered by Phase 3 |
 | **N** | Not provable in CI on any runner | **2** — both mitigated by diagnostics, not left open |
 
@@ -84,7 +84,8 @@ and updated by the executor. Bucket, test type, and command are fixed here.
 | PERF-02 | `consumeActivityChunk` carries a partial line across chunks | L | TBD | — | unit | `pnpm exec vitest run packages/backend/src/activity-tail.test.ts -t "partial"` | ❌ W0 | ⬜ pending |
 | PERF-02 | A multi-byte UTF-8 sequence split across chunks survives intact | L | TBD | — | unit | `… -t "utf-8"` | ❌ W0 | ⬜ pending |
 | PERF-02 | `offset > size` resets the cursor (truncation/rotation) | L | TBD | — | integration | `… -t "truncation"` — real `mkdtemp` file, matching `command-resolution.test.ts` style | ❌ W0 | ⬜ pending |
-| PERF-02 | Re-reading after no writes yields zero new lines (the 250 ms common case) | L | TBD | — | integration | `… -t "no new bytes"` | ❌ W0 | ⬜ pending |
+| PERF-02 | Re-reading after no writes yields zero new lines (the 250 ms common case) | L | TBD | — | integration | `… -t "no new bytes"` — the `it` title must contain this literal substring; vitest `-t` is a substring match | ❌ W0 | ⬜ pending |
+| PERF-02 | An unterminated `cursor.partial` above `ACTIVITY_PARTIAL_MAX_BYTES` (4 MiB) is dropped whole and counted, and an under-cap one is not | L | TBD | T-04-14 | unit | `… -t "partial cap"` | ❌ W0 | ⬜ pending |
 | PERF-02 | `Buffer.alloc(length)` with `length === buffer.byteLength` (LLRT `copy_from_slice` panic) | L | TBD | — | static | Code review + anchored comment. **Not observable on Node** — the constraint is LLRT-only | ❌ W0 | ⬜ pending |
 | PERF-03 | A positive result is cached and not re-resolved within TTL | L | TBD | — | unit | `pnpm exec vitest run packages/backend/src/resolution-cache.test.ts -t "within TTL"` | ❌ W0 | ⬜ pending |
 | PERF-03 | Expiry re-resolves after the injected clock advances past TTL | L | TBD | — | unit | `… -t "expires"` | ❌ W0 | ⬜ pending |
@@ -96,6 +97,9 @@ and updated by the executor. Bucket, test type, and command are fixed here.
 | PERF-04 | The marker carries the dropped byte count | L | TBD | — | unit | `… -t "marker"` | ❌ W0 | ⬜ pending |
 | PERF-04 | Claude line buffer drops and counts a > 4 MiB unterminated line | L | TBD | T-04-05 | unit | `pnpm exec vitest run packages/backend/src/claude-print.test.ts -t "unterminated"` | ✅ file / ❌ cases | ⬜ pending |
 | PERF-04 | The split-once refactor is behaviour-identical | L | TBD | T-04-06 | regression | `pnpm exec vitest run packages/backend/src/claude-print.test.ts` — all existing cases green, unmodified | ✅ | ⬜ pending |
+| PERF-04 | `drainCompleteLines` splits once, emits complete lines and carries the remainder (`callMcpMethod`'s `stdoutBuffer`, site 6) | L | TBD | T-04-06 | unit | `pnpm exec vitest run packages/backend/src/bounded-buffer.test.ts -t "drains complete lines"` | ❌ W0 | ⬜ pending |
+| PERF-04 | An over-cap unterminated remainder is dropped whole and counted; an over-cap **newline-terminated** chunk is not | L | TBD | T-04-28 | unit | `… -t "drops an over-cap remainder"` | ❌ W0 | ⬜ pending |
+| PERF-04 | `callMcpMethod`'s stderr accumulator (site 5, `index.ts:1201`/`:1295`) is bounded — its ≤10 s timeout bounds the window, not the volume | L | TBD | T-04-05 | unit | `… -t "keeps the tail only under tail retention"` proves the mechanism; the wiring is graded by `pnpm exec vitest run` + the plan 04-09 task 3 grep gates | ❌ W0 | ⬜ pending |
 | SC-9 | `buildSpawnEnv` preserves `APPDATA`/`LOCALAPPDATA` and overlays drift vars | L | TBD | — | unit | `pnpm exec vitest run packages/backend/src/platform.test.ts -t "buildSpawnEnv"` | ❌ W0 | ⬜ pending |
 | SC-9 | Every `spawn` site supplying `env` uses `buildSpawnEnv` | L | TBD | — | static | `grep -c "spawn(" packages/backend/src/index.ts` cross-checked against `buildSpawnEnv` call sites | ❌ W0 | ⬜ pending |
 | SC-10 | The realpath ladder falls through to `path.resolve` when both upper rungs are absent | L | TBD | — | unit | `pnpm exec vitest run packages/backend/src/runtime-probe.test.ts -t "ladder"` — inject fake fs functions | ❌ W0 | ⬜ pending |
@@ -112,10 +116,17 @@ New test files that must exist before the tasks they cover can be verified:
 - [ ] `packages/backend/src/platform.test.ts` — RUN-03, CMP-02, SC-9, RUN-05 (`normalizePlatform`)
 - [ ] `packages/backend/src/fs-retry.test.ts` — RUN-04
 - [ ] `packages/backend/src/activity-tail.test.ts` — PERF-02
-- [ ] `packages/backend/src/bounded-buffer.test.ts` — PERF-04 (site A: stdout/stderr accumulators)
+- [ ] `packages/backend/src/bounded-buffer.test.ts` — PERF-04 (the five total-volume stdout/stderr accumulators **and** `drainCompleteLines`, the line-drain helper for `callMcpMethod`'s `stdoutBuffer`)
 - [ ] `packages/backend/src/resolution-cache.test.ts` — PERF-03
 - [ ] `packages/backend/src/runtime-probe.test.ts` — RUN-05, SC-10
-- [ ] New cases appended to `packages/backend/src/claude-print.test.ts` — PERF-04 (site B: line buffer)
+- [ ] New cases appended to `packages/backend/src/claude-print.test.ts` — PERF-04 (the Claude line buffer)
+
+**Accumulator site inventory (corrected during planning).** `index.ts` has **six** accumulator sites,
+not four: `spawnAndWait` stdout/stderr (`:1522-1523`), `sendCliMessage` stdout/stderr
+(`:2205-2206`), and `callMcpMethod` `stdoutBuffer`/`stderr` (`:1200-1201`). Five are total-volume
+accumulators bounded by `appendBounded`; the sixth is a line-**drain** buffer bounded by
+`drainCompleteLines`, because head/tail/both retention would corrupt JSON-RPC framing. Plan 04-05
+supplies both mechanisms; plan 04-09 tasks 2 and 3 wire them.
 
 **Framework install:** none needed — vitest 4.0.18 is present and configured.
 **Shared fixtures:** none needed — the `mkdtemp` + `afterEach` cleanup pattern at
