@@ -98,6 +98,7 @@ import { withFsRetry } from "./fs-retry";
 import {
   buildProbeReport,
   formatProbeFailure,
+  formatProbeReportFields,
   type ProbeReport,
   type RealpathRung,
 } from "./runtime-probe";
@@ -419,6 +420,28 @@ function probeRuntime(): Result<HostFacts> {
 
   host = facts;
   return ok(facts);
+}
+
+// The one-line success summary. Deliberately compact: the gating results, the
+// realpath rung Phase 6 designs against, and the two MAX_PATH integers a bug
+// reporter cannot otherwise know. Everything here is a status word, a rung name
+// or an integer — no paths, no environment values, no version strings (those
+// belong to the failure message and to getDiagnostics, which is user-triggered).
+//
+// detectRealpathRung() is re-read rather than threaded through the report: it is
+// a pure `typeof` presence check with no I/O, so a second read is free and
+// cannot diverge from the one the report already recorded.
+function describeProbeSummary(report: ProbeReport): string {
+  const gating = report.capabilities
+    .filter((capability) => capability.gating)
+    .map((capability) => `${capability.name}=${capability.ok ? "ok" : "FAILED"}`);
+
+  return [
+    ...gating,
+    `realpathRung=${detectRealpathRung()}`,
+    `tempRootLength=${report.metrics["tempRootLength"] ?? VERSION_UNAVAILABLE}`,
+    `projectedWorstCasePathLength=${report.metrics["projectedWorstCasePathLength"] ?? VERSION_UNAVAILABLE}`,
+  ].join(" ");
 }
 
 /** Generate a short lowercase-hex directory token without the crypto module */
@@ -2033,8 +2056,21 @@ async function startMcpServer(sdk: BackendSDK): Promise<Result<McpServerInfo>> {
   // mcpTempDir is assigned, because everything below it now needs host.tmpdir.
   const probe = probeRuntime();
   if (probe.kind === "Error") {
+    // The failure path needs no extra channel: cleanupMcpRuntime routes this
+    // message through setMcpAuthStatus -> publishMcpStatus, so D-08's version
+    // block already reaches the user-visible MCP status panel and, via
+    // caidoAuthMessage, getDiagnostics too.
     await cleanupMcpRuntime(sdk, "error", probe.error);
     return err(probe.error);
+  }
+
+  // D-06: every probe result reaches the user, gating or not. Exactly one
+  // compact line per successful start; the failure path above is already
+  // covered by the message probeRuntime composed.
+  if (lastProbeReport !== undefined) {
+    sdk.console.log(
+      `[drift] runtime probe: ${describeProbeSummary(lastProbeReport)}`,
+    );
   }
 
   // The sweep moved below the probe for the reason above; it used to run here
@@ -3150,6 +3186,20 @@ async function getDiagnostics(_sdk: BackendSDK): Promise<Result<Record<string, s
     mcpTempDir: mcpTempDir ?? "not set (MCP not started)",
     mcpTempScript: mcpTempScript ?? "not set (MCP not started)",
     mcpContextFile: getMcpContextFilePath() ?? "not set (MCP not started)",
+    // D-06 / D-08: every probe result — gating and reported — plus the version
+    // block, flattened into this same record so an LLRT gap is visible in a
+    // support bundle without blocking MCP for a capability nothing consumes yet.
+    // When MCP has never been started the probe has never run, which follows the
+    // file's existing "not set (MCP not started)" convention rather than
+    // omitting the group or throwing.
+    //
+    // Security (T-04-04): every field below is a version string, a path Drift
+    // itself constructed or resolved, a boolean or an integer. Nothing here is
+    // derived from enumerating the environment, and the Windows profile
+    // variables render as presence booleans by name, never as values.
+    ...(lastProbeReport === undefined
+      ? { runtimeProbe: "not run (MCP not started)" }
+      : formatProbeReportFields(lastProbeReport)),
     // RUN-04's agreed mitigation for the one behaviour that is not inducible in
     // CI on any runner: a real Defender lock. With the attempt count in the
     // support bundle, the reporter's next bug report answers whether the
