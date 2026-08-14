@@ -168,7 +168,7 @@ Plans:
 
 **Wave 3** *(blocked on 04-04, 04-05, 04-08)*
 
-- [ ] 04-09-PLAN.md — `index.ts`: PERF-02's offset read replacing the 250 ms whole-file re-parse, and PERF-04's four bounded accumulators
+- [x] 04-09-PLAN.md — `index.ts`: PERF-02's offset read replacing the 250 ms whole-file re-parse, plus **six** of PERF-04's seven accumulator sites — five total-volume ones through `appendBounded`, and `callMcpMethod`'s JSON-RPC drain buffer through `drainCompleteLines`. (The earlier "four bounded accumulators" wording was the first of two undercounts the plan itself corrected: `grep -n "stdout += \|stderr += "` sees only five of the seven, and is structurally blind to `stdoutBuffer +=` and to `out +=`. Site 7, `resolveCommand`'s `out`, is 04-10's.)
 
 **Wave 4** *(blocked on 04-07, 04-09)*
 
@@ -308,7 +308,7 @@ Parallelism opportunities: Phase 2 may run alongside Phase 3 (both depend only o
 | 1. Restore the Verification Signal | 6/6 | Complete    | 2026-08-13 |
 | 2. POSIX Correctness & Hardening | 0/3 | Not started | - |
 | 3. CI Spike — Prove LLRT Basics on Windows | 5/5 | Complete    | 2026-08-14 |
-| 4. Platform Foundation | 8/11 | In Progress | - |
+| 4. Platform Foundation | 9/11 | In Progress | - |
 | 5. Kill Shell Wrappers | 0/2 | Not started | - |
 | 6. Windows Command Resolution | 0/2 | Not started | - |
 | 7. Provider Spawn & Registration | 0/3 | Not started | - |

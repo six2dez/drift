@@ -192,17 +192,35 @@ One blocking lint issue in the source work, recorded above as a Rule 3 auto-fix 
 
 - **Found during:** post-summary state updates (not a task)
 - **Issue:** The known carry-forward from 04-01 through 04-08, reproduced exactly. `### Phase 4: Platform Foundation` has no `**Plans:**` line, so the helper's regex matches the first one in the file — backlog item **999.1** (the event-driven `sendCliMessage` refactor) — and writes Phase 4's count into it. It also re-mangles the Progress table row's trailing cells.
-- **Fix:** Restored `**Plans:** 0 plans` on 999.1 and the table row. What the helper got *right* and was kept: the `04-09-PLAN.md` checkbox → `[x]` and the `8/11` → `9/11` count.
+- **Observed:** `ROADMAP.md:329` went `**Plans:** 0 plans` → `**Plans:** 9/11 plans executed`, and the Progress row went `| 4. Platform Foundation | 8/11 | In Progress | - |` → `| 4. Platform Foundation | 9/11 | In Progress|  |` — the trailing cells mangled again, undoing 04-08's tidy.
+- **Fix:** Restored `**Plans:** 0 plans` on 999.1 and the table row's trailing cells. What the helper got *right* and was kept: the `04-09-PLAN.md` checkbox → `[x]` and the `8/11` → `9/11` count.
 - **Files modified:** `.planning/ROADMAP.md`
-- **Verification:** snapshot-before / `diff`-after reduced to exactly the intended lines; `grep -c '^\*\*Plans:\*\* 0 plans$'` → `11`.
+- **Verification:** `git diff` against the committed baseline reduced to exactly the three intended lines; `grep -c '^\*\*Plans:\*\* 0 plans$'` → `11`, `grep -c 'plans executed'` → `0`.
 - **Carry-forward, unchanged:** two plans remain in this phase and both will hit it. **Snapshot before, diff after** — a count-only check does not catch the trailing-cell mangling. Ordering matters: the helper counts `*-SUMMARY.md` files on disk, so it must run *after* the summary is written.
+
+**1b. [Rule 1 - Bug] The ROADMAP's own one-line descriptor for this plan still carried the stale "four bounded accumulators" claim**
+
+- **Found during:** the ROADMAP diff above (not a task)
+- **Issue:** Wave 3's entry read `04-09-PLAN.md — index.ts: PERF-02's offset read …, and PERF-04's four bounded accumulators`. That is the *first* of the two undercounts this plan's own `<objective>` corrects — the count is **seven** sites, of which this plan owns **six**. 04-05 hit and fixed the identical stale wording on its own descriptor and recorded the precedent. Left alone it is the artifact a 04-10 or 04-11 executor scanning the roadmap would reason from, and "four" is not a number anyone can reconstruct the truth from.
+- **Fix:** Rewrote the descriptor to the shipped shape — six of seven sites, five through `appendBounded` and one through `drainCompleteLines` — and named *why* the undercount happened (the inventory grep is structurally blind to `stdoutBuffer +=` and `out +=`) so the correction carries its own reason. Site 7's ownership by 04-10 is stated inline.
+- **Files modified:** `.planning/ROADMAP.md`
+- **Why this was in scope:** documentation-only, one line, describing the plan just executed, inside a file this step was already repairing — and the plan's own framing calls a surviving "four" a stale claim to correct rather than a target to match.
 
 **2. [Rule 1 - Bug] `state advance-plan` and `state record-metric` left the same residues 04-02 through 04-08 recorded**
 
 - **Found during:** post-summary state updates (not a task)
 - **Issue:** Confirmed by `git diff -- .planning/STATE.md` against the committed baseline, never by exit code. `advance-plan` advanced *Plan 9 of 11* → *10 of 11* but also reset `Status:` mid-phase and flattened both `last_activity` (frontmatter) and `Last activity` (Current Position) to a bare date. `record-metric` appended a 4-column orphan row below the `*Updated after each plan completion*` footer, unrelated to the differently-shaped **By Phase** table above it.
-- **Fix:** Restored `Status: Executing Phase 4` and both descriptive activity lines, relocated the metric into the **By Phase** row (`04 | 9 of 11`) and the **Recent Trend** last-5 list, deleted the stray row, and incremented the hand-maintained Velocity `Total plans completed:` line.
+- **Fix:** Restored `Status: Executing Phase 4` and both descriptive activity lines, relocated the metric into the **By Phase** row (`04 | 9 of 11`) and the **Recent Trend** last-5 list, and deleted the stray row.
 - **Files modified:** `.planning/STATE.md`
+- **What did NOT misfire:** `update-progress` again reported `percent: 91` while writing only `completed_plans: 19 → 20` — the `percent: 10` field and the `Progress: [██░░░░░░░░] 20% (2 of 10 milestone phases)` line are untouched, which is the *desired* outcome for this project (its progress line counts milestone phases, not plans). Fourth plan to record the reported-vs-written mismatch so it is not mistaken for corruption.
+
+**2c. [Rule 1 - Bug] The hand-maintained Velocity line was two plans behind, not one**
+
+- **Found during:** the STATE.md repair above (not a task)
+- **Issue:** `Total plans completed:` read `22`. Checking the line across the last eight `docs(04-0x)` commits shows it going 17 → 18 → 18 (04-03 missed) → 19 → 20 → 21 → 22 → **22** — i.e. **04-08 did not increment it**, even though it updated the By Phase row from `7 of 11` to `8 of 11` in the same commit. No helper maintains this line, which is why it silently drifts.
+- **Fix:** Set to `24` (04-08's missed increment plus this plan's) and nudged `Total execution time` from `~2.7` to `~3.3 hours` to absorb 04-08's 25 min and this plan's 10 min, which were also never added.
+- **Files modified:** `.planning/STATE.md`
+- **Carry-forward:** check this line against `git log -- .planning/STATE.md` rather than incrementing whatever is there; a missed increment is invisible to any exit code and compounds silently.
 
 **2b. [Confirmed again] the named-flag rules hold**
 
@@ -245,6 +263,9 @@ None — no external service configuration required.
 - Commit `643de82` — FOUND
 - Commit `b720576` — FOUND
 - Commit `9285c5b` — FOUND
+- `.planning/ROADMAP.md` — verified by `git diff` against the committed baseline: exactly three intended changes (the `04-09-PLAN.md` checkbox, its corrected descriptor, and the `8/11` → `9/11` count); all eleven `999.x` backlog items read `**Plans:** 0 plans`; `grep -c 'plans executed'` = `0`
+- `.planning/STATE.md` — verified by `git diff` against the committed baseline: position, `completed_plans`, Status, both activity lines, the Velocity block, the By Phase row, Recent Trend, the three session fields and six `[Phase 04]` decisions, and nothing else. `grep -c '^- \[Phase 4\]:'` = `0` (zero-padded `--phase 04` again wrote the correct prefix)
+- `.planning/REQUIREMENTS.md` — verified byte-identical (`git diff --stat` empty); PERF-02 and PERF-04 both still `- [ ]` and `Pending`, as intended
 
 ---
 *Phase: 04-platform-foundation*
