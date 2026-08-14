@@ -97,6 +97,15 @@ import {
 import { withFsRetry } from "./fs-retry";
 import { createActivityCursor, readActivityTick } from "./activity-tail";
 import {
+  appendBounded,
+  createBoundedBuffer,
+  renderBoundedBuffer,
+  CLI_STDERR_MAX_CHARS,
+  CLI_STDOUT_MAX_CHARS,
+  SPAWN_STDERR_MAX_CHARS,
+  SPAWN_STDOUT_MAX_CHARS,
+} from "./bounded-buffer";
+import {
   buildProbeReport,
   formatProbeFailure,
   formatProbeReportFields,
@@ -1844,12 +1853,36 @@ async function runMcpSelfTest(
 function spawnAndWait(cmd: string, args: string[]): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
     const proc = spawn(cmd, args, { stdio: ["pipe", "pipe", "pipe"] });
-    let stdout = "";
-    let stderr = "";
-    proc.stdout?.on("data", (d: Buffer) => { stdout += d.toString(); });
-    proc.stderr?.on("data", (d: Buffer) => { stderr += d.toString(); });
-    proc.on("close", (code) => resolve({ code: code ?? 1, stdout, stderr }));
-    proc.on("error", () => resolve({ code: 1, stdout, stderr }));
+    // Head retention: every consumer of this stream reads the FIRST line - a
+    // `which` path, a `node --version` string, a short `mcp add` acknowledgement.
+    let stdout = createBoundedBuffer({
+      maxChars: SPAWN_STDOUT_MAX_CHARS,
+      retention: "head",
+    });
+    // Tail retention: this stream is diagnostics, the LAST error is the
+    // actionable one and warnings pile up ahead of it.
+    let stderr = createBoundedBuffer({
+      maxChars: SPAWN_STDERR_MAX_CHARS,
+      retention: "tail",
+    });
+    proc.stdout?.on("data", (d: Buffer) => { stdout = appendBounded(stdout, d.toString()); });
+    proc.stderr?.on("data", (d: Buffer) => { stderr = appendBounded(stderr, d.toString()); });
+    // Rendered at the resolve boundary, so the PUBLIC shape of this function is
+    // unchanged: every caller still receives plain strings and needed no edit.
+    proc.on("close", (code) =>
+      resolve({
+        code: code ?? 1,
+        stdout: renderBoundedBuffer(stdout),
+        stderr: renderBoundedBuffer(stderr),
+      }),
+    );
+    proc.on("error", () =>
+      resolve({
+        code: 1,
+        stdout: renderBoundedBuffer(stdout),
+        stderr: renderBoundedBuffer(stderr),
+      }),
+    );
   });
 }
 
@@ -2652,8 +2685,27 @@ async function sendCliMessage(
       // Track for cancellation
       activeProcesses.set(input.sessionId, proc);
 
-      let stdout = "";
-      let stderr = "";
+      // Both-ends retention, because for gemini/codex/copilot this string IS the
+      // chat answer (the two read sites in finalizeFromProcessEnd below): the
+      // opening of an answer matters to a reader and so does the conclusion, so
+      // a middle-drop preserves both.
+      //
+      // Deliberate divergence from Node's own precedent, recorded here because a
+      // later reader will be tempted to "align with Node": child_process.exec's
+      // maxBuffer (default 1 MiB) KILLS the child on overflow. Drift must not.
+      // Killing the CLI mid-answer converts a cosmetic problem - an answer longer
+      // than anyone will read - into a lost turn, which is a self-inflicted
+      // availability failure (T-04-17). Truncate and keep reading.
+      let stdout = createBoundedBuffer({
+        maxChars: CLI_STDOUT_MAX_CHARS,
+        retention: "both",
+      });
+      // Tail retention: this stream is diagnostics and the LAST error is the
+      // actionable one while warnings pile up ahead of it.
+      let stderr = createBoundedBuffer({
+        maxChars: CLI_STDERR_MAX_CHARS,
+        retention: "tail",
+      });
       let claudePrintState = createClaudePrintState();
       let settled = false;
       let claudeRecoveryTimeout: ReturnType<typeof setTimeout> | undefined;
@@ -2779,15 +2831,15 @@ async function sendCliMessage(
         const output =
           (providerId === "claude-cli"
             ? finalizeClaudePrintOutput(claudePrintState)
-            : stdout.trim()) ||
+            : renderBoundedBuffer(stdout).trim()) ||
           (providerId === "claude-cli" && claudePostToolShutdownRequested
             ? buildClaudePostToolStallFallback(collectedActivities)
             : "") ||
           (providerId === "claude-cli"
             ? getClaudeToolFailureFallback(collectedActivities)
             : "") ||
-          stderr.trim() ||
-          stdout.trim() ||
+          renderBoundedBuffer(stderr).trim() ||
+          renderBoundedBuffer(stdout).trim() ||
           `(exit code: ${code})`;
         finalize(ok({
           content: output,
@@ -2931,7 +2983,7 @@ async function sendCliMessage(
 
       proc.stdout?.on("data", (chunk: Buffer) => {
         const text = chunk.toString();
-        stdout += text;
+        stdout = appendBounded(stdout, text);
         lastStdoutAt = Date.now();
         appendSessionDebugLog(
           sessionDebugLogPath,
@@ -3020,7 +3072,7 @@ async function sendCliMessage(
 
       proc.stderr?.on("data", (chunk: Buffer) => {
         const text = chunk.toString();
-        stderr += text;
+        stderr = appendBounded(stderr, text);
         appendSessionDebugLog(
           sessionDebugLogPath,
           `[stderr] ${summarizeDebugChunk(text)}`,
