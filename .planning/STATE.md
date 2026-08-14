@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: "Completed 04-05 (bounded-buffer.ts + bounded-buffer.test.ts); next: 04-06"
-last_updated: "2026-08-14T13:06:53.240Z"
-last_activity: 2026-08-14 -- 04-05 complete (PERF-04 bounded-buffer.ts: three retentions, five caps, marked truncation + drainCompleteLines for the one line-drain site; 16-case bounded-buffer.test.ts)
+stopped_at: "Completed 04-06 (claude-print.ts bounded + split-once; claude-print.test.ts 10 -> 18 cases); next: 04-07"
+last_updated: "2026-08-14T13:26:22.858Z"
+last_activity: "2026-08-14 -- 04-06 complete (PERF-04 site B: claude-print.ts line buffer bounded at 4 MiB with a counted whole-drop + the per-line indexOf/slice loop replaced by one split; claude-print.test.ts 10 -> 18 cases, additions only)"
 progress:
   total_phases: 21
   completed_phases: 2
   total_plans: 22
-  completed_plans: 16
+  completed_plans: 17
   percent: 10
 ---
 
@@ -26,9 +26,9 @@ See: .planning/PROJECT.md (updated 2026-06-26)
 ## Current Position
 
 Phase: 4 (Platform Foundation) — EXECUTING
-Plan: 6 of 11
+Plan: 7 of 11
 Status: Executing Phase 4
-Last activity: 2026-08-14 -- 04-05 complete (PERF-04 bounded-buffer.ts: three retentions, five caps, marked truncation + drainCompleteLines for the one line-drain site; 16-case bounded-buffer.test.ts)
+Last activity: 2026-08-14 -- 04-06 complete (PERF-04 site B: claude-print.ts line buffer bounded at 4 MiB with a counted whole-drop + the per-line indexOf/slice loop replaced by one split; claude-print.test.ts 10 -> 18 cases, additions only)
 
 Progress: [██░░░░░░░░] 20% (2 of 10 milestone phases)
 
@@ -36,9 +36,9 @@ Progress: [██░░░░░░░░] 20% (2 of 10 milestone phases)
 
 **Velocity:**
 
-- Total plans completed: 20 (plus 1 quick task)
+- Total plans completed: 21 (plus 1 quick task)
 - Average duration: ~10 min
-- Total execution time: ~2.3 hours
+- Total execution time: ~2.5 hours
 
 **By Phase:**
 
@@ -46,11 +46,11 @@ Progress: [██░░░░░░░░] 20% (2 of 10 milestone phases)
 |-------|-------|-------|----------|
 | 01 | 6 | - | - |
 | 03 | 5 | - | - |
-| 04 | 5 of 11 | - | - |
+| 04 | 6 of 11 | - | - |
 
 **Recent Trend:**
 
-- Last 5 plans: 04-01 (10 min, 2 tasks, 2 files, 0 CI runs — a pure module and its unit tests, verified entirely locally), 04-02 (7 min, 2 tasks, 2 files, 0 CI runs — same shape as 04-01, and faster because the pure-module + sibling-test pattern was already established), 04-03 (9 min, 2 tasks + 1 legibility fix, 2 files, 0 CI runs — the third pure-module plan in a row; the extra 2 min went on the mandated manual read of the rendered failure message, which is what found the fix), 04-04 (7 min, 2 tasks, 2 files, 0 CI runs — the fourth pure-module plan in a row and the fastest yet; the only new work was the byte-level UTF-8 reasoning, and both tasks passed their own verify on the first run), 04-05 (9 min, 2 tasks, 2 files, 0 CI runs — the largest single task in the phase, deliberately unsplit because splitting would force two tasks to write one file; both tasks passed their own verify on the first run and the 16-case suite was green on its first run)
+- Last 5 plans: 04-02 (7 min, 2 tasks, 2 files, 0 CI runs — same shape as 04-01, and faster because the pure-module + sibling-test pattern was already established), 04-03 (9 min, 2 tasks + 1 legibility fix, 2 files, 0 CI runs — the third pure-module plan in a row; the extra 2 min went on the mandated manual read of the rendered failure message, which is what found the fix), 04-04 (7 min, 2 tasks, 2 files, 0 CI runs — the fourth pure-module plan in a row and the fastest yet; the only new work was the byte-level UTF-8 reasoning, and both tasks passed their own verify on the first run), 04-05 (9 min, 2 tasks, 2 files, 0 CI runs — the largest single task in the phase, deliberately unsplit because splitting would force two tasks to write one file; both tasks passed their own verify on the first run and the 16-case suite was green on its first run), 04-06 (10 min, 2 tasks + 1 cap-symmetry addition, 2 files, 0 CI runs — the FIRST Phase 4 plan to modify an existing, production-wired file rather than create a new one; the extra time went on proving the refactor additions-only and hand-aligning the new lines to Prettier instead of running --write over 999.11's pre-existing debt)
 - Trend: steady; 01-06 is the longest (21 min) because it waits on three real CI runs and a three-Node local pre-flight. 03-03 came in at 9 min despite needing two real `windows-latest` runs — the Windows probe job completes in 16-18s, so the CI wait is far cheaper than the ubuntu matrix. 03-04 waited on four runs (2 Windows probe + 2 ubuntu matrix) and still finished in 11 min for the same reason. 03-05 burned no runner at all: it only re-queried the six existing run records and transcribed their measured output.
 
 *Updated after each plan completion*
@@ -106,6 +106,13 @@ Recent decisions affecting current work:
 - [Phase 04]: [04-05]: Site 7 (resolveCommand's out, index.ts:854/:862) reuses SPAWN_STDOUT_MAX_CHARS with head retention instead of getting a seventh constant — identical head-read shape — and the reuse is recorded AT the constant so plan 04-10 finds it rather than inventing WHICH_STDOUT_MAX_CHARS. It was deliberately NOT exempted on 'it is only which, and there is a 1-second timeout' grounds: that is the same argument the phase rejects for callMcpMethod, where the <=10 s timeout bounds the window and not the volume.
 - [Phase 04]: [04-05]: MCP_SELFTEST_LINE_MAX_CHARS is 4 MiB, the same as 04-04's ACTIVITY_PARTIAL_MAX_BYTES and 04-06's forthcoming CLAUDE_LINE_BUFFER_MAX_CHARS — one hazard shape (a never-terminated line in a stream carrying target-application content), one answer, drop the remainder WHOLE and count it. Three numbers for one hazard would read as an oversight. The intended asymmetry is units only: UTF-16 code units here and in 04-06 (string buffers), bytes in 04-04 (Buffer remainder).
 - [Phase 04]: [04-05]: PERF-04 was NOT marked complete. All seven index.ts accumulator sites are still unbounded, the O(k*n) indexOf/slice loop at :1269-1291 is still there, and all fifteen bounded-buffer.ts exports have zero production call sites; 04-06, 04-09 and 04-10 carry the wiring. Fifth consecutive Phase 4 plan making this call after 04-01, 04-02, 04-03 and 04-04, matching Phase 3's CI-02 precedent.
+- [Phase 04]: [04-06]: claude-print.ts is the FIRST Phase 4 module whose change ships live behaviour — index.ts:65 imports it and :2207/:2496 call it on every Claude turn, unlike 04-01..04-05 whose exports all had zero production call sites. The bounded buffer and the split-once drain are therefore mitigating T-04-05/T-04-06 in the running product today, not just in a tested module.
+- [Phase 04]: [04-06]: PERF-04 was still NOT marked complete, for a DIFFERENT reason than 04-01..04-05. Site B (claude-print.ts) is now wired and live, but PERF-04 also covers the seven index.ts accumulators, all of which are still unbounded — 04-09 wires sites 1-6 and 04-10 site 7. Marking it complete here would claim six unbounded sites are bounded. Sixth consecutive Phase 4 plan making this call.
+- [Phase 04]: [04-06]: The bound is applied to the POST-SPLIT remainder, never to the concatenated buffer: everything before the last newline is a complete line about to be emitted, so bounding the concatenation would discard legitimate output AND still pass a naive over-cap test. The falsifiability partner (an over-cap but newline-TERMINATED chunk drops nothing) is what an implementation bounding the concatenation fails.
+- [Phase 04]: [04-06]: CLAUDE_LINE_BUFFER_MAX_CHARS is 4 MiB with the drop-whole-and-count policy, closing the phase's three-way cap symmetry with 04-04's ACTIVITY_PARTIAL_MAX_BYTES and 04-05's MCP_SELFTEST_LINE_MAX_CHARS. The value is asserted from inside the suite (mirroring bounded-buffer.test.ts's case) rather than by a one-off grep, so a future divergence has to be deliberate. The unit asymmetry — UTF-16 code units here, bytes in activity-tail.ts — is the intended one and is commented at all three constants.
+- [Phase 04]: [04-06]: The split-once refactor's proof is 0 DELETIONS in git diff plus a single-chunk-vs-byte-by-byte equivalence test, not 'the suite still passes'. A refactor can keep a suite green by also editing it, so the additions-only property (git diff --numstat reports 261 0) is the load-bearing evidence and the 10 pre-existing it titles were compared byte-for-byte against HEAD~2.
+- [Phase 04]: [04-06]: claude-print.test.ts gained a SECOND import block from ./claude-print instead of an edit to the existing one. Editing the first import would put a modified line inside the 393-line behaviour-identity proof that 04-VALIDATION.md's regression row grades as additions-only. Legal ESM, comment explains the constraint, and it must not be merged back while that row is the gate.
+- [Phase 04]: [04-06]: prettier --write was deliberately NOT run on either file. Both are inside pnpm format's glob but are part of backlog 999.11's pre-existing debt, so --write would reformat pre-existing lines and destroy the additions-only property. Instead the three new lines prettier would have reflowed were hand-aligned to its output, verified by prettier-ing a scratch COPY and confirming every remaining delta lands on a pre-existing line.
 
 ### Pending Todos
 
@@ -145,9 +152,9 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-14T13:06:53.235Z
-Stopped at: Completed 04-05 (bounded-buffer.ts + bounded-buffer.test.ts); next: 04-06
-Resume file: .planning/phases/04-platform-foundation/04-06-PLAN.md
+Last session: 2026-08-14T13:22:50.328Z
+Stopped at: Completed 04-06 (claude-print.ts bounded + split-once; claude-print.test.ts 10 -> 18 cases); next: 04-07
+Resume file: .planning/phases/04-platform-foundation/04-07-PLAN.md
 
 **Live on the public remote: nothing of ours.** Plan 03-04 tore down all three `scratch/*` branches (`ci-proof-windows-probe`, `ci-proof-windows-probe-negative`, `ci-proof-windows-gate-negative`) locally and remotely. Asserted with a `test -z` discrimination over the captured glob (`scratch-glob-empty=0`) plus the full unfiltered listing, which now shows only `main` at `2d8cf16` and the pre-existing, unrelated `fix/security-hotfixes` at `0cd81f3`. `origin/main` was never pushed by this phase and is still `2d8cf16`; local `main` is 23 commits ahead and deliberately unpushed. **Re-verified 2026-08-13 (plan 03-05):** the remote still lists only `main` `2d8cf16` and the pre-existing `fix/security-hotfixes` `0cd81f3`, and all eight Phase 3 run records (4 probe + 4 `CI` control) still resolve with their recorded conclusions — which is what makes the URLs in `03-FINDINGS.md` valid citations after the branches were deleted. The probe **artifacts** do not survive: they expire 2026-09-12, which is why D-11 required the committed findings document.
 
