@@ -1,6 +1,7 @@
 # Phase 3 Findings — Windows/LLRT Primitive Probe (CI-02)
 
 **Recorded:** 2026-08-13, plan 03-05, **after** the runs completed and from their measured output (D-12).
+**Amended:** 2026-08-14, after code review (`03-REVIEW.md` CR-01/CR-02) found P0-ENV's discriminator could not discriminate. The probe was corrected and re-run — [run 31780073574](https://github.com/six2dez/drift/actions/runs/31780073574) — and **the result overturns this document's original P0-ENV interpretation.** See § *P0-ENV — replace versus merge*. Same D-12 discipline: amended from measured output, after the run.
 **Canonical for:** Phases 4-8. Cite this file, not the CI artifacts — those expire 2026-09-12 (D-11).
 **Vehicle:** Node.js on `windows-latest`, **not** LLRT. Read the vehicle caveat below before any result.
 
@@ -13,7 +14,7 @@
 Two consequences bind Phases 4-8 harder than the bare PASSes suggest, and both are recorded in full below rather than buried:
 
 1. **P1-CMD selects the `cmd.exe /c` architecture.** Direct `.cmd` spawn is unusable on Node ≥ 18.20.2 because of the CVE-2024-27980 guard. A `cmd.exe /c` branch is **mandatory**, not recommended.
-2. **P0-ENV's PASS does not license "the parent environment is inherited".** Source analysis of libuv (below) bounds it to eleven back-filled variable names. `APPDATA` and `LOCALAPPDATA` — precisely what `command-resolution.ts` needs for the Windows nvm/fnm paths — are **not** among them.
+2. **P0-ENV's PASS does not license "the parent environment is inherited" — and as of the 2026-08-14 re-run this is measured, not inferred.** The original probe tested whether the child could see `PATH`, but `PATH` is one of eleven names libuv back-fills into *any* supplied block on Windows, so `PATH-VISIBLE` was guaranteed regardless of semantics and the answer was predetermined. The corrected probe tests a parent-only marker (`DRIFT_PROBE_PARENT_ONLY`) that is on neither list. On `windows-latest` it came back **`PARENT-CLEARED`**: the `env` option **REPLACES** the parent block on Windows, exactly as it does on POSIX. What this document originally recorded as *source analysis* of libuv's eleven `required_vars` is now **confirmed by measurement**, and `APPDATA`/`LOCALAPPDATA` — precisely what `command-resolution.ts` needs for the Windows nvm/fnm paths — are **not** back-filled. Phase 4 must spread `{ ...process.env, ...driftVars }`.
 
 Both verification gates were falsified on separate runs, so this is a result that could have been otherwise rather than a green tick.
 
@@ -53,6 +54,9 @@ Run table in the `01-06-SUMMARY.md` shape. Every conclusion below was read from 
 | 2 | **The authoritative run** — all seven assertions | `scratch/ci-proof-windows-probe` | `0a05174` | https://github.com/six2dez/drift/actions/runs/31702392047 | **success** |
 | 3 | Falsifiability — does a probe `FAIL` fail the job? | `scratch/ci-proof-windows-probe-negative` | `faff52f` | https://github.com/six2dez/drift/actions/runs/31703442673 | **failure — INTENDED** |
 | 4 | Falsifiability — does the D-10 gate bite? | `scratch/ci-proof-windows-gate-negative` | `4e82c2a` | https://github.com/six2dez/drift/actions/runs/31703717548 | **failure — INTENDED** |
+| 5 | **Re-run after the CR-01/CR-02 fixes — supersedes run 2's P0-ENV interpretation** | `scratch/ci-proof-windows-probe-recheck` | `741ff21` | https://github.com/six2dez/drift/actions/runs/31780073574 | **success** |
+
+Run 5 exists because `03-REVIEW.md` found (CR-01) that P0-ENV's replace-vs-merge discriminator read `PATH` — a variable Windows back-fills — so it could not have discriminated, and (CR-02) that P1-CMD treated any spawn error as conclusive regardless of platform. Both were fixed (`2f4db6a`, `4d5eae2`) and the probe re-run. All seven assertions PASS at exit 0 again, but **P0-ENV's answer changed direction**. Run 2 remains the record of what the *original* probe measured; run 5 is authoritative for P0-ENV and P0-TMP going forward. Per-step conclusions on run 5, read from `gh run view --json jobs`: D-10 gate `success`, probe `success`, upload `success`; the `ci.yml` control leg ([31780073577](https://github.com/six2dez/drift/actions/runs/31780073577)) was green on the same commit.
 
 Runs 3 and 4 are red **on purpose**. A future reader must not treat them as unresolved problems — they are the phase's falsifiability evidence, and without them run 2's green would prove nothing.
 
@@ -158,14 +162,23 @@ INFO [P3-UUID]: globalThis.crypto.randomUUID=true node:crypto randomUUID=true
 
 This is the observation Phases 4-8's env-injection architecture rests on, and it is **not recoverable from a bare PASS**, which is why the probe emits it as its own line. The two platforms disagree:
 
-| Host | Child reported | Probe's wording |
-|---|---|---|
-| darwin (03-01, local dev host) | `PATH-ABSENT` | "that option **replaced** the parent environment" |
-| **`windows-latest`** (run 31702392047) | `PATH-VISIBLE` | "that option **merged** into the parent environment" |
+| Host | Discriminator read | Child reported | Probe's wording |
+|---|---|---|---|
+| darwin (03-01, local dev host) | `PATH` | `PATH-ABSENT` | "that option **replaced** the parent environment" |
+| **`windows-latest`** (run 31702392047) | `PATH` | `PATH-VISIBLE` | "that option **merged** into the parent environment" — **WRONG, see below** |
+| **`windows-latest`** (run 31780073574, corrected probe) | `DRIFT_PROBE_PARENT_ONLY` | **`PARENT-CLEARED`** | "that option **replaced** the parent environment" — **authoritative** |
 
-**The measurement is recorded above unedited. The probe's derived guidance in that third INFO line — "Phases 4-8 inherit the parent block and need not spread `...process.env`" — generalises further than the measurement supports, and Phase 4 must not adopt it as written.**
+**Run 2's "merged" reading was an artifact of the discriminator, not a property of Windows.** `PATH` is one of libuv's eleven back-filled names, so a child given *any* explicit `env` block sees it; the field could only ever report `PATH-VISIBLE` on Windows. `03-REVIEW.md` CR-01 identified this, and the corrected probe re-ran with a marker set in the parent, omitted from the supplied block, and absent from the eleven. It came back **`PARENT-CLEARED`**.
 
-**Source analysis — ANALYSIS, NOT MEASUREMENT.** libuv `src/win/process.c` (`v1.x`) does not merge the parent environment. `make_program_env()` back-fills a fixed, sorted list of variables into the supplied block when they are absent, calling `GetEnvironmentVariableW` against the *parent* process for each missing one. The list — `required_vars[]` — is exactly eleven names:
+**Windows therefore behaves the same as POSIX: the `env` option replaces the parent block outright.** The verbatim line from run 31780073574:
+
+```
+INFO [P0-ENV]: on this host (win32) the env option replaced the parent environment block: the parent-only marker DRIFT_PROBE_PARENT_ONLY — set in the parent, omitted from the supplied block, and absent from libuv's eleven Windows required_vars — came back PARENT-CLEARED in the child
+```
+
+The original guidance — "Phases 4-8 inherit the parent block and need not spread `...process.env`" — was **not merely over-general, it was backwards.** It no longer appears in the probe.
+
+**Source analysis — now CORROBORATED BY MEASUREMENT (run 5), where it was previously analysis alone.** libuv `src/win/process.c` (`v1.x`) does not merge the parent environment. `make_program_env()` back-fills a fixed, sorted list of variables into the supplied block when they are absent, calling `GetEnvironmentVariableW` against the *parent* process for each missing one. The list — `required_vars[]` — is exactly eleven names:
 
 ```
 HOMEDRIVE, HOMEPATH, LOGONSERVER, PATH, SYSTEMDRIVE, SYSTEMROOT,
@@ -286,7 +299,9 @@ Today Drift injects environment variables into children by *generating a bash sc
 
 (`spawnAndWait` at `index.ts:1521` is the same shape.) So Phase 4 is *adding* the `env` option to these call sites, not proving that an existing one keeps working. Concretely:
 
-> **Phase 4 must pass `{ ...process.env, ...driftVars }`, not `{ ...driftVars }`.** The eleven-name back-fill covers `PATH`, `TEMP`, `USERPROFILE`, `SYSTEMROOT` and seven others, but **not** `APPDATA` or `LOCALAPPDATA` — the two variables `command-resolution.ts` needs to build the Windows nvm and fnm candidate paths. Spreading the parent block is the only form that is correct for both platforms, since on POSIX the `env` option replaces outright.
+> **Phase 4 must pass `{ ...process.env, ...driftVars }`, not `{ ...driftVars }`.** The eleven-name back-fill covers `PATH`, `TEMP`, `USERPROFILE`, `SYSTEMROOT` and seven others, but **not** `APPDATA` or `LOCALAPPDATA` — the two variables `command-resolution.ts` needs to build the Windows nvm and fnm candidate paths. Spreading the parent block is the only form that is correct for both platforms, since the `env` option replaces outright on POSIX **and on Windows**.
+
+**This is now measured, not inferred** ([run 31780073574](https://github.com/six2dez/drift/actions/runs/31780073574), `PARENT-CLEARED`). When this document was first written the directive rested on libuv source analysis while the probe's own output said the opposite; both now agree. Treat `{ ...driftVars }` alone as a defect on either platform.
 
 The `.cmd`-launcher fallback named in the STATE.md blocker is **not required** for env injection.
 
@@ -324,7 +339,7 @@ Recorded as gaps rather than inferred from `03-RESEARCH.md`'s predictions.
 
 | Gap | Why it is a gap | Where it closes |
 |---|---|---|
-| **Whether a variable outside libuv's eleven `required_vars` (e.g. `APPDATA`) survives into a child spawned with an explicit `env` block** | The probe measured `PATH`, which *is* one of the eleven. The eleven-name bound is **source analysis of libuv, not measurement.** | A probe extension measuring a non-required variable directly — a candidate for Phase 4. 03-03's sanctioned probe edit was not triggered because P1-CMD was conclusive. |
+| ~~**Whether a variable outside libuv's eleven `required_vars` (e.g. `APPDATA`) survives into a child spawned with an explicit `env` block**~~ — **CLOSED 2026-08-14 by measurement** | Was a gap because the probe measured `PATH`, which *is* one of the eleven, making the eleven-name bound source analysis only. | **Closed.** The corrected probe measures `DRIFT_PROBE_PARENT_ONLY`, set in the parent and outside the eleven; [run 31780073574](https://github.com/six2dez/drift/actions/runs/31780073574) returned `PARENT-CLEARED`. A non-required variable does **not** survive. The eleven-name bound is now measured, not inferred. |
 | **LLRT itself, on any assertion** | No standalone LLRT Windows binary exists; Caido headless in CI needs a paid Teams plan | Phase 9/10, real machine — see Residual Risk |
 | **LLRT's crypto surface (P3-UUID)** | Unlike P2-OS, no source-level confirmation was obtained in either direction | Phase 9/10 |
 | **The D-10 gate's third arm (`grep` status 2 — missing or unreadable target)** | Both the clean arm (status 1, on run 2 and in local pre-flights) and the match arm (status 0, on run 4) fired. The unreadable arm is **structurally present** — the third `exit 1` site, currently `windows-llrt-probe.yml:142` — but was never exercised on a real run | Not planned. Phase 9's replacement job should preserve the three-branch structure regardless. |
