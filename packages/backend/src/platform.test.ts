@@ -1,0 +1,260 @@
+import { describe, expect, it } from "vitest";
+import {
+  buildSpawnEnv,
+  getExecutableNames,
+  getHomeDirCandidates,
+  getSweepRoots,
+  getTempRoot,
+  getWhichCommand,
+  normalizePlatform,
+} from "./platform";
+
+// Every Windows branch below is exercised with `platform` passed as a literal,
+// which is the entire point of `platform.ts` being pure: the maintainer cannot
+// run native Windows, so this suite is the win32 proof and it runs on the Linux
+// CI runner. The describe/it titles are a CONTRACT with 04-VALIDATION.md, which
+// addresses each row by `-t "<name>"` — renaming one silently unhooks a
+// requirement from its verification.
+
+describe("getTempRoot", () => {
+  it("strips the trailing backslash GetTempPath2 returns on Windows", () => {
+    expect(
+      getTempRoot({
+        platform: "win32",
+        tmpdir: "C:\\Users\\x\\AppData\\Local\\Temp\\",
+      }),
+    ).toBe("C:\\Users\\x\\AppData\\Local\\Temp");
+  });
+
+  it("strips the trailing slash a launchd TMPDIR carries on macOS", () => {
+    expect(
+      getTempRoot({ platform: "darwin", tmpdir: "/var/folders/ab/cd/T/" }),
+    ).toBe("/var/folders/ab/cd/T");
+  });
+
+  it("leaves an already-clean Linux tmpdir untouched", () => {
+    expect(getTempRoot({ platform: "linux", tmpdir: "/tmp" })).toBe("/tmp");
+  });
+
+  it("preserves a filesystem root instead of reducing it to an empty string", () => {
+    expect(getTempRoot({ platform: "linux", tmpdir: "/" })).toBe("/");
+    expect(getTempRoot({ platform: "win32", tmpdir: "C:\\" })).toBe("C:\\");
+  });
+
+  it("trims surrounding whitespace before stripping separators", () => {
+    expect(getTempRoot({ platform: "linux", tmpdir: "  /tmp//  " })).toBe(
+      "/tmp",
+    );
+  });
+});
+
+describe("getSweepRoots", () => {
+  it("adds the legacy /tmp arm on macOS where tmpdir is /var/folders", () => {
+    expect(
+      getSweepRoots({ platform: "darwin", tmpdir: "/var/folders/ab/cd/T/" }),
+    ).toEqual(["/var/folders/ab/cd/T", "/tmp"]);
+  });
+
+  it("does not add /tmp on Windows", () => {
+    expect(
+      getSweepRoots({
+        platform: "win32",
+        tmpdir: "C:\\Users\\x\\AppData\\Local\\Temp\\",
+      }),
+    ).toEqual(["C:\\Users\\x\\AppData\\Local\\Temp"]);
+  });
+
+  it("does not duplicate /tmp on Linux", () => {
+    expect(getSweepRoots({ platform: "linux", tmpdir: "/tmp" })).toEqual([
+      "/tmp",
+    ]);
+  });
+});
+
+describe("getWhichCommand", () => {
+  it("resolves with which on darwin and linux", () => {
+    expect(getWhichCommand({ platform: "darwin" }).command).toBe("which");
+    expect(getWhichCommand({ platform: "linux" }).command).toBe("which");
+  });
+
+  it("resolves with where.exe on win32", () => {
+    expect(getWhichCommand({ platform: "win32" }).command).toBe("where.exe");
+  });
+
+  it("passes the command as a single argument on every platform", () => {
+    expect(getWhichCommand({ platform: "darwin" }).args("node")).toEqual([
+      "node",
+    ]);
+    expect(getWhichCommand({ platform: "linux" }).args("node")).toEqual([
+      "node",
+    ]);
+    expect(getWhichCommand({ platform: "win32" }).args("node")).toEqual([
+      "node",
+    ]);
+  });
+});
+
+describe("getExecutableNames", () => {
+  it("returns the bare command unchanged on POSIX", () => {
+    expect(getExecutableNames({ command: "node", platform: "darwin" })).toEqual(
+      ["node"],
+    );
+    expect(getExecutableNames({ command: "node", platform: "linux" })).toEqual([
+      "node",
+    ]);
+  });
+
+  it("returns the .exe/.cmd/.bat ladder with the bare name last on win32", () => {
+    expect(getExecutableNames({ command: "node", platform: "win32" })).toEqual([
+      "node.exe",
+      "node.cmd",
+      "node.bat",
+      "node",
+    ]);
+  });
+
+  it("leaves an already-extensioned win32 path alone", () => {
+    expect(
+      getExecutableNames({
+        command: "C:\\Program Files\\nodejs\\node.exe",
+        platform: "win32",
+      }),
+    ).toEqual(["C:\\Program Files\\nodejs\\node.exe"]);
+  });
+
+  it("matches an existing extension case-insensitively", () => {
+    expect(
+      getExecutableNames({ command: "claude.CMD", platform: "win32" }),
+    ).toEqual(["claude.CMD"]);
+  });
+
+  it("returns nothing for an empty or whitespace-only command", () => {
+    expect(getExecutableNames({ command: "   ", platform: "win32" })).toEqual(
+      [],
+    );
+    expect(getExecutableNames({ command: "", platform: "linux" })).toEqual([]);
+  });
+});
+
+describe("getHomeDirCandidates", () => {
+  it("reads HOME on POSIX and ignores USERPROFILE", () => {
+    expect(
+      getHomeDirCandidates({
+        platform: "darwin",
+        env: { HOME: "/Users/six", USERPROFILE: "C:\\Users\\six" },
+      }),
+    ).toEqual(["/Users/six"]);
+  });
+
+  it("reads USERPROFILE, APPDATA and LOCALAPPDATA in that order on win32", () => {
+    expect(
+      getHomeDirCandidates({
+        platform: "win32",
+        env: {
+          HOME: "/home/six",
+          USERPROFILE: "C:\\Users\\six",
+          APPDATA: "C:\\Users\\six\\AppData\\Roaming",
+          LOCALAPPDATA: "C:\\Users\\six\\AppData\\Local",
+        },
+      }),
+    ).toEqual([
+      "C:\\Users\\six",
+      "C:\\Users\\six\\AppData\\Roaming",
+      "C:\\Users\\six\\AppData\\Local",
+    ]);
+  });
+
+  it("returns a value repeated across two Windows variables only once", () => {
+    expect(
+      getHomeDirCandidates({
+        platform: "win32",
+        env: {
+          USERPROFILE: "C:\\Users\\six",
+          APPDATA: "C:\\Users\\six",
+          LOCALAPPDATA: "C:\\Users\\six\\AppData\\Local",
+        },
+      }),
+    ).toEqual(["C:\\Users\\six", "C:\\Users\\six\\AppData\\Local"]);
+  });
+
+  it("drops undefined, empty and whitespace-only values", () => {
+    expect(
+      getHomeDirCandidates({
+        platform: "win32",
+        env: {
+          USERPROFILE: "",
+          APPDATA: "   ",
+          LOCALAPPDATA: "  C:\\Users\\six\\AppData\\Local  ",
+        },
+      }),
+    ).toEqual(["C:\\Users\\six\\AppData\\Local"]);
+    expect(getHomeDirCandidates({ platform: "linux", env: {} })).toEqual([]);
+  });
+});
+
+describe("normalizePlatform", () => {
+  it("accepts the three platforms the narrow union covers", () => {
+    expect(normalizePlatform("win32")).toBe("win32");
+    expect(normalizePlatform("darwin")).toBe("darwin");
+    expect(normalizePlatform("linux")).toBe("linux");
+  });
+
+  it("rejects an unrecognised value instead of falling through to POSIX", () => {
+    // LLRT's third PLATFORM arm is std::env::consts::OS, so these are values
+    // the runtime really can report. Falling through would reintroduce the
+    // reported Windows bug one layer up (D-06 / RUN-05).
+    expect(normalizePlatform("freebsd")).toBeUndefined();
+    expect(normalizePlatform("android")).toBeUndefined();
+  });
+
+  it("rejects empty, whitespace-only and undefined input", () => {
+    expect(normalizePlatform("")).toBeUndefined();
+    expect(normalizePlatform("  ")).toBeUndefined();
+    expect(normalizePlatform(undefined)).toBeUndefined();
+  });
+
+  it("trims surrounding whitespace before checking the allow-list", () => {
+    expect(normalizePlatform("  win32  ")).toBe("win32");
+  });
+});
+
+describe("buildSpawnEnv", () => {
+  it("preserves parent variables that libuv does not back-fill on Windows", () => {
+    const env = buildSpawnEnv({
+      parentEnv: {
+        APPDATA: "C:\\Users\\x\\AppData\\Roaming",
+        LOCALAPPDATA: "C:\\Users\\x\\AppData\\Local",
+      },
+      driftVars: { CAIDO_TOKEN: "t" },
+    });
+    expect(env["APPDATA"]).toBe("C:\\Users\\x\\AppData\\Roaming");
+    expect(env["LOCALAPPDATA"]).toBe("C:\\Users\\x\\AppData\\Local");
+    expect(env["CAIDO_TOKEN"]).toBe("t");
+  });
+
+  it("lets a drift var override a same-named parent variable", () => {
+    const env = buildSpawnEnv({
+      parentEnv: { CAIDO_TOKEN: "stale", PATH: "/usr/bin" },
+      driftVars: { CAIDO_TOKEN: "fresh" },
+    });
+    expect(env["CAIDO_TOKEN"]).toBe("fresh");
+    expect(env["PATH"]).toBe("/usr/bin");
+  });
+
+  it("drops undefined-valued parent entries", () => {
+    const env = buildSpawnEnv({
+      parentEnv: { PRESENT: "yes", ABSENT: undefined },
+      driftVars: {},
+    });
+    expect(env).toEqual({ PRESENT: "yes" });
+    expect(Object.keys(env)).not.toContain("ABSENT");
+  });
+
+  it("returns a new object rather than mutating parentEnv", () => {
+    const parentEnv: Record<string, string | undefined> = { PATH: "/usr/bin" };
+    const env = buildSpawnEnv({ parentEnv, driftVars: { CAIDO_TOKEN: "t" } });
+    expect(env).not.toBe(parentEnv);
+    expect(parentEnv["CAIDO_TOKEN"]).toBeUndefined();
+    expect(Object.keys(parentEnv)).toEqual(["PATH"]);
+  });
+});
