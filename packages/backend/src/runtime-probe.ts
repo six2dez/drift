@@ -397,9 +397,16 @@ export function formatProbeFailure(
   }
 
   // (a) which primitive is missing, and its detail; (b) what Drift needed it for.
+  //
+  // The no-failing-capability line has to say what that MEANS, or it reads as a
+  // contradiction of the write-failure lead above it. Under D-07 that pairing is
+  // the common case, not an edge one: the write IS the os.tmpdir() assertion, so
+  // a temp dir Drift cannot write to still answers os.tmpdir() perfectly well.
   if (failing.length === 0) {
     lines.push(
-      "Missing capability: none — every gating runtime capability reported ok.",
+      firstWriteError !== ""
+        ? "Missing capability: none - every runtime primitive answered, so the temp directory itself is the problem (a read-only or full volume, a redirected %TMP%, or an anti-virus lock on the file Drift just wrote)."
+        : "Missing capability: none - every gating runtime capability reported ok.",
     );
   } else {
     for (const capability of failing) {
