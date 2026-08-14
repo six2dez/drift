@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: "Completed 04-04 (activity-tail.ts + activity-tail.test.ts); next: 04-05"
-last_updated: "2026-08-14T12:53:17.834Z"
-last_activity: 2026-08-14 -- 04-04 complete (PERF-02 activity-tail.ts offset cursor + byte-safe partial line + 20-case activity-tail.test.ts)
+stopped_at: "Completed 04-05 (bounded-buffer.ts + bounded-buffer.test.ts); next: 04-06"
+last_updated: "2026-08-14T13:06:53.240Z"
+last_activity: 2026-08-14 -- 04-05 complete (PERF-04 bounded-buffer.ts: three retentions, five caps, marked truncation + drainCompleteLines for the one line-drain site; 16-case bounded-buffer.test.ts)
 progress:
   total_phases: 21
   completed_phases: 2
   total_plans: 22
-  completed_plans: 15
+  completed_plans: 16
   percent: 10
 ---
 
@@ -26,9 +26,9 @@ See: .planning/PROJECT.md (updated 2026-06-26)
 ## Current Position
 
 Phase: 4 (Platform Foundation) — EXECUTING
-Plan: 5 of 11
+Plan: 6 of 11
 Status: Executing Phase 4
-Last activity: 2026-08-14 -- 04-04 complete (PERF-02 activity-tail.ts offset cursor + byte-safe partial line + 20-case activity-tail.test.ts)
+Last activity: 2026-08-14 -- 04-05 complete (PERF-04 bounded-buffer.ts: three retentions, five caps, marked truncation + drainCompleteLines for the one line-drain site; 16-case bounded-buffer.test.ts)
 
 Progress: [██░░░░░░░░] 20% (2 of 10 milestone phases)
 
@@ -36,9 +36,9 @@ Progress: [██░░░░░░░░] 20% (2 of 10 milestone phases)
 
 **Velocity:**
 
-- Total plans completed: 19 (plus 1 quick task)
+- Total plans completed: 20 (plus 1 quick task)
 - Average duration: ~10 min
-- Total execution time: ~2.2 hours
+- Total execution time: ~2.3 hours
 
 **By Phase:**
 
@@ -46,11 +46,11 @@ Progress: [██░░░░░░░░] 20% (2 of 10 milestone phases)
 |-------|-------|-------|----------|
 | 01 | 6 | - | - |
 | 03 | 5 | - | - |
-| 04 | 4 of 11 | - | - |
+| 04 | 5 of 11 | - | - |
 
 **Recent Trend:**
 
-- Last 5 plans: 03-05 (8 min, 2 tasks, 2 files, 0 CI runs — evidence transcription only), 04-01 (10 min, 2 tasks, 2 files, 0 CI runs — a pure module and its unit tests, verified entirely locally), 04-02 (7 min, 2 tasks, 2 files, 0 CI runs — same shape as 04-01, and faster because the pure-module + sibling-test pattern was already established), 04-03 (9 min, 2 tasks + 1 legibility fix, 2 files, 0 CI runs — the third pure-module plan in a row; the extra 2 min went on the mandated manual read of the rendered failure message, which is what found the fix), 04-04 (7 min, 2 tasks, 2 files, 0 CI runs — the fourth pure-module plan in a row and the fastest yet; the only new work was the byte-level UTF-8 reasoning, and both tasks passed their own verify on the first run)
+- Last 5 plans: 04-01 (10 min, 2 tasks, 2 files, 0 CI runs — a pure module and its unit tests, verified entirely locally), 04-02 (7 min, 2 tasks, 2 files, 0 CI runs — same shape as 04-01, and faster because the pure-module + sibling-test pattern was already established), 04-03 (9 min, 2 tasks + 1 legibility fix, 2 files, 0 CI runs — the third pure-module plan in a row; the extra 2 min went on the mandated manual read of the rendered failure message, which is what found the fix), 04-04 (7 min, 2 tasks, 2 files, 0 CI runs — the fourth pure-module plan in a row and the fastest yet; the only new work was the byte-level UTF-8 reasoning, and both tasks passed their own verify on the first run), 04-05 (9 min, 2 tasks, 2 files, 0 CI runs — the largest single task in the phase, deliberately unsplit because splitting would force two tasks to write one file; both tasks passed their own verify on the first run and the 16-case suite was green on its first run)
 - Trend: steady; 01-06 is the longest (21 min) because it waits on three real CI runs and a three-Node local pre-flight. 03-03 came in at 9 min despite needing two real `windows-latest` runs — the Windows probe job completes in 16-18s, so the CI wait is far cheaper than the ubuntu matrix. 03-04 waited on four runs (2 Windows probe + 2 ubuntu matrix) and still finished in 11 min for the same reason. 03-05 burned no runner at all: it only re-queried the six existing run records and transcribed their measured output.
 
 *Updated after each plan completion*
@@ -101,6 +101,11 @@ Recent decisions affecting current work:
 - [Phase 04]: [04-04]: The activity cursor's `partial` is a Buffer, never a string — the ONE field of the claude-print.ts analog (`buffer: string`, :90) that must not be copied. JSON.stringify does not escape non-ASCII, so a read boundary landing inside an em-dash, an IDN hostname or a non-ASCII response snippet bakes a permanent U+FFFD if the remainder is decoded per chunk. The -t "utf-8" case asserts the naive string decode IS lossy at the chosen index BEFORE asserting the Buffer carry is not, so it cannot pass vacuously.
 - [Phase 04]: [04-04]: Two ceilings, not one. ACTIVITY_MAX_TICK_BYTES (1 MiB) clamps a single allocation; ACTIVITY_PARTIAL_MAX_BYTES (4 MiB) clamps a remainder that accumulates ACROSS ticks — 100 ticks of 1 MiB still reach 100 MiB in cursor.partial. Same value and same drop-whole-and-count policy as plan 04-06's CLAUDE_LINE_BUFFER_MAX_CHARS, deliberately: identical hazard shape, identical answer. The intended asymmetry is that 04-06 counts UTF-16 code units (string buffer) while this counts bytes (Buffer remainder). Do not merge them.
 - [Phase 04]: [04-04]: PERF-02 was NOT marked complete. index.ts:2158 still readFile()s the whole growing activity file every 250 ms and all eight activity-tail.ts exports have zero production call sites; 04-08 carries the integration. Fourth consecutive Phase 4 plan making this call after 04-01 (RUN-03/CMP-02/RUN-05), 04-02 (RUN-04) and 04-03 (RUN-05), matching Phase 3's CI-02 precedent.
+- [Phase 04]: [04-05]: bounded-buffer.ts carries TWO mechanisms and they must not be collapsed. appendBounded (head/tail/both retention, five exported caps) bounds TOTAL VOLUME at six sites; drainCompleteLines bounds an UNTERMINATED REMAINDER at one. Head/tail retention on callMcpMethod's JSON-RPC line stream would drop the middle of a frame and corrupt the protocol, so drainCompleteLines deliberately takes no BoundedBuffer. Two hazards, two mechanisms, one module — stated in the module header so the 'obvious' simplification is a forbidden one.
+- [Phase 04]: [04-05]: The seven-site PERF-04 inventory is now confirmed by measurement, not asserted. grep -n 'stdout += \|stderr += ' index.ts returns FIVE lines (:1295, :1524, :1525, :2484, :2573) and is structurally blind to stdoutBuffer += at :1268 (site 6, a line-drain buffer) and out += d.toString() at :862 (site 7, named 'out' not 'stdout'). That blindness is what produced the earlier 'four accumulators' and 'six accumulators' drafts; both blind spots are now named at the constant that bounds them.
+- [Phase 04]: [04-05]: Site 7 (resolveCommand's out, index.ts:854/:862) reuses SPAWN_STDOUT_MAX_CHARS with head retention instead of getting a seventh constant — identical head-read shape — and the reuse is recorded AT the constant so plan 04-10 finds it rather than inventing WHICH_STDOUT_MAX_CHARS. It was deliberately NOT exempted on 'it is only which, and there is a 1-second timeout' grounds: that is the same argument the phase rejects for callMcpMethod, where the <=10 s timeout bounds the window and not the volume.
+- [Phase 04]: [04-05]: MCP_SELFTEST_LINE_MAX_CHARS is 4 MiB, the same as 04-04's ACTIVITY_PARTIAL_MAX_BYTES and 04-06's forthcoming CLAUDE_LINE_BUFFER_MAX_CHARS — one hazard shape (a never-terminated line in a stream carrying target-application content), one answer, drop the remainder WHOLE and count it. Three numbers for one hazard would read as an oversight. The intended asymmetry is units only: UTF-16 code units here and in 04-06 (string buffers), bytes in 04-04 (Buffer remainder).
+- [Phase 04]: [04-05]: PERF-04 was NOT marked complete. All seven index.ts accumulator sites are still unbounded, the O(k*n) indexOf/slice loop at :1269-1291 is still there, and all fifteen bounded-buffer.ts exports have zero production call sites; 04-06, 04-09 and 04-10 carry the wiring. Fifth consecutive Phase 4 plan making this call after 04-01, 04-02, 04-03 and 04-04, matching Phase 3's CI-02 precedent.
 
 ### Pending Todos
 
@@ -140,9 +145,9 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-14T12:53:17.829Z
-Stopped at: Completed 04-04 (activity-tail.ts + activity-tail.test.ts); next: 04-05
-Resume file: .planning/phases/04-platform-foundation/04-05-PLAN.md
+Last session: 2026-08-14T13:06:53.235Z
+Stopped at: Completed 04-05 (bounded-buffer.ts + bounded-buffer.test.ts); next: 04-06
+Resume file: .planning/phases/04-platform-foundation/04-06-PLAN.md
 
 **Live on the public remote: nothing of ours.** Plan 03-04 tore down all three `scratch/*` branches (`ci-proof-windows-probe`, `ci-proof-windows-probe-negative`, `ci-proof-windows-gate-negative`) locally and remotely. Asserted with a `test -z` discrimination over the captured glob (`scratch-glob-empty=0`) plus the full unfiltered listing, which now shows only `main` at `2d8cf16` and the pre-existing, unrelated `fix/security-hotfixes` at `0cd81f3`. `origin/main` was never pushed by this phase and is still `2d8cf16`; local `main` is 23 commits ahead and deliberately unpushed. **Re-verified 2026-08-13 (plan 03-05):** the remote still lists only `main` `2d8cf16` and the pre-existing `fix/security-hotfixes` `0cd81f3`, and all eight Phase 3 run records (4 probe + 4 `CI` control) still resolve with their recorded conclusions — which is what makes the URLs in `03-FINDINGS.md` valid citations after the branches were deleted. The probe **artifacts** do not survive: they expire 2026-09-12, which is why D-11 required the committed findings document.
 
