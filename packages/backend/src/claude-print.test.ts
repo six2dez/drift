@@ -416,6 +416,18 @@ describe("claude print parsing", () => {
 // under it.
 
 describe("claude-print line buffer bounds", () => {
+  it("uses the phase's one shared value for every unterminated-line cap", () => {
+    // The mirror of bounded-buffer.test.ts's identically-purposed case. The two
+    // siblings are MCP_SELFTEST_LINE_MAX_CHARS (bounded-buffer.ts, plan 04-05)
+    // and ACTIVITY_PARTIAL_MAX_BYTES (activity-tail.ts, plan 04-04); all three
+    // bound one hazard — a never-terminated line in a stream carrying
+    // target-application content — so all three are 4 MiB by construction. The
+    // assertion lives in the suite rather than in a one-off grep so a future
+    // divergence has to be a deliberate act with its own rationale.
+    expect(CLAUDE_LINE_BUFFER_MAX_CHARS).toBe(4 * 1024 * 1024);
+    expect(CLAUDE_LINE_BUFFER_MAX_CHARS).toBe(4194304);
+  });
+
   it("drops and counts an unterminated line larger than the buffer cap", () => {
     const onText = vi.fn();
     const onSessionId = vi.fn();
