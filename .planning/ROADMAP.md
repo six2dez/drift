@@ -164,7 +164,7 @@ Plans:
 
 **Wave 2** *(blocked on 04-01, 04-02, 04-03)*
 
-- [ ] 04-08-PLAN.md — `index.ts`: the single guarded `os` read (D-02), the probe wrapping the real first write (D-05/D-06/D-07/D-08), all three `/tmp` sites onto `os.tmpdir()`, and the D-06/D-08 diagnostics fields
+- [x] 04-08-PLAN.md — `index.ts`: the single guarded `os` read (D-02), the probe wrapping the real first write (D-05/D-06/D-07/D-08), all three `/tmp` sites onto `os.tmpdir()`, and the D-06/D-08 diagnostics fields
 
 **Wave 3** *(blocked on 04-04, 04-05, 04-08)*
 
@@ -308,7 +308,7 @@ Parallelism opportunities: Phase 2 may run alongside Phase 3 (both depend only o
 | 1. Restore the Verification Signal | 6/6 | Complete    | 2026-08-13 |
 | 2. POSIX Correctness & Hardening | 0/3 | Not started | - |
 | 3. CI Spike — Prove LLRT Basics on Windows | 5/5 | Complete    | 2026-08-14 |
-| 4. Platform Foundation | 7/11 | In Progress | - |
+| 4. Platform Foundation | 8/11 | In Progress | - |
 | 5. Kill Shell Wrappers | 0/2 | Not started | - |
 | 6. Windows Command Resolution | 0/2 | Not started | - |
 | 7. Provider Spawn & Registration | 0/3 | Not started | - |

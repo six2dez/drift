@@ -61,7 +61,7 @@ completed: 2026-08-14
 - **Started:** 2026-08-14T15:44:00Z (approx)
 - **Completed:** 2026-08-14T16:09:00Z
 - **Tasks:** 3 (in 2 commits — see Deviations)
-- **Files modified:** 1 (`packages/backend/src/index.ts`, +400 / -20)
+- **Files modified:** 1 (`packages/backend/src/index.ts`, +450 / -20)
 
 ## Vehicle caveat (carried from Phase 3, required in this summary)
 
@@ -101,6 +101,8 @@ Tasks 1 and 2 shipped in one commit because they are not separately compilable �
 
 1. **Task 1 + Task 2: the runtime-probe section, the `startMcpServer` reorder, the retry-wrapped first write, and all three `/tmp` migrations** — `d3d0b46` (feat)
 2. **Task 3: surface the probe report, version block and retry count in `getDiagnostics` and the MCP status message** — `e6cf855` (feat)
+
+**Plan metadata:** `9fed710` (docs: the summary), followed by the `docs(04-08): update STATE.md and ROADMAP.md …` commit immediately after it. That commit's hash is deliberately **not** quoted here: it is the commit that carries this file, so any edit naming it invalidates the name.
 
 ## Files Created/Modified
 
@@ -146,7 +148,7 @@ Tasks 1 and 2 shipped in one commit because they are not separately compilable �
 | Blast radius | `git diff --name-only HEAD~2` | exactly `packages/backend/src/index.ts` |
 | No deletions | `git diff --diff-filter=D --name-only HEAD~2` | empty |
 | T-04-SC | `git diff --stat HEAD~2 -- package.json packages/backend/package.json pnpm-lock.yaml` | empty |
-| **NUL byte scan** (04-07 carry-forward) | byte-level `node` read of `index.ts` | `0` NULs in 130,794 bytes; `git diff --numstat` reports `400 20`, i.e. git sees text, so every `grep` gate above is meaningful |
+| **NUL byte scan** (04-07 carry-forward) | byte-level `node` read of `index.ts` | `0` NULs in 133,459 bytes; `git diff --numstat` reports `450 20`, i.e. git sees text, so every `grep` gate above is meaningful |
 
 ### Executed verification (not just static)
 
@@ -314,10 +316,14 @@ None — no external service configuration required.
 
 ## Self-Check: PASSED
 
-- `packages/backend/src/index.ts` — FOUND (modified; 130,794 bytes, 0 NUL bytes, `git diff --numstat` = `400 20`)
+- `packages/backend/src/index.ts` — FOUND (modified; 133,459 bytes, 0 NUL bytes, `git diff --numstat` over both feat commits = `450 20`)
 - `.planning/phases/04-platform-foundation/04-08-SUMMARY.md` — FOUND
 - Commit `d3d0b46` — FOUND
 - Commit `e6cf855` — FOUND
+- Commit `9fed710` — FOUND
+- `.planning/ROADMAP.md` — verified by `diff` against a pre-run snapshot: exactly two intended changes (the `04-08-PLAN.md` checkbox and the `7/11` → `8/11` count); all eleven `999.x` backlog items read `**Plans:** 0 plans`; `grep -c 'plans executed'` = `0`
+- `.planning/STATE.md` — verified by `diff` against a pre-run snapshot: position, `completed_plans`, By Phase row, Recent Trend, session fields and four `[Phase 04]` decisions, and nothing else
+- `.planning/REQUIREMENTS.md` — verified byte-identical; RUN-03/RUN-04/RUN-05/CMP-02 all still `- [ ]`, as intended
 
 ---
 *Phase: 04-platform-foundation*
