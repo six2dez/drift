@@ -150,8 +150,37 @@ Three results bind the later phases, and Phase 4's criteria below encode the fir
   9. Every `spawn` call site that supplies an `env` option spreads the parent block — `{ ...process.env, ...driftVars }`, never `{ ...driftVars }` — and a test asserts it. Phase 3 measured that the `env` option **replaces** the parent environment on Windows as well as POSIX ([run 31780073574](https://github.com/six2dez/drift/actions/runs/31780073574), parent-only marker `PARENT-CLEARED`); libuv back-fills only eleven `required_vars`, and `APPDATA`/`LOCALAPPDATA` — the two `command-resolution.ts` needs for the Windows nvm/fnm candidate paths — are **not** among them.
   10. Path comparisons against a profile-derived path normalise both sides with `realpathSync.native` first: Phase 3 measured `os.tmpdir()` returning the 8.3 short form (`C:\Users\RUNNER~1\...`) while `USERPROFILE`/`APPDATA`/`LOCALAPPDATA` return the long form, so the two spellings are not string-comparable.
 
-**Plans**: 2 plans (provisional)
-**Research flag**: NO — well-documented Node/Windows APIs; Phase 3 confirms the LLRT surface (see its Results table).
+**Plans**: 11 plans (5 waves)
+Plans:
+**Wave 1** *(seven independent pure modules — no shared files, fully parallel)*
+
+- [ ] 04-01-PLAN.md — `platform.ts` + tests: D-01's discrete pure OS-decision functions, `getSweepRoots`' legacy `/tmp` arm (CMP-02), `normalizePlatform`, `buildSpawnEnv` (SC-9)
+- [ ] 04-02-PLAN.md — `fs-retry.ts` + tests: the RUN-04 transient-FS classifier and the bounded 1,500 ms ladder with an injected sleep
+- [ ] 04-03-PLAN.md — `runtime-probe.ts` + tests: D-06's gate table as data, D-08's version block, the failure message, and D-04's `normalizePathForCompare` ladder (SC-10)
+- [ ] 04-04-PLAN.md — `activity-tail.ts` + tests: PERF-02's byte cursor, partial-line carry, and the exact-length `Buffer.alloc` the LLRT `copy_from_slice` constraint demands
+- [ ] 04-05-PLAN.md — `bounded-buffer.ts` + tests: PERF-04 site A, four per-site caps with marked truncation
+- [ ] 04-06-PLAN.md — `claude-print.ts` bound + split-once refactor: PERF-04 site B, the 4 MiB drop path and the O(n^2) slicing fix
+- [ ] 04-07-PLAN.md — `resolution-cache.ts` + tests: PERF-03's TTL cache with an injected clock, negative caching, and signature invalidation
+
+**Wave 2** *(blocked on 04-01, 04-02, 04-03)*
+
+- [ ] 04-08-PLAN.md — `index.ts`: the single guarded `os` read (D-02), the probe wrapping the real first write (D-05/D-06/D-07/D-08), all three `/tmp` sites onto `os.tmpdir()`, and the D-06/D-08 diagnostics fields
+
+**Wave 3** *(blocked on 04-04, 04-05, 04-08)*
+
+- [ ] 04-09-PLAN.md — `index.ts`: PERF-02's offset read replacing the 250 ms whole-file re-parse, and PERF-04's four bounded accumulators
+
+**Wave 4** *(blocked on 04-07, 04-09)*
+
+- [ ] 04-10-PLAN.md — `index.ts`: PERF-03 wiring — one cache for both resolution paths, invalidation on provider-command change, bypass on the manual Check button
+
+**Wave 5** *(blocked on 04-06, 04-10)*
+
+- [ ] 04-11-PLAN.md — Phase gates (no hardcoded `/tmp`, probe ordering, SC-9 cross-check, D-04 survival, `pnpm build`, CMP-01 tripwire) + the blocking human read of the RUN-05 failure message
+
+**Research flag**: NO — well-documented Node/Windows APIs; Phase 3 confirms the LLRT surface (see its Results table). `04-RESEARCH.md` (2026-08-14) went further and read Caido's own LLRT fork source, which overturned three planning assumptions: `realpath` is **absent** from `caido/dependency-llrt@main`'s `fs` module, so SC-10's ladder always lands on `path.resolve` under Caido (ship the shape, report the rung); LLRT's `os.tmpdir()` can return a **trailing backslash** where Node strips it, so every temp path uses `path.join`; and LLRT's `FileHandle.read` panics unless the buffer is sized exactly to the read length, which is unobservable on Node.
+
+**Planning note**: the provisional "2 plans" estimate is superseded. `04-RESEARCH.md` § *Validation Architecture* is the reason: six of the seven requirements land in `index.ts`, which is 3,004 lines with **zero** direct test coverage, and the maintainer cannot test native Windows locally. Splitting each behaviour into a pure module with an injected `platform` moves 33 of 37 criteria into the Linux-provable bucket — ~94% of the phase — versus leaving them unverifiable by construction. The extra plans are what buy that ratio.
 
 ### Phase 5: Kill Shell Wrappers
 
@@ -279,7 +308,7 @@ Parallelism opportunities: Phase 2 may run alongside Phase 3 (both depend only o
 | 1. Restore the Verification Signal | 6/6 | Complete    | 2026-08-13 |
 | 2. POSIX Correctness & Hardening | 0/3 | Not started | - |
 | 3. CI Spike — Prove LLRT Basics on Windows | 5/5 | Complete    | 2026-08-14 |
-| 4. Platform Foundation | 0/2 | Not started | - |
+| 4. Platform Foundation | 0/11 | Not started | - |
 | 5. Kill Shell Wrappers | 0/2 | Not started | - |
 | 6. Windows Command Resolution | 0/2 | Not started | - |
 | 7. Provider Spawn & Registration | 0/3 | Not started | - |
