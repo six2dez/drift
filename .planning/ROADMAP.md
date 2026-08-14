@@ -154,7 +154,7 @@ Three results bind the later phases, and Phase 4's criteria below encode the fir
 Plans:
 **Wave 1** *(seven independent pure modules — no shared files, fully parallel)*
 
-- [ ] 04-01-PLAN.md — `platform.ts` + tests: D-01's discrete pure OS-decision functions, `getSweepRoots`' legacy `/tmp` arm (CMP-02), `normalizePlatform`, `buildSpawnEnv` (SC-9)
+- [x] 04-01-PLAN.md — `platform.ts` + tests: D-01's discrete pure OS-decision functions, `getSweepRoots`' legacy `/tmp` arm (CMP-02), `normalizePlatform`, `buildSpawnEnv` (SC-9)
 - [ ] 04-02-PLAN.md — `fs-retry.ts` + tests: the RUN-04 transient-FS classifier and the bounded 1,500 ms ladder with an injected sleep
 - [ ] 04-03-PLAN.md — `runtime-probe.ts` + tests: D-06's gate table as data, D-08's version block, the failure message, and D-04's `normalizePathForCompare` ladder (SC-10)
 - [ ] 04-04-PLAN.md — `activity-tail.ts` + tests: PERF-02's byte cursor, partial-line carry, and the exact-length `Buffer.alloc` the LLRT `copy_from_slice` constraint demands
@@ -308,7 +308,7 @@ Parallelism opportunities: Phase 2 may run alongside Phase 3 (both depend only o
 | 1. Restore the Verification Signal | 6/6 | Complete    | 2026-08-13 |
 | 2. POSIX Correctness & Hardening | 0/3 | Not started | - |
 | 3. CI Spike — Prove LLRT Basics on Windows | 5/5 | Complete    | 2026-08-14 |
-| 4. Platform Foundation | 0/11 | Not started | - |
+| 4. Platform Foundation | 1/11 | In Progress | - |
 | 5. Kill Shell Wrappers | 0/2 | Not started | - |
 | 6. Windows Command Resolution | 0/2 | Not started | - |
 | 7. Provider Spawn & Registration | 0/3 | Not started | - |
@@ -326,7 +326,7 @@ Unsequenced ideas from the 2026-08-12 codebase review. Not ready for active plan
 
 **Goal:** [Captured for future planning] `sendCliMessage` holds an RPC promise open for the entire turn, and Caido's runtime does not deliver `child_process` callbacks or run `setInterval` while an RPC awaits. Every pumping workaround exists because of this: the 1.5 s frontend keep-alive, `activeSelfTestPoll`, `sessionWatchdogs`, and the 250 ms heartbeat. Returning a `turnId` immediately and delivering results over the existing event channel would delete the whole problem class (~300 lines). Deliberately sequenced after the port — it collides head-on with Phases 5 and 8.
 **Requirements:** TBD
-**Plans:** 5/5 plans complete
+**Plans:** 0 plans
 
 Plans:
 

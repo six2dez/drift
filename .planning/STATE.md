@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 4 context gathered
-last_updated: "2026-08-14T11:38:43.396Z"
-last_activity: 2026-08-14 -- Phase 4 planning complete
+stopped_at: "Completed 04-01 (platform.ts + platform.test.ts); next: 04-02"
+last_updated: "2026-08-14T12:11:54.503Z"
+last_activity: 2026-08-14 -- 04-01 complete (pure platform.ts + 28-case platform.test.ts)
 progress:
   total_phases: 21
   completed_phases: 2
   total_plans: 22
-  completed_plans: 11
+  completed_plans: 12
   percent: 10
 ---
 
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-26)
 
 **Core value:** The user's local AI CLI must reliably start, attach to Caido via the MCP server, and run tools against live Caido data — on native Windows as well as macOS/Linux.
-**Current focus:** Phase 4 — Platform Foundation (Phase 3 complete 2026-08-14)
+**Current focus:** Phase 4 — Platform Foundation
 
 ## Current Position
 
-Phase: 4
-Plan: Not started
-Status: Ready to execute
-Last activity: 2026-08-14 -- Phase 4 planning complete
+Phase: 4 (Platform Foundation) — EXECUTING
+Plan: 2 of 11
+Status: Executing Phase 4
+Last activity: 2026-08-14 -- 04-01 complete (pure platform.ts + 28-case platform.test.ts)
 
 Progress: [██░░░░░░░░] 20% (2 of 10 milestone phases)
 
@@ -36,9 +36,9 @@ Progress: [██░░░░░░░░] 20% (2 of 10 milestone phases)
 
 **Velocity:**
 
-- Total plans completed: 16 (plus 1 quick task)
+- Total plans completed: 17 (plus 1 quick task)
 - Average duration: ~10 min
-- Total execution time: ~1.8 hours
+- Total execution time: ~2.0 hours
 
 **By Phase:**
 
@@ -46,10 +46,11 @@ Progress: [██░░░░░░░░] 20% (2 of 10 milestone phases)
 |-------|-------|-------|----------|
 | 01 | 6 | - | - |
 | 03 | 5 | - | - |
+| 04 | 1 of 11 | - | - |
 
 **Recent Trend:**
 
-- Last 5 plans: 03-01 (4 min, 2 tasks, 2 files), 03-02 (6 min, 2 tasks, 1 file), 03-03 (9 min, 2 tasks, 1 file, 2 Windows CI runs), 03-04 (11 min, 3 tasks, 0 files net, 4 CI runs), 03-05 (8 min, 2 tasks, 2 files, 0 CI runs — evidence transcription only)
+- Last 5 plans: 03-02 (6 min, 2 tasks, 1 file), 03-03 (9 min, 2 tasks, 1 file, 2 Windows CI runs), 03-04 (11 min, 3 tasks, 0 files net, 4 CI runs), 03-05 (8 min, 2 tasks, 2 files, 0 CI runs — evidence transcription only), 04-01 (10 min, 2 tasks, 2 files, 0 CI runs — a pure module and its unit tests, verified entirely locally)
 - Trend: steady; 01-06 is the longest (21 min) because it waits on three real CI runs and a three-Node local pre-flight. 03-03 came in at 9 min despite needing two real `windows-latest` runs — the Windows probe job completes in 16-18s, so the CI wait is far cheaper than the ubuntu matrix. 03-04 waited on four runs (2 Windows probe + 2 ubuntu matrix) and still finished in 11 min for the same reason. 03-05 burned no runner at all: it only re-queried the six existing run records and transcribed their measured output.
 
 *Updated after each plan completion*
@@ -87,6 +88,9 @@ Recent decisions affecting current work:
 - [Phase 03]: [03-05]: P1-CMD returned the `spawn-threw-sync` / `EINVAL` surface on `windows-latest` — Node's CVE-2024-27980 guard refuses a direct `.cmd` spawn and throws **synchronously**, so a `try`/`catch` around the `spawn()` call itself is required, not just an `error`-event handler. Phases 4-8 must route every `.cmd`/`.bat` target through `spawn("cmd.exe", ["/c", target, ...args])` behind an `os.platform() === "win32"` guard (CMP-01/CMP-02 keep the POSIX path untouched). This lands directly on `command-resolution.ts`, whose Windows nvm/fnm candidates are `.cmd` shims. Canonical citable source — the CI artifacts expire 2026-09-12 and cannot be cited from a PLAN.md: `.planning/phases/03-ci-spike-prove-llrt-basics-on-windows/03-FINDINGS.md`.
 - [Phase 03]: [03-05]: `.github/workflows/windows-llrt-probe.yml` and `scripts/windows-llrt-probe.mjs` are **deleted in Phase 9** when CI-01 lands the permanent `windows-latest` regression job (D-02) — explicit debt with a due date. The one property that must survive the deletion is the **D-10 no-secret-material gate** (three-branch `grep`: status 0 = match fails, status 1 = clean passes, anything else including a missing or unreadable target fails), the only part of Phase 3 observed to bite ([run 31703717548](https://github.com/six2dez/drift/actions/runs/31703717548)) and the only part Phases 4-8 depend on silently. Phase 9's replacement job must carry it forward rather than drop it.
 - [Phase 03]: [03-04]: `git ls-remote --heads origin 'scratch/*'` exits **0 whether or not the glob matched**, so a bare `echo "empty=$?"` after it prints 0 even with every scratch branch still alive on the public remote. Teardown must capture the output into a variable and discriminate with `test -z`, and must record the full *unfiltered* `git ls-remote --heads origin` listing alongside it so an empty match is provably empty rather than a mistyped pattern. The same `test -z` form applies to `git status --porcelain`, which also exits 0 regardless of what it printed.
+- [Phase 04]: [04-01]: platform.ts imports NOTHING — not os (D-02 keeps the single read in index.ts), not path (POSIX-flavoured on the Linux runner, so it cannot strip a Windows trailing backslash). `grep -c '^import'` returning 0 IS SC-1's no-I/O claim in mechanically checkable form; an unused import would also fail noUnusedLocals (TS6133) and eslint --max-warnings 0, breaking the task's own verify.
+- [Phase 04]: [04-01]: RUN-03/CMP-02/RUN-05 were NOT marked complete after this plan. Plans 04-08 and 04-11 carry the same ids, index.ts still hardcodes /tmp at :337/:1681/:1685/:1716, and no runtime probe exists yet — building the instrument is not shipping the behaviour. Same call Phase 3 made for CI-02 after plan 1 of 5.
+- [Phase 04]: [04-01]: getTempRoot accepts platform but deliberately does not branch on it — the runtime, not the OS, decides the separator shape (LLRT's GetTempPath2 tmpdir ends in a backslash; Node has stripped separators since v2.0.0). The strip is explicit string logic guarding "/" and "C:\\", because path.normalize is a POSIX no-op on the test runner exactly where win32 needs it.
 
 ### Pending Todos
 
@@ -126,9 +130,9 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-14T08:22:43.786Z
-Stopped at: Phase 4 context gathered
-Resume file: .planning/phases/04-platform-foundation/04-CONTEXT.md
+Last session: 2026-08-14T12:11:54.498Z
+Stopped at: Completed 04-01 (platform.ts + platform.test.ts); next: 04-02
+Resume file: .planning/phases/04-platform-foundation/04-02-PLAN.md
 
 **Live on the public remote: nothing of ours.** Plan 03-04 tore down all three `scratch/*` branches (`ci-proof-windows-probe`, `ci-proof-windows-probe-negative`, `ci-proof-windows-gate-negative`) locally and remotely. Asserted with a `test -z` discrimination over the captured glob (`scratch-glob-empty=0`) plus the full unfiltered listing, which now shows only `main` at `2d8cf16` and the pre-existing, unrelated `fix/security-hotfixes` at `0cd81f3`. `origin/main` was never pushed by this phase and is still `2d8cf16`; local `main` is 23 commits ahead and deliberately unpushed. **Re-verified 2026-08-13 (plan 03-05):** the remote still lists only `main` `2d8cf16` and the pre-existing `fix/security-hotfixes` `0cd81f3`, and all eight Phase 3 run records (4 probe + 4 `CI` control) still resolve with their recorded conclusions — which is what makes the URLs in `03-FINDINGS.md` valid citations after the branches were deleted. The probe **artifacts** do not survive: they expire 2026-09-12, which is why D-11 required the committed findings document.
 
