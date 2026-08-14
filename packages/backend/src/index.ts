@@ -95,6 +95,7 @@ import {
   type Platform,
 } from "./platform";
 import { withFsRetry } from "./fs-retry";
+import { createActivityCursor, readActivityTick } from "./activity-tail";
 import {
   buildProbeReport,
   formatProbeFailure,
@@ -937,19 +938,12 @@ async function createSessionRuntimeFiles(sessionId: string): Promise<{
   return files;
 }
 
-function parseRuntimeActivityEvents(raw: string): RuntimeActivityEvent[] {
-  return raw
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line !== "")
-    .flatMap((line) => {
-      try {
-        return [JSON.parse(line) as RuntimeActivityEvent];
-      } catch {
-        return [];
-      }
-    });
-}
+// parseRuntimeActivityEvents used to live here. PERF-02 replaced its ONLY caller
+// (the 250 ms flushActivities tick) with readActivityTick, which already splits,
+// trims and drops empty lines, so the function had no remaining reader and
+// tsconfig's noUnusedLocals plus eslint at --max-warnings 0 both fail on dead
+// code. Its tolerant semantics are unchanged, just inlined at the one call site:
+// a line that does not parse as JSON is skipped, never thrown.
 
 function toToolApprovalRequest(
   sessionId: string,
@@ -2557,17 +2551,63 @@ async function sendCliMessage(
       reasonCode: "running",
     });
     const collectedActivities: McpToolActivity[] = [];
+    // The dedupe Set below must NOT be deleted as "now redundant" now that the
+    // tick reads from a byte offset. The offset makes re-delivery unlikely, not
+    // impossible: readActivityTick resets to byte 0 whenever the file shrinks
+    // below the recorded offset (truncation or rotation), and everything before
+    // that point is then re-read. This Set is the correctness backstop, and the
+    // re-entrancy flag under it is a separate guard that is also still needed.
     const seenActivityIds = new Set<string>();
     let readingActivities = false;
+    // PERF-02's byte cursor. It lives HERE, in sendCliMessage's closure, and not
+    // in a module-level Map keyed by session id: all three callers (the 250 ms
+    // setInterval heartbeat, runWatchdog and finalize) close over this scope, so
+    // the cursor is per-session BY CONSTRUCTION and dies with the turn. A Map
+    // would need explicit cleanup and could leak on any unhandled path.
+    let activityCursor = createActivityCursor();
     let notifyClaudeToolActivity: (() => void) | undefined;
 
     const flushActivities = async () => {
       if (runtimeFiles === undefined || readingActivities) return;
       readingActivities = true;
       try {
-        const raw = await readFile(runtimeFiles.activityFilePath, "utf-8");
-        const events = parseRuntimeActivityEvents(raw);
-        for (const event of events) {
+        // Captured BEFORE the read, and the ordering is the entire mitigation:
+        // assigning the returned cursor back into the closure variable below
+        // makes the two the same object reference, so a comparison written after
+        // that assignment would read `x > x` and could never fire. index.ts has
+        // no direct test coverage, so nothing downstream would catch it.
+        const previousDroppedBytes = activityCursor.droppedBytes;
+        // Reads only the bytes appended since the previous tick. Replaces a
+        // readFile + full re-parse of the whole growing file, four times a
+        // second, on the single-threaded event loop that also runs the RPC
+        // keep-alive this watchdog depends on. Never throws: on any failure it
+        // returns the incoming cursor and no lines, which is the same
+        // best-effort contract as the `catch` below.
+        const tick = await readActivityTick({
+          filePath: runtimeFiles.activityFilePath,
+          cursor: activityCursor,
+        });
+        activityCursor = tick.cursor;
+        if (tick.cursor.droppedBytes > previousDroppedBytes) {
+          // An over-long unterminated line was dropped whole by the tail reader.
+          // Surfaced once rather than swallowed: a drop nobody can see is a
+          // repudiation gap. Deliberately NOT an mcp-tool-activity event - the
+          // activity stream is the tool log, not a diagnostics channel.
+          sdk.console.error(
+            `[drift] activity tail dropped ${String(tick.cursor.droppedBytes - previousDroppedBytes)} bytes of an unterminated activity line sessionId=${input.sessionId}`,
+          );
+        }
+        for (const line of tick.lines) {
+          // The tolerant parse that parseRuntimeActivityEvents used to own, now
+          // inlined at its one call site. Declared ahead of a try that wraps the
+          // parse ALONE so the loop body below keeps its original indentation;
+          // wrapping the whole body would reindent every preserved line.
+          let event: RuntimeActivityEvent;
+          try {
+            event = JSON.parse(line) as RuntimeActivityEvent;
+          } catch {
+            continue;
+          }
           if (seenActivityIds.has(event.id)) continue;
           seenActivityIds.add(event.id);
           if (event.type === "approval-request") {
