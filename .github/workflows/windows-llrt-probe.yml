@@ -189,14 +189,29 @@ jobs:
       # prevent, because the job would otherwise be green with no evidence at all.
       # retention-days is 30 because the durable record is the committed findings
       # document (D-11) and this artifact is only a convenience copy that expires.
-      # The artifact name embeds github.run_number, so plans 03-03 and 03-04 must
-      # resolve the exact name from the run's artifact listing rather than assume
-      # a fixed string when downloading.
+      #
+      # The name embeds BOTH github.run_number and github.run_attempt, and the
+      # second half is not decoration. run_number does not change when a run is
+      # re-run — only run_attempt increments — and upload-artifact v4+ requires
+      # artifact names to be unique within a workflow run; ci.yml already records
+      # that constraint in its own comment ("upload-artifact returns 409 on
+      # duplicate artifact names"). A probe that legitimately exits 1 is the
+      # EXPECTED case here, since D-05 through D-07 all define non-zero outcomes
+      # as recorded findings, so "re-run the failed job" is a routine operation —
+      # and a run_number-only name would 409 on that re-run against the artifact
+      # attempt 1 already uploaded, destroying the evidence on precisely the run
+      # most likely to need it.
+      #
+      # Consumers must still resolve the exact name from the run's artifact
+      # listing rather than assume a fixed string when downloading. Plans 03-03
+      # and 03-04 already do that, so both stay compatible with this change;
+      # their archived summaries quote the attempt-1 names (windows-llrt-probe-2,
+      # windows-llrt-probe-3) produced by the older single-token scheme.
       - name: Upload probe results
         if: always()
         uses: actions/upload-artifact@v5
         with:
-          name: windows-llrt-probe-${{ github.run_number }}
+          name: windows-llrt-probe-${{ github.run_number }}-${{ github.run_attempt }}
           path: probe-results.txt
           if-no-files-found: error
           retention-days: 30
