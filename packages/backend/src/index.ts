@@ -117,8 +117,13 @@ import {
   type RealpathRung,
 } from "./runtime-probe";
 import {
+  buildProviderCommandSignature,
   createResolutionCacheState,
+  describeResolutionCache,
   resolveWithCache,
+  syncResolutionCacheSignature,
+  RESOLUTION_NEGATIVE_TTL_MS,
+  RESOLUTION_POSITIVE_TTL_MS,
 } from "./resolution-cache";
 
 // ── Types (inline to avoid Zod which crashes QuickJS) ──────────────
@@ -1368,6 +1373,33 @@ async function updateSettings(
     input.mcp !== undefined;
   let syncError: string | undefined;
   currentSettings = { ...currentSettings, ...input };
+  // ROADMAP SC-6 / T-04-20. The comparison spans the merge above: the cache
+  // holds the PRE-merge signature (seeded at init, re-synced on every save) and
+  // is handed the signature built from the MERGED providers, so any changed
+  // providers[*].command clears every cached binary resolution. A separately
+  // captured pre-merge local is unnecessary for that and would have no reader,
+  // failing no-unused-vars at --max-warnings 0 — this task's own verify.
+  //
+  // This is deliberately its OWN condition rather than a rider on the
+  // session-reset flag declared above: that flag fires on input.caidoApi or
+  // input.mcp, a different trigger, and conflating the two would either clear
+  // on every unrelated save or miss the one case SC-6 is about.
+  //
+  // It also sits immediately after the merge, ahead of the MCP-refresh branches
+  // below, because refreshActiveMcpRuntime resolves Node — whose candidate list
+  // is built from the provider commands — and bakes the result into a freshly
+  // written wrapper. Clearing after it would spawn from exactly the stale entry
+  // this invalidation exists to prevent, and the frontend pushes the WHOLE
+  // settings object, so that branch is taken on every save from the UI.
+  //
+  // The signature itself is never logged and never persisted: it carries a NUL
+  // sentinel for a provider configured without a command.
+  const providerSignature = buildProviderCommandSignature(currentSettings.providers);
+  if (syncResolutionCacheSignature(resolutionCache, providerSignature)) {
+    sdk.console.log(
+      "[drift] binary resolution cache invalidated: a provider command changed",
+    );
+  }
   if (input.caidoApi !== undefined && mcpTempDir === undefined) {
     setMcpAuthStatus("unknown", "");
     await publishMcpStatus(sdk);
@@ -3455,6 +3487,19 @@ async function getDiagnostics(_sdk: BackendSDK): Promise<Result<Record<string, s
     caidoEffectiveScopeId: effectiveContext.historyScopeId || "none",
     nodeExecutable: nodeExecutable || "not found",
     nodeSearchCandidates: lastNodeSearchCandidates.join(", ") || "none",
+    // PERF-03. Turns a confusing stale result into a self-explaining one: a user
+    // reporting "Drift can't find my newly installed CLI" now pastes a bundle
+    // that already says the entry is a 12-second-old negative hit. Security
+    // (T-04-04): key names, ages in seconds, a positive/negative marker and the
+    // clear count only — no cached VALUES, no provider command strings beyond
+    // what this record already carries, and nothing derived from enumerating the
+    // environment. The invalidation signature is deliberately absent.
+    resolutionCache: describeResolutionCache(resolutionCache, Date.now()),
+    // Rendered from the two exported constants rather than hardcoded, so a
+    // silent TTL change shows up here instead of making the bundle lie.
+    resolutionCacheTtls:
+      `positive ${String(Math.round(RESOLUTION_POSITIVE_TTL_MS / 1000))}s` +
+      ` / negative ${String(Math.round(RESOLUTION_NEGATIVE_TTL_MS / 1000))}s`,
     activeProvider: currentSettings.activeProvider,
     sqlitePersistenceAvailable: db !== undefined ? "yes" : "no",
     activeSessions: String(activeProcesses.size),
@@ -3625,6 +3670,14 @@ export function init(sdk: SDK<API, BackendEvents>) {
   void Promise.all([
     loadJson<Settings>("settings", DEFAULT_SETTINGS).then((s) => {
       currentSettings = { ...DEFAULT_SETTINGS, ...s };
+      // PERF-03 baseline. Without this seed the first save after a restart
+      // would compare the real provider commands against the empty initial
+      // signature, report a change and clear a cache that was already correct.
+      // The boolean is ignored on purpose: over an empty cache the transition
+      // is a no-op with an honest return value, and special-casing the seed
+      // inside resolution-cache.ts would hide a genuine first-turn change.
+      const seedSignature = buildProviderCommandSignature(currentSettings.providers);
+      syncResolutionCacheSignature(resolutionCache, seedSignature);
       sdk.console.log("[drift] settings loaded");
     }),
     loadJson<StoredChat[]>("chats", []).then((c) => {
