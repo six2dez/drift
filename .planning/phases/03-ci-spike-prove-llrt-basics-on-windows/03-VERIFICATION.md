@@ -1,14 +1,16 @@
 ---
 phase: 03-ci-spike-prove-llrt-basics-on-windows
 verified: 2026-08-13T14:04:02Z
-status: human_needed
+resolved: 2026-08-14T07:55:00Z
+status: passed
 score: 40/40 must-haves verified
+human_verification_outcome: "All 5 items resolved 2026-08-14 — see 03-HUMAN-UAT.md (status: resolved). Items 1 and 2 (CR-01, CR-02) were resolved by FIXING rather than accepting; the CR-01 fix was re-measured on windows-latest (run 31780073574) and OVERTURNED this phase's original P0-ENV interpretation — the spawn env option replaces the parent block on Windows, as on POSIX. 03-FINDINGS.md and STATE.md amended (896137d); ROADMAP.md amended for SC-4 with run URLs, Phase 4 criteria 9-10, and corrected Phase 9 SC-1 pins."
 overrides_applied: 1
 overrides:
   - must_have: "os.tmpdir() returns a drive-lettered path that exists on disk and os.platform() returns \"win32\" inside the Caido backend runtime"
     reason: "The 'inside the Caido backend runtime' qualifier is unreachable: no standalone LLRT Windows binary exists (upstream dropped the target at v0.6.0-beta; caido/dependency-llrt publishes no releases) and running Caido headless in CI needs a paid Teams plan. Measured under Node v24.18.1 on windows-latest instead. The user accepted this fidelity ceiling as-is in 03-CONTEXT.md § Claude's Discretion and declined to make real-machine confirmation a gate; D-08's non-LLRT labelling is the adopted mitigation and the labels are present on the archived artifact. 03-FINDINGS.md:40-42 states the gap under its own heading ('ROADMAP success-criterion gap — stated plainly') rather than glossing it."
-    accepted_by: "six2dez (03-CONTEXT.md § Claude's Discretion, 2026-08-13) — recorded here by the verifier; confirm or reject"
-    accepted_at: "2026-08-13T00:00:00Z"
+    accepted_by: "six2dez — explicitly confirmed 2026-08-14 (03-HUMAN-UAT.md item 4), having originally accepted the fidelity ceiling in 03-CONTEXT.md § Claude's Discretion"
+    accepted_at: "2026-08-14T07:55:00Z"
 human_verification:
   - test: "Decide whether the P0-ENV replace-vs-merge discriminator (CR-01) is fixed before Phase 4 planning, or accepted as-is. Read 03-FINDINGS.md:157-179 and :327, then decide: (a) leave as-is because the canonical verdict already carries the correct bound, or (b) extend the probe with a non-back-filled marker variable (03-FINDINGS.md:327 already names this as a Phase 4 candidate) before Phase 4 writes spawn code."
     expected: "A decision recorded in STATE.md or the Phase 4 context. Note the phase-goal risk is already contained — both 03-FINDINGS.md and STATE.md override the probe's wrong directive and instruct Phase 4 to pass { ...process.env, ...driftVars }."
