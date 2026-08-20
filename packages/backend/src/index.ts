@@ -970,11 +970,14 @@ async function disposeSessionDebugLog(logPath: string | undefined): Promise<void
 // renderer above writes into the surviving Gemini/Codex wrapper - the wrapper
 // whose `export` lines are the only carrier of the Caido token and the
 // tool-policy variables for those two CLIs on darwin and linux. It has no
-// caller outside that render path, so it dies with it. (That renderer's
-// identifier is deliberately not spelled here: the phase counts it over the RAW
-// file and expects exactly two - the definition and the one call.) Deleting either one before Phase 7's env-passing
-// registration lands would be a live CMP-01 regression for two shipping
-// providers on the platforms the entire user base runs today (D-01).
+// caller outside that render path, so it dies with it. Deleting either one
+// before Phase 7's env-passing registration lands would be a live CMP-01
+// regression for two shipping providers on the platforms the entire user base
+// runs today (D-01).
+//
+// (That renderer's identifier is deliberately not spelled in this block: the
+// phase counts it over the RAW file and expects exactly two - the definition
+// and the one call.)
 //
 // The due date is named literally because an undated "temporary" comment
 // becomes permanent: Phase 7, PRV-03.
