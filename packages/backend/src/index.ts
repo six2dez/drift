@@ -91,6 +91,7 @@ import { getPersistenceDbHandle, type PersistenceDbHandle } from "./persistence"
 import {
   getSweepRoots,
   getTempRoot,
+  isAbsolutePath,
   normalizePlatform,
   type Platform,
 } from "./platform";
@@ -361,6 +362,19 @@ function readVersionBlock(): Record<string, string> {
     versionsLlrt: guarded(() => runtimeProcess.process?.versions?.["llrt"]),
     osPlatform,
     osRelease,
+    // The `path` module's FLAVOUR, which is load-bearing for every runtime path
+    // Drift builds and was the one unknown the probe did not report. `path.sep`
+    // answers it in one character: "\\" is the win32 flavour, "/" is POSIX.
+    // REPORTS, never gates — isAbsolutePath (platform.ts) no longer depends on
+    // the answer, so this field exists so Phase 6 can design against a
+    // measurement instead of an assumption, and so a Windows bug report carries
+    // it without anyone having to ask.
+    pathSeparator: guarded(() => path.sep),
+    pathFlavour: guarded(() =>
+      (path as unknown as { win32?: unknown }).win32 === undefined
+        ? "single"
+        : "dual",
+    ),
   };
 }
 
@@ -1280,7 +1294,14 @@ async function resolveCommand(
   // Deliberately OUTSIDE the cache. This is a single fileExists call, not worth
   // an entry, and caching it would let a deleted or replaced absolute path
   // linger for the whole positive TTL (T-04-25).
-  if (path.isAbsolute(command)) {
+  // isAbsolutePath, not path.isAbsolute: the `path` module's flavour is not
+  // source-verified for Caido's LLRT, and under a POSIX-flavoured one
+  // `path.isAbsolute("C:\\Users\\x\\...\\claude.cmd")` is FALSE — so a Windows
+  // user with an absolute provider command would fall through to a `which`
+  // spawn, a binary that does not exist there, and be told the command is
+  // unresolvable. The platform comes from the RUN-05 probe and is `undefined`
+  // before it runs, which the helper handles by accepting either spelling.
+  if (isAbsolutePath({ value: command, platform: host?.platform })) {
     return await fileExists(command) ? command : undefined;
   }
   // PERF-03. Everything below — the which/where.exe spawn, the candidate build
@@ -1392,7 +1413,10 @@ async function checkProvider(
       return {
         id,
         available: false,
-        error: path.isAbsolute(config.command)
+        error: isAbsolutePath({
+          value: config.command,
+          platform: host?.platform,
+        })
           ? `"${config.command}" does not exist`
           : `"${config.command}" not found in PATH or common install locations`,
       };
@@ -2150,7 +2174,7 @@ async function getNodeExecutable(): Promise<string | undefined> {
         (command): command is string =>
           typeof command === "string" &&
           command !== "" &&
-          path.isAbsolute(command),
+          isAbsolutePath({ value: command, platform: host?.platform }),
       ),
   });
   lastNodeSearchCandidates = candidates;

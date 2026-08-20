@@ -6,6 +6,7 @@ import {
   getSweepRoots,
   getTempRoot,
   getWhichCommand,
+  isAbsolutePath,
   normalizePlatform,
 } from "./platform";
 
@@ -45,6 +46,78 @@ describe("getTempRoot", () => {
     expect(getTempRoot({ platform: "linux", tmpdir: "  /tmp//  " })).toBe(
       "/tmp",
     );
+  });
+});
+
+describe("isAbsolutePath", () => {
+  // The bug this prevents: under a POSIX-flavoured `path` — which this module
+  // documents as the flavour the Linux runner resolves, and which is not
+  // source-verified either way for Caido's LLRT — path.isAbsolute of a Windows
+  // path is FALSE, so a Windows user with an absolute provider command falls
+  // through to a `which` spawn that does not exist there.
+  const windowsAbsolute = [
+    "C:\\Users\\x\\AppData\\Roaming\\npm\\claude.cmd",
+    "c:/Users/x/node.exe",
+    "\\\\server\\share\\claude.cmd",
+    "\\Windows\\System32\\where.exe",
+  ];
+
+  it("recognises Windows spellings on win32 and rejects them on POSIX", () => {
+    for (const value of windowsAbsolute) {
+      expect(isAbsolutePath({ value, platform: "win32" })).toBe(true);
+    }
+    for (const value of windowsAbsolute) {
+      // "\\..." is a leading separator, which the POSIX arm does not accept
+      // either, so every entry is false here.
+      expect(isAbsolutePath({ value, platform: "linux" })).toBe(false);
+      expect(isAbsolutePath({ value, platform: "darwin" })).toBe(false);
+    }
+  });
+
+  it("recognises POSIX spellings on darwin and linux", () => {
+    expect(
+      isAbsolutePath({ value: "/usr/local/bin/node", platform: "darwin" }),
+    ).toBe(true);
+    expect(isAbsolutePath({ value: "/usr/bin/node", platform: "linux" })).toBe(
+      true,
+    );
+    // A forward-slash root is absolute on win32 too — Node's win32
+    // path.isAbsolute accepts it.
+    expect(isAbsolutePath({ value: "/usr/bin/node", platform: "win32" })).toBe(
+      true,
+    );
+  });
+
+  it("rejects relative and drive-relative values on every platform", () => {
+    // A bare "C:" is drive-RELATIVE, the same string getTempRoot refuses to
+    // strip to nothing for the same reason.
+    for (const value of [
+      "",
+      "claude",
+      "./claude",
+      "..\\claude.cmd",
+      "C:",
+      "C:claude.cmd",
+    ]) {
+      expect(isAbsolutePath({ value, platform: "win32" })).toBe(false);
+      expect(isAbsolutePath({ value, platform: "linux" })).toBe(false);
+      expect(isAbsolutePath({ value, platform: undefined })).toBe(false);
+    }
+  });
+
+  it("accepts either spelling when the platform is not yet known", () => {
+    // resolveCommand is reachable from a provider status check before the RUN-05
+    // probe has run. The caller is choosing between "stat this" and "spawn a
+    // PATH search", so the generous answer is the one that fails safe.
+    expect(
+      isAbsolutePath({ value: "/usr/bin/node", platform: undefined }),
+    ).toBe(true);
+    expect(
+      isAbsolutePath({
+        value: "C:\\Program Files\\nodejs\\node.exe",
+        platform: undefined,
+      }),
+    ).toBe(true);
   });
 });
 

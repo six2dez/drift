@@ -80,6 +80,59 @@ export function getTempRoot(input: {
   return root;
 }
 
+// Absolute-path recognition that does not depend on which FLAVOUR of `path` the
+// host resolved to.
+//
+// The problem this replaces: `path.isAbsolute` follows the module's own
+// platform. This file already refuses to import `path` on the stated grounds
+// that it "resolves to its POSIX flavour on the Linux runner" — and if that is
+// true of the runner it may be true of Caido's LLRT, which is precisely the
+// unknown Phase 4 exists to stop guessing about. A POSIX-flavoured
+// `path.isAbsolute("C:\\Users\\x\\AppData\\Roaming\\npm\\claude.cmd")` returns
+// FALSE, so a Windows user who configures an absolute provider command falls
+// through to a `which` spawn — a binary that does not exist on Windows — and is
+// told the command is unresolvable.
+//
+// `platform` is INJECTED like everything else here, so both branches are
+// provable from the Linux runner. `undefined` means the RUN-05 probe has not run
+// yet (resolveCommand is reachable from a provider status check before MCP
+// start), and it accepts EITHER spelling on purpose: the two behaviours a caller
+// picks between are "stat this path" and "spawn a PATH search", and when the
+// platform is unknown the stat is both the cheaper answer and the one that fails
+// safe — a wrong guess costs one failed stat and then falls through.
+//
+// Explicit character tests, never a regex with backslashes, for the same reason
+// getTempRoot strips separators by hand: the win32 spellings must stay readable
+// and testable on a POSIX host.
+export function isAbsolutePath(input: {
+  value: string;
+  platform: Platform | undefined;
+}): boolean {
+  const value = input.value;
+  if (value === "") return false;
+
+  const first = value[0] ?? "";
+  const isPosixAbsolute = first === "/";
+
+  // "C:\", "C:/" — a drive-qualified root. A bare "C:" is drive-RELATIVE and is
+  // deliberately excluded, matching getTempRoot's treatment of the same string.
+  const driveLetter =
+    (first >= "A" && first <= "Z") || (first >= "a" && first <= "z");
+  const third = value[2] ?? "";
+  const isDriveAbsolute =
+    driveLetter && value[1] === ":" && (third === "\\" || third === "/");
+
+  // A leading separator: a UNC "\\server\share" or a rooted "\dir", both of which
+  // Node's win32 path.isAbsolute also accepts.
+  const isRooted = first === "\\" || first === "/";
+
+  if (input.platform === "win32") return isDriveAbsolute || isRooted;
+  if (input.platform === undefined) {
+    return isPosixAbsolute || isDriveAbsolute || isRooted;
+  }
+  return isPosixAbsolute;
+}
+
 // Every directory the orphan sweep must scan for leftover `drift-mcp-*` dirs.
 //
 // The second arm is the security-relevant part and the entire CMP-02 proof: the
