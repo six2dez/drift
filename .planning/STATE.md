@@ -4,16 +4,16 @@ milestone: v1.0
 current_phase: 05
 current_phase_name: Kill Shell Wrappers
 status: executing
-stopped_at: Completed 05-04-PLAN.md
-last_updated: "2026-08-20T13:29:10.281Z"
+stopped_at: Completed 05-05-PLAN.md
+last_updated: "2026-08-20T13:45:47.988Z"
 last_activity: 2026-08-20
 last_activity_desc: Phase 05 execution started
-state_head: 35f61f58a4e0d7521679d10dc93dff8714ab31db
+state_head: eb1c07f2fc115802294cbb94bf49ec569b0bae27
 progress:
   total_phases: 10
   completed_phases: 3
   total_plans: 28
-  completed_plans: 26
+  completed_plans: 27
 milestone_name: milestone
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-06-26)
 ## Current Position
 
 Phase: 05 (Kill Shell Wrappers) — EXECUTING
-Plan: 5 of 6
+Plan: 6 of 6
 Status: Ready to execute
 Last activity: 2026-08-20 — Phase 05 execution started
 
@@ -65,6 +65,7 @@ Progress: [███░░░░░░░] 30% (3 of 10 milestone phases)
 | Phase 05 P02 | 8 min | 3 tasks | 6 files |
 | Phase 05 P03 | 9 min | 2 tasks | 2 files |
 | Phase 05 P04 | 11 min | 3 tasks | 2 files |
+| Phase 05 P05 | 8 min | 3 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -164,6 +165,9 @@ Recent decisions affecting current work:
 - [Phase 05]: A SpawnWithEnv function alias bridges Caido's SpawnOptions, which declares no env although LLRT's runtime honours it (Pitfall 7); it narrows rather than widens, keeping env a required typed Record
 - [Phase 05]: refreshActiveMcpRuntime keeps its own token check so the 'invalid' auth state is not downgraded to a generic 'error' by the keystone's single error channel
 - [Phase 05]: 05-VALIDATION.md row V-6 expects one surviving spawnAndWait(chmod); the correct count after 05-04 is 2 and becomes 1 only after 05-05. Recorded for 05-06 to correct, not retuned in 05-04
+- [Phase 05]: The provider spawn injects driftVars only when the MCP runtime is attached, preserving the pre-conversion condition so no Caido token reaches an MCP-detached provider child (D-10)
+- [Phase 05]: writeTemp throws on an exhausted retry ladder rather than returning a path to a possibly-absent file; its attempt count surfaces as a NEW getDiagnostics field, mcpTempWriteAttempts
+- [Phase 05]: Phase 5 SC-1 amended to the shipped code and Phase 7 gains SC-7 as the structural owner of the surviving POSIX functions (D-01/D-02)
 
 ### Pending Todos
 
@@ -203,8 +207,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-20T13:28:57.195Z
-Stopped at: Completed 05-04-PLAN.md
+Last session: 2026-08-20T13:45:36.064Z
+Stopped at: Completed 05-05-PLAN.md
 Resume file: None
 
 **Live on the public remote: nothing of ours.** Plan 03-04 tore down all three `scratch/*` branches (`ci-proof-windows-probe`, `ci-proof-windows-probe-negative`, `ci-proof-windows-gate-negative`) locally and remotely. Asserted with a `test -z` discrimination over the captured glob (`scratch-glob-empty=0`) plus the full unfiltered listing, which now shows only `main` at `2d8cf16` and the pre-existing, unrelated `fix/security-hotfixes` at `0cd81f3`. `origin/main` was never pushed by this phase and is still `2d8cf16`; local `main` is 23 commits ahead and deliberately unpushed. **Re-verified 2026-08-13 (plan 03-05):** the remote still lists only `main` `2d8cf16` and the pre-existing `fix/security-hotfixes` `0cd81f3`, and all eight Phase 3 run records (4 probe + 4 `CI` control) still resolve with their recorded conclusions — which is what makes the URLs in `03-FINDINGS.md` valid citations after the branches were deleted. The probe **artifacts** do not survive: they expire 2026-09-12, which is why D-11 required the committed findings document.

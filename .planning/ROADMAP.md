@@ -202,7 +202,7 @@ Plans:
 | The launch **shape**: no `.sh`, no `chmod`, no `#!/bin/bash` on any Windows-reachable path, proven by static gates and a `windows-latest` build+vitest leg | That any of it works under the **real Caido LLRT runtime** — unverified in either direction; CI spawns through Node, where libuv back-fills environment names LLRT does not | Phase 9/10, on a real Windows Caido install, with the original reporter's confirmation |
 | macOS/Linux behaviour preserved, existing suite green | Gemini/Codex on Windows — registration is **skipped** there with a stated reason | Phase 7, **PRV-03** |
 
-**Plans**: 4/6 plans executed (4 waves)
+**Plans**: 5/6 plans executed (4 waves)
 Plans:
 **Wave 1** *(three independent slices — no shared files, fully parallel)*
 
@@ -216,7 +216,7 @@ Plans:
 
 **Wave 3** *(blocked on 05-04 — same file)*
 
-- [ ] 05-05-PLAN.md — `index.ts` provider slice: D-04's direct spawn on all platforms, the `launchCommand`/`launchArgs`/`finalize()` cleanup deleted AS ONE SET, `writeLaunchScript` gone, `withFsRetry` around `writeTemp` (RUN-04 structurally), three literal `DELETED IN PHASE 7 (PRV-03)` notices, and the SC-1 amendment + new Phase 7 criterion in this roadmap
+- [x] 05-05-PLAN.md — `index.ts` provider slice: D-04's direct spawn on all platforms, the `launchCommand`/`launchArgs`/`finalize()` cleanup deleted AS ONE SET, `writeLaunchScript` gone, `withFsRetry` around `writeTemp` (RUN-04 structurally), three literal `DELETED IN PHASE 7 (PRV-03)` notices, and the SC-1 amendment + new Phase 7 criterion in this roadmap
 
 **Wave 4** *(blocked on 05-02 and 05-05)*
 
@@ -339,7 +339,7 @@ Parallelism opportunities: Phase 2 may run alongside Phase 3 (both depend only o
 | 2. POSIX Correctness & Hardening | 0/3 | Not started | - |
 | 3. CI Spike — Prove LLRT Basics on Windows | 5/5 | Complete    | 2026-08-14 |
 | 4. Platform Foundation | 11/11 | Complete    | 2026-08-20 |
-| 5. Kill Shell Wrappers | 4/6 | In Progress|  |
+| 5. Kill Shell Wrappers | 5/6 | In Progress|  |
 | 6. Windows Command Resolution | 0/2 | Not started | - |
 | 7. Provider Spawn & Registration | 0/3 | Not started | - |
 | 8. Process Lifecycle | 0/1 | Not started | - |
