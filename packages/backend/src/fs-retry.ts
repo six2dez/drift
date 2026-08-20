@@ -242,17 +242,33 @@ export async function withFsRetry<T>(
 
       const delayMs = delays[attempt] ?? 0;
       // The hook and the sleep are the only injected code running inside this
-      // loop, and a throw from either would escape and break the contract
-      // above — 04-08 routes `onRetry` into `sdk.console`, which is not
-      // guaranteed non-throwing in Caido's runtime. Treat a failure in either
-      // as terminal: the honest answer is still the filesystem error just
-      // caught, which is what the outcome already carries.
+      // loop, and a throw from either must not escape — that would break the
+      // always-resolves contract above. They are caught SEPARATELY because
+      // they earn different verdicts:
+      //
+      //   onRetry — a DIAGNOSTIC hook, and 04-08 routes it into `sdk.console`,
+      //     which is not guaranteed non-throwing in Caido's runtime. An
+      //     observer must never be able to abandon the operation it observes:
+      //     a failed log line silently converting a 6-attempt/1,500 ms ladder
+      //     into a 1-attempt no-retry is precisely the AV lock RUN-04 exists
+      //     to survive, lost to a logging bug. Swallow it and keep climbing.
+      //     (What to *report* is unaffected — the outcome still carries the
+      //     filesystem error just caught, not the hook's.)
+      //
+      //   sleep — LOAD-BEARING. There is no way to pace the ladder without it,
+      //     and an injected clock that rejects has no honest continuation, so
+      //     that one is still terminal.
       try {
         deps?.onRetry?.({
           attempt: attempt + 1,
           code: getFsErrorCode(error),
           delayMs,
         });
+      } catch {
+        // Diagnostics only. Deliberately empty: see above.
+      }
+
+      try {
         await sleep(delayMs);
       } catch {
         break;

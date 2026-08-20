@@ -247,11 +247,18 @@ describe("withFsRetry", () => {
     });
   });
 
-  it("resolves rather than throwing when an injected hook throws", async () => {
+  it("resolves rather than throwing when an injected hook throws, and still climbs the whole ladder", async () => {
     // The always-resolves contract (matching spawnAndWait) is what lets
     // startMcpServer branch on .kind; a throw escaping here would bypass its
     // error path entirely. 04-08 routes onRetry into sdk.console, which is not
     // guaranteed non-throwing in Caido's runtime.
+    //
+    // CONTRACT CHANGED (CR-02): this previously asserted attempts === 1, which
+    // certified a defect — a failed log line cancelled the retry ladder whose
+    // entire purpose is surviving a transient AV lock, and the reported
+    // attempts === 1 was then indistinguishable from "the error was not
+    // transient". A diagnostic hook must never alter control flow, so the
+    // ladder must run to its full length with the hook throwing every time.
     const sleep = noopSleep();
     const onRetry = vi.fn((): void => {
       throw new Error("sdk.console exploded");
@@ -263,7 +270,33 @@ describe("withFsRetry", () => {
     const outcome = await withFsRetry(operation, { sleep, onRetry });
 
     expect(outcome.kind).toBe("Error");
-    expect(outcome.attempts).toBe(1);
+    expect(outcome.attempts).toBe(6);
+    expect(operation).toHaveBeenCalledTimes(6);
+    expect(onRetry).toHaveBeenCalledTimes(5);
+    // Pacing is unaffected by the failing observer.
+    expect(sleep.mock.calls.flat()).toEqual([...FS_RETRY_DELAYS_MS]);
+  });
+
+  it("stops when the injected sleep throws, because pacing is load-bearing", async () => {
+    // The deliberate asymmetry to the test above: onRetry is an observer and is
+    // swallowed, but there is no honest way to pace a ladder whose clock
+    // rejects, so that one stays terminal. Asserted so the asymmetry is a
+    // decision rather than an accident.
+    const sleep = vi.fn(async (_ms: number): Promise<void> => {
+      throw new Error("clock rejected");
+    });
+    const operation = vi.fn(async (): Promise<string> => {
+      throw errnoError("EBUSY", "resource busy or locked");
+    });
+
+    const outcome = await withFsRetry(operation, { sleep });
+
+    expect(outcome).toEqual({
+      kind: "Error",
+      error: "Error: resource busy or locked",
+      attempts: 1,
+      lastCode: "EBUSY",
+    });
     expect(operation).toHaveBeenCalledTimes(1);
   });
 
