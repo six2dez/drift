@@ -2,6 +2,7 @@ import path from "path";
 import { describe, expect, it, vi } from "vitest";
 import {
   buildProbeReport,
+  CAPABILITY_PURPOSE,
   formatProbeFailure,
   formatProbeReportFields,
   normalizePathForCompare,
@@ -55,7 +56,7 @@ function capabilityNamed(
 }
 
 describe("buildProbeReport", () => {
-  it("marks os.platform and os.tmpdir as gating and realpath and windowsEnv as reported only", () => {
+  it("marks os.platform and os.tmpdir as gating and realpath, windowsEnv and parentEnv as reported only", () => {
     const report = buildProbeReport(probeInput());
 
     // The classification is read back off the returned array rather than off the
@@ -71,7 +72,7 @@ describe("buildProbeReport", () => {
       report.capabilities
         .filter((entry) => !entry.gating)
         .map((entry) => entry.name),
-    ).toEqual(["realpath", "windowsEnv"]);
+    ).toEqual(["realpath", "windowsEnv", "parentEnv"]);
 
     // The load-bearing consequence of the split: a missing realpath does NOT
     // block, an unrecognised platform DOES.
@@ -192,6 +193,8 @@ describe("buildProbeReport", () => {
     expect(report.metrics).toEqual({
       tempRootLength: "36",
       projectedWorstCasePathLength: "108",
+      parentEnvKeyCount: "unavailable",
+      parentEnvPathEntryCount: "unavailable",
     });
 
     const absent = buildProbeReport(
@@ -200,6 +203,8 @@ describe("buildProbeReport", () => {
     expect(absent.metrics).toEqual({
       tempRootLength: "unavailable",
       projectedWorstCasePathLength: "unavailable",
+      parentEnvKeyCount: "unavailable",
+      parentEnvPathEntryCount: "unavailable",
     });
   });
 });
@@ -211,6 +216,23 @@ describe("buildProbeReport", () => {
 // path and mcp-server.mjs spawns nothing itself, so a thin or absent PATH
 // cannot break the Phase 5 health-check path (05-CONTEXT.md D-05, Phase 4 D-06).
 describe("buildProbeReport parentEnv row", () => {
+  it("registers a fifth non-gating capability with a matching purpose clause", () => {
+    // Read off the constant itself, not off a report, so a row added without a
+    // CAPABILITY_PURPOSE entry — or a purpose entry with no row — fails here.
+    expect(PROBE_CAPABILITIES).toHaveLength(5);
+    expect(Object.keys(CAPABILITY_PURPOSE)).toHaveLength(5);
+    expect(Object.keys(CAPABILITY_PURPOSE).sort()).toEqual(
+      PROBE_CAPABILITIES.map((entry) => entry.name).sort(),
+    );
+
+    const entry = PROBE_CAPABILITIES.find(
+      (candidate) => candidate.name === "parentEnv",
+    );
+    expect(entry).toBeDefined();
+    expect(entry?.gating).toBe(false);
+    expect(entry?.label).toBe("Parent process environment");
+  });
+
   it("reports not probed, never the digit 0, when no environment was supplied", () => {
     const report = buildProbeReport(probeInput());
     const row = capabilityNamed(report, "parentEnv");
@@ -337,9 +359,12 @@ describe("formatProbeReportFields", () => {
       "runtimeOsTmpdir",
       "runtimeRealpath",
       "runtimeWindowsEnv",
+      "runtimeParentEnv",
       "driftVersion",
       "tempRootLength",
       "projectedWorstCasePathLength",
+      "parentEnvKeyCount",
+      "parentEnvPathEntryCount",
     ]);
     expect(fields["driftVersion"]).toBe("0.1.0");
     expect(fields["runtimeOsPlatform"]).toContain("gating");

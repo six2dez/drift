@@ -23,7 +23,11 @@
 // debug log; the probe report is a DIFFERENT surface — it is pasted into public
 // bug reports — and needs its own no-secrets discipline. Windows profile
 // variables therefore render as presence booleans BY NAME, never as values,
-// because their values contain the user's real account name.
+// because their values contain the user's real account name. The parentEnv row
+// added for D-05 holds the same line by emitting integers and status words
+// only: counting is not enumerating, so the standing rule that this module
+// never enumerates the process environment survives literally — neither a key
+// name nor a value ever leaves it (T-05-10).
 
 import path from "path";
 
@@ -71,6 +75,18 @@ export const PROBE_CAPABILITIES = [
     // dressed up as strictness.
     gating: false,
   },
+  {
+    name: "parentEnv",
+    label: "Parent process environment",
+    // REPORTS, never gates (D-06 / 05-CONTEXT.md D-05). The fallback is real:
+    // the MCP server is spawned by an ABSOLUTE node path and mcp-server.mjs
+    // spawns nothing itself, so a thin or entirely missing PATH cannot break
+    // the Phase 5 health-check path. It can only bite the provider CLI, which
+    // is Phase 7's PRV-01. Gating on it would refuse to start Drift on a
+    // runtime where the health check demonstrably works — D-05's explicitly
+    // rejected alternative.
+    gating: false,
+  },
 ] as const;
 
 export type ProbeCapabilityResult = {
@@ -108,6 +124,19 @@ const UNAVAILABLE = "unavailable";
 // bare word "undefined" with no context.
 const NOT_AVAILABLE = "not available";
 
+// Rendered ONLY for a measurement Drift actually took whose subject turned out
+// not to be there. Deliberately a different string from UNAVAILABLE, which
+// marks a measurement Drift never took at all. Phase 4's 04-03 spent a plan on
+// this distinction, and a test asserts the two render differently: a report
+// written to be pasted into a public bug report must never assert a measurement
+// Drift did not make (T-05-11).
+const ABSENT = "absent";
+
+// The one environment key name this module is allowed to say out loud. Compared
+// case-insensitively because Windows environment keys are case-insensitive and
+// a parent block spelling it `Path` must be MEASURED, not reported absent.
+const PATH_VARIABLE_NAME = "PATH";
+
 // ── SC-3's MAX_PATH guard-rail (04-RESEARCH.md § MAX_PATH Budgeting) ────────
 //
 // MAX_PATH is 260 characters INCLUDING the terminating NUL, so 259 usable for a
@@ -135,7 +164,11 @@ const MAX_PATH_LEAF_COMPONENT_CHARS = 41;
 // Why Drift needed each gating primitive, in the words the failure message uses.
 // Keyed by capability name so a new entry in PROBE_CAPABILITIES cannot silently
 // render a message with no "what for" clause.
-const CAPABILITY_PURPOSE: Record<ProbeCapabilityName, string> = {
+// Exported so the suite can assert it has an entry for EVERY capability name
+// rather than trusting the compiler's Record exhaustiveness alone: the point of
+// keying by name is that a new PROBE_CAPABILITIES row cannot ship without a
+// what-for clause, and that guarantee should be falsifiable at runtime too.
+export const CAPABILITY_PURPOSE: Record<ProbeCapabilityName, string> = {
   "os.platform":
     "Drift needs the platform name to choose between the POSIX and the Windows launch path; guessing wrong is exactly the Windows failure this release exists to fix.",
   "os.tmpdir":
@@ -144,6 +177,8 @@ const CAPABILITY_PURPOSE: Record<ProbeCapabilityName, string> = {
     "Drift uses path canonicalisation only to compare a temp path against a profile-derived path; the fallback keeps working without it.",
   windowsEnv:
     "Drift reads these to locate Node and the AI CLI binaries installed under a Windows user profile.",
+  parentEnv:
+    "Drift builds every child process's environment from the parent block rather than inheriting a shell's, so the size of that block and the number of PATH entries are what a Windows or Dock-launched macOS user needs to paste when a CLI cannot be found.",
 };
 
 function trimmed(value: string | undefined): string {
@@ -261,20 +296,139 @@ function describeWindowsEnvCapability(input: {
   };
 }
 
-function buildProbeMetrics(tempRoot: string): Record<string, string> {
-  if (tempRoot === "") {
+// Three states, not two, and they are kept apart by the type rather than by a
+// magic number. `notProbed` means Drift never looked; `absent` means Drift
+// looked and the PATH variable was not there. Collapsing them would make the
+// report claim a measurement it did not take (T-05-11).
+type PathEntryCount =
+  | { kind: "counted"; count: number }
+  | { kind: "absent" }
+  | { kind: "notProbed" };
+
+function countPathEntries(input: {
+  parentEnv: Record<string, string | undefined> | undefined;
+  platform: string | undefined;
+}): PathEntryCount {
+  const parentEnv = input.parentEnv;
+  if (parentEnv === undefined) {
+    return { kind: "notProbed" };
+  }
+
+  // Case-insensitive resolution. Windows environment keys are case-insensitive
+  // and a parent block spelling it `Path` must be measured, not reported absent
+  // on the one platform this release exists to fix.
+  const key = Object.keys(parentEnv).find(
+    (candidate) => candidate.toUpperCase() === PATH_VARIABLE_NAME,
+  );
+  if (key === undefined) {
+    return { kind: "absent" };
+  }
+
+  const platform = trimmed(input.platform);
+  if (platform === "") {
+    // The separator is a function of the platform. With no platform there is no
+    // separator, and splitting anyway would produce a confidently wrong integer
+    // in a field a bug reporter is about to paste.
+    return { kind: "notProbed" };
+  }
+
+  const separator = platform === "win32" ? ";" : ":";
+  const value = parentEnv[key];
+  const count = (typeof value === "string" ? value : "")
+    .split(separator)
+    .map((segment) => segment.trim())
+    .filter((segment) => segment !== "").length;
+
+  return { kind: "counted", count };
+}
+
+function renderPathEntryCount(result: PathEntryCount): string {
+  if (result.kind === "counted") {
+    return String(result.count);
+  }
+  return result.kind === "absent" ? ABSENT : UNAVAILABLE;
+}
+
+function describeParentEnvCapability(input: {
+  normalizedPlatform: string | undefined;
+  // Optional, mirroring buildProbeReport's input, so that "the caller did not
+  // pass one" and "the caller passed undefined" are the same not-probed state.
+  parentEnv?: Record<string, string | undefined>;
+}): CapabilityOutcome {
+  // This row NEVER fails. It is `ok: true` in every branch because it reports
+  // and does not gate (D-05); `report.ok` must be unaffected by anything below.
+  const parentEnv = input.parentEnv;
+  if (parentEnv === undefined) {
     return {
-      tempRootLength: UNAVAILABLE,
-      projectedWorstCasePathLength: UNAVAILABLE,
+      ok: true,
+      detail: "the parent process environment was not probed",
+    };
+  }
+
+  // Counts only. Never a key name (other than the literal word PATH), never a
+  // value: this string is pasted into public bug reports and the block contains
+  // tokens, account names and machine names (T-05-10).
+  const keyCount = Object.keys(parentEnv).length;
+  const base = `parent environment carries ${String(keyCount)} keys`;
+  const pathEntries = countPathEntries({
+    parentEnv,
+    platform: input.normalizedPlatform,
+  });
+
+  if (pathEntries.kind === "absent") {
+    return {
+      ok: true,
+      detail: `${base}; the ${PATH_VARIABLE_NAME} variable is absent from that block`,
+    };
+  }
+
+  if (pathEntries.kind === "notProbed") {
+    return {
+      ok: true,
+      detail: `${base}; the ${PATH_VARIABLE_NAME} entry count was not probed because the platform is unrecognised, so the separator is unknowable`,
     };
   }
 
   return {
-    tempRootLength: String(tempRoot.length),
-    projectedWorstCasePathLength: String(
-      tempRoot.length +
-        MAX_PATH_DIR_COMPONENT_CHARS +
-        MAX_PATH_LEAF_COMPONENT_CHARS,
+    ok: true,
+    detail: `${base}; ${PATH_VARIABLE_NAME} carries ${String(pathEntries.count)} entries`,
+  };
+}
+
+function buildProbeMetrics(input: {
+  tempRoot: string;
+  parentEnv: Record<string, string | undefined> | undefined;
+  platform: string | undefined;
+}): Record<string, string> {
+  const tempRoot = input.tempRoot;
+  const pathBudget =
+    tempRoot === ""
+      ? {
+          tempRootLength: UNAVAILABLE,
+          projectedWorstCasePathLength: UNAVAILABLE,
+        }
+      : {
+          tempRootLength: String(tempRoot.length),
+          projectedWorstCasePathLength: String(
+            tempRoot.length +
+              MAX_PATH_DIR_COMPONENT_CHARS +
+              MAX_PATH_LEAF_COMPONENT_CHARS,
+          ),
+        };
+
+  return {
+    ...pathBudget,
+    // UNAVAILABLE, never "0": a key count of zero is a real measurement and an
+    // unprobed environment is not one.
+    parentEnvKeyCount:
+      input.parentEnv === undefined
+        ? UNAVAILABLE
+        : String(Object.keys(input.parentEnv).length),
+    parentEnvPathEntryCount: renderPathEntryCount(
+      countPathEntries({
+        parentEnv: input.parentEnv,
+        platform: input.platform,
+      }),
     ),
   };
 }
@@ -287,6 +441,9 @@ export function buildProbeReport(input: {
   realpathRung: RealpathRung | undefined;
   realpathRungNote?: string;
   windowsEnvPresent: Record<string, boolean> | undefined;
+  // OPTIONAL so probeRuntime() in index.ts compiles untouched by this plan;
+  // plan 05-04 supplies process.env from index.ts's single probe site.
+  parentEnv?: Record<string, string | undefined>;
   version: Record<string, string>;
 }): ProbeReport {
   const outcomes: Record<ProbeCapabilityName, CapabilityOutcome> = {
@@ -294,6 +451,7 @@ export function buildProbeReport(input: {
     "os.tmpdir": describeTmpdirCapability(input),
     realpath: describeRealpathCapability(input),
     windowsEnv: describeWindowsEnvCapability(input),
+    parentEnv: describeParentEnvCapability(input),
   };
 
   // Iterate PROBE_CAPABILITIES rather than Object.entries(outcomes) so the
@@ -317,7 +475,11 @@ export function buildProbeReport(input: {
     ok: capabilities.every((capability) => !capability.gating || capability.ok),
     capabilities,
     version: input.version,
-    metrics: buildProbeMetrics(trimmed(input.tempRoot)),
+    metrics: buildProbeMetrics({
+      tempRoot: trimmed(input.tempRoot),
+      parentEnv: input.parentEnv,
+      platform: input.normalizedPlatform,
+    }),
   };
 }
 
