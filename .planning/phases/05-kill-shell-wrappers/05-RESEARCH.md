@@ -854,26 +854,36 @@ test "$(grep -c '\.sh"' packages/backend/src/index.ts)" -eq 2
 
 ---
 
-## Open Questions
+## Open Questions (RESOLVED)
+
+All FOUR items below were answered during Phase 5 planning and every recommendation was adopted;
+each carries an inline **RESOLVED** marker naming the plan that adopted it. Nothing here is an open
+decision. The section is retained because the reasoning behind each answer is load-bearing for the
+plans that consumed it. (Marker hygiene applied during plan revision — the heading and the per-item
+markers were missing, which read as four unresolved decisions.)
 
 1. **Does the config-JSON projection carry the parent-merged `env` or only `driftVars`?**
    - What we know: the spawn path must merge (L-4). Copilot ships `buildMcpRuntimeEnv(...)` alone today (`:2796`), and CMP-01 says do not move it.
    - What's unclear: nothing about correctness — it is a blast-radius judgement about writing the user's whole environment into a `0o600` file that D-10 already makes token-bearing.
    - Recommendation: keep the projections distinct (spec carries both `env` and `driftVars`); the config documents use `driftVars`. Preserves Copilot's byte-shape exactly.
+   - **RESOLVED — adopted by plan 05-01** (`buildMcpServerSpec` emits both `env` and `driftVars`; `toMcpConfigDocument` projects `driftVars`) **and wired by plan 05-04** (both config writers go through `writeChatMcpConfig`; threat row T-05-16 records the blast-radius rationale).
 
 2. **Does the D-10 no-secret-material gate move into `ci.yml` now, or wait for Phase 9?**
    - What we know: ROADMAP § *Phase 9 SC-1a* requires it to survive `windows-llrt-probe.yml`'s deletion, in its three-branch form. D-07 moves the job it was destined for.
    - What's unclear: whether Phase 5 wants to own re-pointing its scan targets (which must stay self-non-matching).
    - Recommendation: move it now with the job. A gate whose targets vanish in Phase 9 fails on `grep` status 2 — the third arm exists precisely to catch that.
+   - **RESOLVED — adopted by plan 05-02, task 2.** The gate moves into `ci.yml` now, in its three-arm form, before `Install dependencies`, with `windows-llrt-probe.yml` deliberately kept in the scan-target list so its Phase 9 deletion trips the third arm loudly.
 
 3. **Does `buildMcpRuntimeEnv` move into the pure module?** (Claude's Discretion, raised in CONTEXT.md.)
    - What we know: it reads **two** pieces of module state, not one — `currentSettings.caidoApi.url` (`:1024`) and `getMcpContextFilePath()` (`:1026`), which itself reads `mcpTempDir`.
    - What's unclear: whether four call sites' worth of injection churn is worth making ~9 env keys Linux-assertable.
    - Recommendation: **move it**, taking `{ caidoUrl, contextFilePath, caidoToken, toolPolicy, activityFilePath, approvalsFilePath }`. It converts the phase's central data structure from bucket N to bucket L, and the injection is mechanical.
+   - **RESOLVED — adopted by plans 05-01 and 05-04, in ADAPTER form.** The pure `buildMcpDriftVars` lands in `mcp-server-spec.ts` taking exactly that injected input (05-01), and `buildMcpRuntimeEnv` stays in `index.ts` as a thin delegating adapter that KEEPS its signature, so all four call sites (`:1186`, `:1929`, `:2695`, `:2796`) are untouched (05-04, task 1). The recommendation's substance is taken — the env keys become Linux-assertable, bucket N → L — while the "four call sites' worth of injection churn" the question weighed is avoided outright. Recorded as a refinement, not a partial adoption.
 
 4. **What `timeout-minutes` for the Windows leg?**
    - What we know: the probe uses 10 for a dependency-free single step; this leg adds install + typecheck + lint + 263 tests + build.
    - Recommendation: start at 20, then set it from the first real run's measured duration and record the run URL beside it (Phase 3 D-11/D-12/D-13).
+   - **RESOLVED — adopted across plans 05-02 and 05-06.** 05-02 task 2 authors `timeout-minutes: 20` with an in-file comment marking it a starting value; 05-06 task 2 replaces it with a figure derived from the first real run's measured wall-clock and records the run URL beside it. (This item was outside the revision checker's count of three; it is answered and adopted on the same footing as the other three.)
 
 ---
 
