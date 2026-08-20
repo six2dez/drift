@@ -110,7 +110,10 @@ agree would be worse than stating the mismatch.
   the proof lives in a spawn test that imports the spec module. No probe category spans that
   seam.
 - **The manual reading:** `index.ts`'s `validateCaidoAuth(spec)` is a thin wrapper —
-  `spawnAndWait(spec.command, ["--validate-auth"], { env: spec.env })` — over inputs that *are*
+  `spawnAndWait(spec.command, [...spec.args, "--validate-auth"], { env: spec.env })` — note the
+  spread: the real line passes the spec's own args ahead of the flag, character-identical to
+  `mcp-server-spec.spawn.test.ts:189`, which is *stronger* for this argument than the paraphrase
+  that omitted it — over inputs that *are*
   proven. The residual risk is that the wrapper is mis-wired, not that the mechanism is wrong.
 - **Evidence produced against it:** V-12 green locally and V-16 green on `windows-latest`, plus
   Gate 3's site inventory showing `validateCaidoAuth` has exactly one definition and two call
@@ -429,7 +432,7 @@ concluded `success`, and the spawn integration tests **passed**:
 ```
 
 The real cause was two failures in `command-resolution.test.ts` — a file this phase had **not
-touched** (`git diff --stat cd22833..HEAD` over it is empty). Both were platform-flavoured `path`
+touched** (`git diff --stat cd22833..aa56d94` over it is empty — anchor the range at `aa56d94`, the commit immediately before this plan's own fix; `..HEAD` now includes that fix and returns 19/2). Both were platform-flavoured `path`
 behaviour, and they were at **two different layers**:
 
 ```
