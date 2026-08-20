@@ -39,16 +39,16 @@ Requirements for the hardening + native-Windows milestone. Each maps to exactly 
 
 ### Runtime (RUN)
 
-- [ ] **RUN-01**: On native Windows, the Drift MCP server starts with no POSIX dependency — `node` is spawned directly, with no `chmod`, no `#!/bin/bash` wrapper, and no `.sh` execution
-- [ ] **RUN-02**: On Windows, the MCP environment (Caido token, `DRIFT_*` vars) reaches the MCP server via the spawn `env` option / config-JSON `env` field, not a shell `export` wrapper
+- [x] **RUN-01**: On native Windows, the Drift MCP server starts with no POSIX dependency — `node` is spawned directly, with no `chmod`, no `#!/bin/bash` wrapper, and no `.sh` execution
+- [x] **RUN-02**: On Windows, the MCP environment (Caido token, `DRIFT_*` vars) reaches the MCP server via the spawn `env` option / config-JSON `env` field, not a shell `export` wrapper
 - [x] **RUN-03**: Drift uses `os.tmpdir()` for its runtime, context, log, and orphan-sweep paths instead of a hardcoded `/tmp` (works on Windows, macOS, Linux)
-- [ ] **RUN-04**: Drift's temp-file write→spawn path tolerates the Windows AV write-then-exec race (copy `mcp-server.mjs` once at start; bounded retry on `EPERM`/`EBUSY`)
+- [x] **RUN-04**: Drift's temp-file write→spawn path tolerates the Windows AV write-then-exec race (copy `mcp-server.mjs` once at start; bounded retry on `EPERM`/`EBUSY`)
 - [x] **RUN-05**: At MCP start, Drift fails loud with an actionable message (incl. Caido/runtime version) if a required runtime capability is missing, instead of failing cryptically
 
 ### Health (HLT)
 
-- [ ] **HLT-01**: On Windows, MCP auth validation (`validateCaidoAuth`) succeeds for the Claude path
-- [ ] **HLT-02**: On Windows, the MCP self-test (tools/list, get_environment, search_history) passes for the Claude path
+- [x] **HLT-01**: On Windows, MCP auth validation (`validateCaidoAuth`) succeeds for the Claude path
+- [x] **HLT-02**: On Windows, the MCP self-test (tools/list, get_environment, search_history) passes for the Claude path
 
 ### Resolution (RES)
 
@@ -71,9 +71,9 @@ Requirements for the hardening + native-Windows milestone. Each maps to exactly 
 
 ### Validation (CI)
 
-- [ ] **CI-01**: A `windows-latest` CI job builds the plugin and runs vitest (the permanent regression net)
+- [x] **CI-01**: A `windows-latest` CI job builds the plugin and runs vitest (the permanent regression net)
 - [x] **CI-02**: A CI spike proves the 7 LLRT assertions (spawn `env` passthrough, `os.tmpdir()`/`os.platform()`, `.cmd` EINVAL behavior, `where` parsing, `os` import specifier, `USERPROFILE`/`APPDATA`/`LOCALAPPDATA`, `crypto.randomUUID`) before any production port code is built on them
-- [ ] **CI-03**: Windows CI is green for the *right* reasons — `.gitattributes` (`eol=lf`), `\r?\n`-tolerant snapshot assertions, pinned shell
+- [x] **CI-03**: Windows CI is green for the *right* reasons — `.gitattributes` (`eol=lf`), `\r?\n`-tolerant snapshot assertions, pinned shell
 
 ### UX / Polish (UX)
 
@@ -84,7 +84,7 @@ Requirements for the hardening + native-Windows milestone. Each maps to exactly 
 
 ### Compatibility (CMP)
 
-- [ ] **CMP-01**: All existing macOS/Linux behavior is preserved — POSIX launch path unchanged behind `platform` guards; existing snapshot/unit tests stay green
+- [x] **CMP-01**: All existing macOS/Linux behavior is preserved — POSIX launch path unchanged behind `platform` guards; existing snapshot/unit tests stay green
 - [x] **CMP-02**: The `os.tmpdir()` substitution does not break the macOS/Linux orphan-sweep (macOS tmpdir is `/var/folders/...`, not `/tmp`)
 
 ## v2 Requirements
@@ -135,17 +135,17 @@ Which phases cover which requirements. Every v1 requirement maps to exactly one 
 | PERF-01 | Phase 2 | Pending |
 | CI-02 | Phase 3 | Complete |
 | RUN-03 | Phase 4 | Complete |
-| RUN-04 | Phase 5 | Pending |
+| RUN-04 | Phase 5 | Complete |
 | RUN-05 | Phase 4 | Complete |
 | CMP-02 | Phase 4 | Complete |
 | PERF-02 | Phase 4 | Complete |
 | PERF-03 | Phase 4 | Complete |
 | PERF-04 | Phase 4 | Complete |
-| RUN-01 | Phase 5 | Pending |
-| RUN-02 | Phase 5 | Pending |
-| HLT-01 | Phase 5 | Pending |
-| HLT-02 | Phase 5 | Pending |
-| CMP-01 | Phase 5 | Pending |
+| RUN-01 | Phase 5 | Complete |
+| RUN-02 | Phase 5 | Complete |
+| HLT-01 | Phase 5 | Complete |
+| HLT-02 | Phase 5 | Complete |
+| CMP-01 | Phase 5 | Complete |
 | RES-01 | Phase 6 | Pending |
 | RES-02 | Phase 6 | Pending |
 | RES-03 | Phase 6 | Pending |
@@ -158,8 +158,8 @@ Which phases cover which requirements. Every v1 requirement maps to exactly one 
 | UX-01 | Phase 7 | Pending |
 | LIF-01 | Phase 8 | Pending |
 | LIF-02 | Phase 8 | Pending |
-| CI-01 | Phase 5 | Pending |
-| CI-03 | Phase 5 | Pending |
+| CI-01 | Phase 5 | Complete |
+| CI-03 | Phase 5 | Complete |
 | UX-03 | Phase 10 | Pending |
 | UX-04 | Phase 10 | Pending |
 
@@ -238,6 +238,99 @@ Which phases cover which requirements. Every v1 requirement maps to exactly one 
   item that would raise SC-2's fidelity by making `index.ts` importable in tests. Phase 9 therefore
   owns no requirement IDs of its own, which is a narrowing, not an emptying.
 
+**Closed at the end of Phase 5 (2026-08-20) — each with its evidence basis:**
+
+Marked Complete by plan 05-06 after the phase gates were **executed** (not inferred from a diff)
+and a real `windows-latest` run was read. The full record is
+`.planning/phases/05-kill-shell-wrappers/05-REPORT.md`; the per-row contract is
+`05-VALIDATION.md`, status `validated`, rows V-1 … V-19 green.
+
+**What "Complete" means here, stated once so it is not over-read.** It means *the evidence this
+phase was designed to produce exists and was executed*. It does **not** mean confirmed on a real
+Windows Caido install. Every row below is bounded by the phase's five explicit non-claims
+(V-20 … V-24 in `05-REPORT.md` § 1) — in particular: `index.ts` is not importable under vitest, so
+its **wiring** of this machinery is evidenced by static gates and a dated human code review, not by
+an executing test (V-21); and every Windows result was measured on **Node, not on Caido's LLRT**
+(V-22/V-23).
+
+- **RUN-01** — *no POSIX dependency; `node` spawned directly, no `chmod`, no `#!/bin/bash`, no
+  `.sh` execution.* Evidence: comment-stripped `.sh` literal count **1** (the survivor is
+  `getMcpWrapperPath`'s own, POSIX Gemini/Codex only, unreachable on win32 and headed
+  `DELETED IN PHASE 7 (PRV-03)`); `spawnAndWait("chmod"` count **1**, likewise inside the
+  win32-guarded wrapper; `launchCommand` / `launchArgs` / `launchScriptPreview` /
+  `writeLaunchScript` all **0 on the raw file**; site inventory matching the expected definition
+  and call-site set; V-1 and V-12/V-16 green. Residual: V-21, V-23.
+
+- **RUN-02** — *env reaches the server via spawn `env` / config-JSON `env`, not a shell `export`.*
+  Evidence: V-2, V-3, V-4, V-10 green as unit tests over the pure spec module; the **two-sided**
+  parent-spread gate (raw `env:` count 4, allow-list filter empty) — the only vehicle-independent
+  control the phase has; V-16 green. Residual: **V-22** — the Node vehicle back-fills eleven
+  `required_vars`, so a bare-dict regression would pass every executing test in this repo. The
+  static gate is what stands between that regression and a shipped release.
+
+- **RUN-04** — *temp-file write→spawn path tolerates the Windows AV write-then-exec race.* Marked
+  Complete on a **structural** argument, written here so it survives the phase boundary. The
+  parenthetical half was already shipped in Phase 4: the one-time `mcp-server.mjs` staging copy
+  runs inside `withFsRetry`'s 6-attempt / ~1,500 ms ladder with `mcpFirstWriteAttempts` surfaced in
+  `getDiagnostics`. The headline half — the write→`chmod`→`rename`→exec pairs in `writeLaunchScript`
+  and `writeMcpWrapper` that `04-RESEARCH.md` names the single best-documented AV case, and which
+  Phase 4's CMP-01 scope fence forbade touching — is now satisfied because **those pairs no longer
+  exist on any Windows-reachable path**: `writeLaunchScript` is deleted outright, and
+  `writeMcpWrapper` is POSIX-only behind a win32 guard proven by a unit test on the predicate. The
+  race is *eliminated* rather than tolerated, which is a stronger result than the ladder. Separately,
+  the ladder gained its **second** production call site (`writeTemp`, covering the token-bearing
+  Claude and Copilot config writes), so it is no longer one refactor away from inert, with its
+  attempt count in a distinct `mcpTempWriteAttempts` field. **Residual, and explicitly not claimed:
+  V-20** — a real Defender lock on real hardware is not inducible on any CI runner. Real-machine
+  confirmation from the original Windows reporter is **Phase 9/10**.
+
+- **HLT-01** — *`validateCaidoAuth` succeeds on Windows for the Claude path.* Evidence: V-12 green
+  locally and **V-16 green on `windows-latest`** — the production `buildMcpServerSpec` output spawns
+  the real `assets/mcp-server.mjs` and `--validate-auth` returns `{ok:true}`; plus the site
+  inventory showing `validateCaidoAuth` has one definition and two call sites, **neither of which
+  passes a path**. Residual: V-21 — the two-line `index.ts` wrapper over those proven inputs is
+  evidenced by grep and human review, not by an executing test.
+
+- **HLT-02** — *MCP self-test (`tools/list`, `get_environment`, `search_history`) passes on
+  Windows.* Evidence: V-13 green locally and **V-17 green on `windows-latest`**, over stdio
+  JSON-RPC against the real server, with both integration cases recorded as **executed, not
+  skipped**. Residual: V-21.
+
+- **CMP-01** — *all existing macOS/Linux behaviour preserved.* Evidence: the `provider-launch`
+  tripwire is **byte-unchanged** across the whole phase (`git diff --stat` against the pre-phase
+  commit is empty) and passes unedited; the suite went **263 → 290** with **zero tests removed as
+  obsolete**, verified mechanically rather than asserted; `enforceOwnerOnlyDir`'s `fs/promises`
+  namespace `chmod` is byte-identical, and the whole-file `chmod` count stays deliberately
+  **non-zero** (15) because a zero there would mean a POSIX security control had been deleted;
+  `pnpm -r typecheck` and `pnpm lint --max-warnings 0` both exit 0. The Gemini/Codex POSIX wrapper
+  was **kept** rather than deleted precisely to avoid a live CMP-01 regression for two shipping
+  providers on the platforms the entire user base runs today (D-01).
+
+- **CI-01** — *a `windows-latest` job builds the plugin and runs vitest.* Evidence: the blocking
+  `Verify (Windows)` leg exists in `ci.yml` and is green on [run 32378434081](https://github.com/six2dez/drift/actions/runs/32378434081), with per-step
+  conclusions recorded by name and the artifact asserted **by path** —
+  `-rw-r--r-- 1 runneradmin 197121 2487350 Aug 20 14:10 dist/plugin_package.zip` — rather than by
+  `caido-dev`'s pathless success line. `timeout-minutes` is now **6**, derived from three measured
+  runs (87 s cold cache, 91 s warm, 84 s), with the run URLs beside the value.
+  **What remains for Phase 9:** making the job **required for merge** (a branch-protection change,
+  not a workflow change), deleting `.github/workflows/windows-llrt-probe.yml` and
+  `scripts/windows-llrt-probe.mjs` — at which point the secret gate's third arm fires on `grep`
+  status 2 and must be **re-pointed, not removed** — and the deferred `caido:plugin` vitest alias,
+  the one change that would raise V-21's fidelity by making `index.ts` importable in tests.
+
+- **CI-03** — *Windows CI is green for the **right** reasons.* Evidence: `.gitattributes`
+  (`* text=auto eol=lf`) landed (V-15); `shell: bash` pinned on every run step in the job and
+  asserted by `.github/scripts/check-ci-windows-job.sh` (14 assertions, exit 0); and — the
+  substantive part — the **first** real run was **red**, was read rather than retried, and the two
+  failures were fixed at the correct layer. One was a genuine production defect (`extractHomeDir`
+  normalised with the platform-flavoured `path.normalize`, so both of its prefix arms were dead on
+  win32); the other was a test that hard-coded a POSIX literal against a helper that is
+  host-flavoured by design. Weakening the first assertion would have hidden a real bug; "fixing"
+  the code for the second would have broken correct Windows behaviour. Distinguishing them is
+  exactly what this requirement asks for. Note this touched `command-resolution.ts`, which had
+  been untouched by Phase 5 until then; teaching `extractHomeDir` about `C:\Users\<name>` remains
+  **RES-03, Phase 6**, and is not claimed here.
+
 ---
 *Requirements defined: 2026-06-26*
-*Last updated: 2026-08-20 — Phase 4 closed: RUN-03, RUN-05, CMP-02, PERF-02, PERF-03 and PERF-04 marked Complete; RUN-04 re-targeted to Phase 5. CI-01 and CI-03 pulled forward from Phase 9 into Phase 5 by plan 05-02 (see notes above); both remain Pending*
+*Last updated: 2026-08-20 — Phase 5 closed: RUN-01, RUN-02, RUN-04, HLT-01, HLT-02, CMP-01, CI-01 and CI-03 marked Complete by plan 05-06, each with the evidence basis and residual non-claims recorded in the section above. Earlier the same day: Phase 4 closed (RUN-03, RUN-05, CMP-02, PERF-02, PERF-03, PERF-04) with RUN-04 re-targeted to Phase 5, and CI-01/CI-03 pulled forward from Phase 9 into Phase 5 by plan 05-02*
