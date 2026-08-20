@@ -194,7 +194,7 @@ Plans:
   3. The Caido token and `DRIFT_*` vars reach the MCP server only via the spawn `env` option / config-JSON `env` field — no shell `export` wrapper — verified by the integration spawn test.
   4. The macOS/Linux launch path is unchanged behind `os.platform()` guards and the existing `provider-launch` exact-snapshot tests stay green (CMP-01).
 
-**Plans**: 3/6 plans executed (4 waves)
+**Plans**: 4/6 plans executed (4 waves)
 Plans:
 **Wave 1** *(three independent slices — no shared files, fully parallel)*
 
@@ -204,7 +204,7 @@ Plans:
 
 **Wave 2** *(blocked on 05-01 and 05-03)*
 
-- [ ] 05-04-PLAN.md — `index.ts` health path: `requireMcpServerSpec`, `spawnAndWait`'s optional env, spec-taking `validateCaidoAuth`/`callMcpMethod`, **all three** `writeMcpWrapper` sites and **both** `validateCaidoAuth` sites (incl. `refreshActiveMcpRuntime`, the one CONTEXT.md missed), both config writers on one projection, the `${}`-expansion guard, and the win32 registration skip stated in-product and in the README
+- [x] 05-04-PLAN.md — `index.ts` health path: `requireMcpServerSpec`, `spawnAndWait`'s optional env, spec-taking `validateCaidoAuth`/`callMcpMethod`, **all three** `writeMcpWrapper` sites and **both** `validateCaidoAuth` sites (incl. `refreshActiveMcpRuntime`, the one CONTEXT.md missed), both config writers on one projection, the `${}`-expansion guard, and the win32 registration skip stated in-product and in the README
 
 **Wave 3** *(blocked on 05-04 — same file)*
 
@@ -330,7 +330,7 @@ Parallelism opportunities: Phase 2 may run alongside Phase 3 (both depend only o
 | 2. POSIX Correctness & Hardening | 0/3 | Not started | - |
 | 3. CI Spike — Prove LLRT Basics on Windows | 5/5 | Complete    | 2026-08-14 |
 | 4. Platform Foundation | 11/11 | Complete    | 2026-08-20 |
-| 5. Kill Shell Wrappers | 3/6 | In Progress|  |
+| 5. Kill Shell Wrappers | 4/6 | In Progress|  |
 | 6. Windows Command Resolution | 0/2 | Not started | - |
 | 7. Provider Spawn & Registration | 0/3 | Not started | - |
 | 8. Process Lifecycle | 0/1 | Not started | - |

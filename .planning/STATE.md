@@ -4,16 +4,16 @@ milestone: v1.0
 current_phase: 05
 current_phase_name: Kill Shell Wrappers
 status: executing
-stopped_at: Completed 05-03-PLAN.md
-last_updated: "2026-08-20T13:08:22.987Z"
+stopped_at: Completed 05-04-PLAN.md
+last_updated: "2026-08-20T13:29:10.281Z"
 last_activity: 2026-08-20
 last_activity_desc: Phase 05 execution started
-state_head: 80e119507bf2d1b784687788fd7bc3ca4a1dfa86
+state_head: 35f61f58a4e0d7521679d10dc93dff8714ab31db
 progress:
   total_phases: 10
   completed_phases: 3
   total_plans: 28
-  completed_plans: 25
+  completed_plans: 26
 milestone_name: milestone
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-06-26)
 ## Current Position
 
 Phase: 05 (Kill Shell Wrappers) — EXECUTING
-Plan: 4 of 6
+Plan: 5 of 6
 Status: Ready to execute
 Last activity: 2026-08-20 — Phase 05 execution started
 
@@ -64,6 +64,7 @@ Progress: [███░░░░░░░] 30% (3 of 10 milestone phases)
 | Phase 05 P01 | 9 min | 3 tasks | 3 files |
 | Phase 05 P02 | 8 min | 3 tasks | 6 files |
 | Phase 05 P03 | 9 min | 2 tasks | 2 files |
+| Phase 05 P04 | 11 min | 3 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -159,6 +160,10 @@ Recent decisions affecting current work:
 - [Phase 05]: [05-03]: The probe reports a PATH ENTRY COUNT, not a presence boolean, because "present but 4 entries" is the interesting macOS-Dock/Windows signal a boolean cannot express. Three states are kept apart by a discriminated union and asserted by INEQUALITY: `unavailable` = never measured, `absent` = measured and not there, an integer = counted. The PATH key is resolved case-insensitively (a Windows block spelling it `Path` must be measured, not reported absent) and the separator comes from the platform, never sniffed from the content — with no platform the count renders not-probed rather than a confidently wrong integer.
 - [Phase 05]: [05-03]: The row emits integers and status words only, so runtime-probe.ts's standing "never enumerates the process environment" rule survives literally — counting is not enumerating (T-05-10). The only environment key name the module may print is the literal PATH. CAPABILITY_PURPOSE was exported (one export beyond the plan's artifact list) so the suite asserts one purpose clause per capability row at runtime, not just via the compiler's Record exhaustiveness.
 - [Phase 05]: [05-03]: RUN-02 and CMP-01 were NOT marked complete — requirements.ready-ids returned 0/2, both are declared by sibling plans still running, and this plan adds only the diagnostic. buildProbeReport's parentEnv input has zero production call sites by design: the plan made it OPTIONAL so it ships independently, and 05-04 supplies process.env from index.ts's single probe site. Matches the Phase 3/4 precedent of not flipping an id on the plan that merely touched it.
+- [Phase 05]: writeChatMcpConfig ships as (name, spec, sdk) — a third sdk parameter beyond 05-04's <interfaces> contract, because the T-05-13 expansion guard must log through sdk.console.error
+- [Phase 05]: A SpawnWithEnv function alias bridges Caido's SpawnOptions, which declares no env although LLRT's runtime honours it (Pitfall 7); it narrows rather than widens, keeping env a required typed Record
+- [Phase 05]: refreshActiveMcpRuntime keeps its own token check so the 'invalid' auth state is not downgraded to a generic 'error' by the keystone's single error channel
+- [Phase 05]: 05-VALIDATION.md row V-6 expects one surviving spawnAndWait(chmod); the correct count after 05-04 is 2 and becomes 1 only after 05-05. Recorded for 05-06 to correct, not retuned in 05-04
 
 ### Pending Todos
 
@@ -198,8 +203,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-20T13:08:00.889Z
-Stopped at: Completed 05-03-PLAN.md
+Last session: 2026-08-20T13:28:57.195Z
+Stopped at: Completed 05-04-PLAN.md
 Resume file: None
 
 **Live on the public remote: nothing of ours.** Plan 03-04 tore down all three `scratch/*` branches (`ci-proof-windows-probe`, `ci-proof-windows-probe-negative`, `ci-proof-windows-gate-negative`) locally and remotely. Asserted with a `test -z` discrimination over the captured glob (`scratch-glob-empty=0`) plus the full unfiltered listing, which now shows only `main` at `2d8cf16` and the pre-existing, unrelated `fix/security-hotfixes` at `0cd81f3`. `origin/main` was never pushed by this phase and is still `2d8cf16`; local `main` is 23 commits ahead and deliberately unpushed. **Re-verified 2026-08-13 (plan 03-05):** the remote still lists only `main` `2d8cf16` and the pre-existing `fix/security-hotfixes` `0cd81f3`, and all eight Phase 3 run records (4 probe + 4 `CI` control) still resolve with their recorded conclusions — which is what makes the URLs in `03-FINDINGS.md` valid citations after the branches were deleted. The probe **artifacts** do not survive: they expire 2026-09-12, which is why D-11 required the committed findings document.
