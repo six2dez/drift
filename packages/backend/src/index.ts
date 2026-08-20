@@ -95,6 +95,16 @@ import {
   normalizePlatform,
   type Platform,
 } from "./platform";
+// The Phase 5 keystone (plan 05-01). Pure, zero-I/O, and the ONLY source of the
+// command/args/env triple for every Drift-owned MCP spawn and config document.
+// Everything imported here is exercised by mcp-server-spec.test.ts and
+// mcp-server-spec.spawn.test.ts — which is the whole point, because index.ts is
+// not importable under vitest and nothing in THIS file is test-reachable.
+import {
+  buildMcpDriftVars,
+  buildMcpServerSpec,
+  type McpServerSpec,
+} from "./mcp-server-spec";
 import { withFsRetry } from "./fs-retry";
 import { createActivityCursor, readActivityTick } from "./activity-tail";
 import {
@@ -144,6 +154,12 @@ function err<T>(error: string): Result<T> {
 
 const NODE_EXECUTABLE_ERROR =
   "Drift could not locate a Node.js executable to launch the MCP server. Restart Caido from an environment where Node.js is available.";
+// The one no-token sentence, previously spelled out at four call sites. It is a
+// user-facing string that requireMcpServerSpec now produces, so the sites that
+// used to compose it read it from here instead of drifting apart.
+const NO_CAIDO_TOKEN_MESSAGE =
+  "No Caido access token is available. Open any Caido page (or reauthenticate) so Drift can pick up your session, then retry.";
+const MCP_RUNTIME_NOT_RUNNING_MESSAGE = "Drift MCP runtime is not running.";
 const CLAUDE_ASSISTANT_RECOVERY_IDLE_MS = 1500;
 const CLAUDE_STREAM_RECOVERY_IDLE_MS = 8000;
 const CLAUDE_POST_TOOL_QUIESCENCE_MS = 15000;
@@ -430,6 +446,27 @@ function readWindowsEnvPresence(): Record<string, boolean> {
   }
 }
 
+// The parent process environment, read through the same `globalThis` guard shape
+// as readVersionBlock (:316) and readWindowsEnvPresence (:414) — never a bare
+// `process.` reference, which is a ReferenceError rather than an `undefined` in a
+// runtime that does not declare the global. Caido's @caido/quickjs-types declares
+// no `process` at all.
+//
+// The two consumers are buildMcpServerSpec's `parentEnv` (which merges it into
+// every MCP spawn env — finding L-4) and buildProbeReport's `parentEnv` (which
+// COUNTS it). Neither renders a value, and this function must never be used to
+// log one (T-04-04).
+function readParentEnv(): Record<string, string | undefined> {
+  const processRef = globalThis as typeof globalThis & {
+    process?: { env?: Record<string, string | undefined> };
+  };
+  try {
+    return processRef.process?.env ?? {};
+  } catch {
+    return {};
+  }
+}
+
 // RUN-05. The single `os` read of the whole backend, and the only place
 // os.platform() / os.tmpdir() are called.
 function probeRuntime(): Result<HostFacts> {
@@ -475,6 +512,11 @@ function probeRuntime(): Result<HostFacts> {
     realpathRungNote: REALPATH_NATIVE_PROBE_NOTE,
     windowsEnvPresent:
       normalized === "win32" ? readWindowsEnvPresence() : undefined,
+    // D-05's reported (never gating) metric, wired here because this is the
+    // backend's single probe site. runtime-probe.ts counts keys and PATH
+    // entries and renders integers only — it never names a key and never
+    // prints a value (T-04-04 / T-05-10).
+    parentEnv: readParentEnv(),
     version: readVersionBlock(),
   });
 
@@ -1010,6 +1052,19 @@ function getCurrentMcpToolPolicy(): McpToolPolicy {
   return buildMcpToolPolicy(currentSettings.mcpPermissions);
 }
 
+// A THIN ADAPTER over the pure buildMcpDriftVars. The signature and all four
+// call sites are unchanged; what changed is where the keys are decided.
+//
+// This function used to read TWO pieces of module state inline —
+// `currentSettings.caidoApi.url` and `getMcpContextFilePath()` — plus the
+// current tool policy. Those reads are why the env dict was unverifiable: they
+// made the key set a function of module singletons inside a file no test can
+// import. They are now INJECTED, and the dict itself (its key set, its
+// insertion order, DRIFT_ALLOWLIST_ACTIVE's unconditional presence, and the
+// three omit-when-absent spreads) is unit-tested in mcp-server-spec.test.ts.
+//
+// Insertion order is load-bearing, not cosmetic: JSON.stringify walks it, and
+// the Copilot config document's byte shape is a CMP-01 surface.
 function buildMcpRuntimeEnv(input: {
   caidoToken: string;
   toolPolicy?: McpToolPolicy;
@@ -1017,26 +1072,16 @@ function buildMcpRuntimeEnv(input: {
   approvalsFilePath?: string;
 }): Record<string, string> {
   const toolPolicy = input.toolPolicy ?? getCurrentMcpToolPolicy();
-  return {
-    CAIDO_URL: currentSettings.caidoApi.url,
-    CAIDO_TOKEN: input.caidoToken,
-    ...(getMcpContextFilePath() !== undefined
-      ? { DRIFT_CONTEXT_FILE: getMcpContextFilePath()! }
-      : {}),
-    // Signals to the MCP server that the allowlist is intentionally configured.
-    // With this set, an empty DRIFT_ALLOWED_TOOLS means "deny all" (every group
-    // disabled), not "allow all". See getAvailableTools() in mcp-server.mjs.
-    DRIFT_ALLOWLIST_ACTIVE: "1",
-    DRIFT_ALLOWED_TOOLS: toolPolicy.allowedToolNames.join(","),
-    DRIFT_CONFIRMATION_REQUIRED_TOOLS: toolPolicy.confirmationRequiredToolNames.join(","),
-    DRIFT_CONFIRM_SENSITIVE_ACTIONS: toolPolicy.confirmSensitiveActions ? "1" : "0",
-    ...(input.activityFilePath !== undefined
-      ? { DRIFT_ACTIVITY_FILE: input.activityFilePath }
-      : {}),
-    ...(input.approvalsFilePath !== undefined
-      ? { DRIFT_APPROVALS_FILE: input.approvalsFilePath }
-      : {}),
-  };
+  return buildMcpDriftVars({
+    caidoUrl: currentSettings.caidoApi.url,
+    caidoToken: input.caidoToken,
+    contextFilePath: getMcpContextFilePath(),
+    allowedToolNames: toolPolicy.allowedToolNames,
+    confirmationRequiredToolNames: toolPolicy.confirmationRequiredToolNames,
+    confirmSensitiveActions: toolPolicy.confirmSensitiveActions,
+    activityFilePath: input.activityFilePath,
+    approvalsFilePath: input.approvalsFilePath,
+  });
 }
 
 async function createSessionRuntimeFiles(sessionId: string): Promise<{
@@ -1181,7 +1226,16 @@ async function writeMcpWrapper(
   },
 ): Promise<string | undefined> {
   if (mcpTempDir === undefined) return undefined;
-  const wrapperPath = path.join(mcpTempDir, options?.name ?? "mcp-wrapper.sh");
+  // getMcpWrapperPath() is now the single source of truth for the surviving
+  // POSIX wrapper path — the one D-01 keeps alive for Gemini/Codex until Phase 7
+  // (PRV-03) lands their --env/-e registration. Taking the default from it
+  // instead of re-joining the literal here also keeps that function from
+  // becoming an unused local once the self-test stops calling it.
+  const wrapperPath =
+    options?.name !== undefined
+      ? path.join(mcpTempDir, options.name)
+      : getMcpWrapperPath();
+  if (wrapperPath === undefined) return undefined;
   const tempWrapperPath = `${wrapperPath}.tmp`;
   const runtimeEnv = buildMcpRuntimeEnv({
     caidoToken,
@@ -1206,8 +1260,15 @@ async function writeMcpWrapper(
   return wrapperPath;
 }
 
-async function validateCaidoAuth(wrapperPath: string): Promise<CaidoValidationResult> {
-  const result = await spawnAndWait(wrapperPath, ["--validate-auth"]);
+// HLT-01. Spawns `node mcp-server.mjs --validate-auth` DIRECTLY, with the env
+// handed to the child through the spawn option rather than through a wrapper
+// script's `export` lines. Everything below the spawn — the JSON parse, the
+// AUTHORIZATION/INVALID_TOKEN classification and the two fallbacks — is
+// unchanged, because the transport changed and the protocol did not.
+async function validateCaidoAuth(spec: McpServerSpec): Promise<CaidoValidationResult> {
+  const result = await spawnAndWait(spec.command, [...spec.args, "--validate-auth"], {
+    env: spec.env,
+  });
   const output = result.stdout.trim() || result.stderr.trim();
 
   try {
@@ -1542,17 +1603,29 @@ async function refreshActiveMcpRuntime(sdk: BackendSDK): Promise<string | undefi
   const mcpScriptPath = getTempMcpScriptPath();
   if (mcpScriptPath === undefined) return undefined;
 
+  // The token check stays OUTSIDE requireMcpServerSpec here, deliberately. This
+  // site distinguishes an absent token ("invalid" — reauthenticate in Caido) from
+  // every other failure ("error"), and that distinction reaches the user through
+  // the MCP status panel. Folding it into the keystone's single error channel
+  // would silently downgrade a recoverable auth state into a generic one.
   const caidoToken = getEffectiveCaidoToken();
   if (caidoToken === "") {
-    const message = "No Caido access token is available. Open any Caido page (or reauthenticate) so Drift can pick up your session, then retry.";
-    await cleanupMcpRuntime(sdk, "invalid", message);
-    return message;
+    await cleanupMcpRuntime(sdk, "invalid", NO_CAIDO_TOKEN_MESSAGE);
+    return NO_CAIDO_TOKEN_MESSAGE;
   }
 
-  const nodeExecutable = await requireNodeExecutable();
-  if (nodeExecutable.kind === "Error") {
-    await cleanupMcpRuntime(sdk, "error", nodeExecutable.error);
-    return nodeExecutable.error;
+  // RUN-01, and the site CONTEXT.md's list did not name. It is reached from a
+  // settings save AND from syncCaidoSessionToken, which the frontend polls as
+  // part of its keep-alive — so leaving it on the wrapper would mean the first
+  // token refresh on Windows tears down a working MCP runtime through the
+  // cleanupMcpRuntime call below.
+  //
+  // The return contract is unchanged and is NOT a Result: a message STRING on
+  // failure, `undefined` on success, cleanupMcpRuntime first.
+  const spec = await requireMcpServerSpec();
+  if (spec.kind === "Error") {
+    await cleanupMcpRuntime(sdk, "error", spec.error);
+    return spec.error;
   }
 
   if ((await writeMcpContextFile()) === undefined) {
@@ -1561,21 +1634,21 @@ async function refreshActiveMcpRuntime(sdk: BackendSDK): Promise<string | undefi
     return message;
   }
 
-  const wrapperPath = await writeMcpWrapper(mcpScriptPath, nodeExecutable.value, caidoToken);
-  if (wrapperPath === undefined) {
-    const message = "Settings were saved, but Drift failed to refresh the MCP wrapper. Restart the MCP server.";
-    await cleanupMcpRuntime(sdk, "error", message);
-    return message;
-  }
-
-  const validation = await validateCaidoAuth(wrapperPath);
+  const validation = await validateCaidoAuth(spec.value);
   if (!validation.ok) {
     await cleanupMcpRuntime(sdk, validation.authState, validation.message);
     return validation.message;
   }
 
   setMcpAuthStatus("valid", "");
-  await tryRegisterMcpForProviders(wrapperPath, sdk);
+  // TASK 2 OF PLAN 05-04 DELETES THIS WRAPPER WRITE. It is temporary: the write
+  // moves inside tryRegisterMcpForProviders together with the win32 guard, and
+  // exists here only so the registration call still compiles at this task
+  // boundary. Not a permanent shape.
+  const wrapperPath = await writeMcpWrapper(mcpScriptPath, spec.value.command, caidoToken);
+  if (wrapperPath !== undefined) {
+    await tryRegisterMcpForProviders(wrapperPath, sdk);
+  }
   await publishMcpStatus(sdk);
   return undefined;
 }
@@ -1650,6 +1723,87 @@ async function checkProviderAvailability(
   return ok(await checkProvider(providerId, { bypassCache: true }));
 }
 
+// ── MCP server spec keystone ────────────────────────────────────────
+
+// Caido's LLRT type surface declares SpawnOptions as
+// `{ uid?, gid?, cwd?, stdio?, shell?, windowsVerbatimArguments? }` and omits
+// `env` entirely (@caido/quickjs-types src/llrt/child_process.d.ts:239-255).
+// The RUNTIME honours it: LLRT's spawn reads the `env` option and REPLACES the
+// parent block with it, source-verified in modules/llrt_child_process/src/lib.rs
+// (05-RESEARCH.md finding L-2). This is § Pitfall 7 exactly — the published type
+// surface omits a capability the same project's source declares — so the
+// declaration is narrowed here rather than the capability abandoned.
+//
+// Deliberately NOT `as any` and NOT a widened SpawnOptions: this alias names the
+// EXACT call shape this file uses, so `env` stays a required, type-checked
+// Record<string, string> at both sites instead of becoming an unchecked hole.
+//
+// The env property is declared as Record<"env", …> rather than as a literal
+// `env:` member. It is exactly the same type — a REQUIRED env of
+// Record<string, string> — but it keeps the phase's env-site gate honest: that
+// gate enumerates every place an environment is handed to a CHILD PROCESS, and a
+// type declaration is not one. Spelling it as a member would put a permanent
+// non-value line into the gate's match set, which is the kind of noise that gets
+// a real gate relaxed later.
+type SpawnWithEnv = (
+  command: string,
+  args: string[],
+  options: Record<"env", Record<string, string>> & {
+    stdio: ["pipe", "pipe", "pipe"];
+  },
+) => ChildProcessWithoutNullStreams;
+const spawnWithEnv = spawn as unknown as SpawnWithEnv;
+
+// RUN-01. The ONE place index.ts decides how the MCP server is launched. Three
+// orchestration sites reach the server through this function — startMcpServer,
+// refreshActiveMcpRuntime (reached from a settings save AND from the frontend's
+// keep-alive token sync) and the shared self-test — plus, from plan 05-04's task
+// 2, both config writers.
+//
+// It replaces a write->chmod->rename->exec ladder with a direct `node` spawn: the
+// Caido token and the DRIFT_* variables travel in the spawn `env` option and the
+// config-JSON `env` field, never in a `#!/bin/bash` `export` line. That is what
+// makes the health path work on Windows, where a `.sh` is not executable at all.
+//
+// The path it hands to buildMcpServerSpec is getTempMcpScriptPath(), i.e.
+// path.join(mcpTempDir, "mcp-server.mjs") — verified identical to
+// startMcpServer's `mcpScriptLocal`, which is path.join(tempDir, "mcp-server.mjs")
+// with `mcpTempDir = tempDir` assigned immediately above the staging copy. There
+// is therefore no second join to keep in sync, and no override parameter is
+// needed.
+async function requireMcpServerSpec(options?: {
+  toolPolicy?: McpToolPolicy;
+  activityFilePath?: string;
+  approvalsFilePath?: string;
+}): Promise<Result<McpServerSpec>> {
+  const mcpScriptPath = getTempMcpScriptPath();
+  if (mcpScriptPath === undefined) return err(MCP_RUNTIME_NOT_RUNNING_MESSAGE);
+
+  const caidoToken = getEffectiveCaidoToken();
+  if (caidoToken === "") return err(NO_CAIDO_TOKEN_MESSAGE);
+
+  const nodeExecutable = await requireNodeExecutable();
+  if (nodeExecutable.kind === "Error") return err(nodeExecutable.error);
+
+  return ok(
+    buildMcpServerSpec({
+      nodeExecutable: nodeExecutable.value,
+      mcpScriptPath,
+      driftVars: buildMcpRuntimeEnv({
+        caidoToken,
+        toolPolicy: options?.toolPolicy,
+        activityFilePath: options?.activityFilePath,
+        approvalsFilePath: options?.approvalsFilePath,
+      }),
+      // Injected, never read inside the pure module. buildMcpServerSpec routes
+      // it through buildSpawnEnv, which is the single parent-merge point: a
+      // drift-only dict would be green on every runner this project has and
+      // broken only under Caido's LLRT (finding L-4).
+      parentEnv: readParentEnv(),
+    }),
+  );
+}
+
 // ── API: MCP ────────────────────────────────────────────────────────
 
 async function getMcpStatus(_sdk: BackendSDK): Promise<Result<McpServerInfo>> {
@@ -1707,37 +1861,32 @@ function getJsonRpcErrorMessage(response: JsonRpcResponse): string {
   return trimToString(response.error?.message) || "MCP request failed.";
 }
 
+// HLT-02. Takes the spec and spawns `node mcp-server.mjs` directly.
+//
+// What is GONE from this function: the `mcp-self-test-<requestId>.sh` launch
+// script it used to write whenever env vars were supplied (which
+// runSharedMcpSelfTest always did), the `launchPath` local and the
+// `cleanupLaunchScript` helper. That was a THIRD token-bearing file on disk; it
+// now simply does not exist, which is a net reduction in blast radius rather
+// than a relocation (D-10).
+//
+// Everything else is untouched on purpose: the line-DRAIN stdout buffer, the
+// activeSelfTestPoll pump the frontend keep-alive drives, the bounded stderr
+// tail and the <=10 s timeout.
 async function callMcpMethod(
-  wrapperPath: string,
+  spec: McpServerSpec,
   request: Record<string, unknown>,
-  envVars: Record<string, string> | undefined = undefined,
 ): Promise<{ response: JsonRpcResponse; durationMs: number }> {
   const requestId = typeof request.id === "number" ? request.id : 2;
   const methodName = typeof request.method === "string" ? request.method : "unknown";
-  let launchPath = wrapperPath;
-  if (envVars !== undefined && Object.keys(envVars).length > 0) {
-    const script = await writeLaunchScript(
-      `mcp-self-test-${requestId}.sh`,
-      wrapperPath,
-      [],
-      envVars,
-    );
-    if (script === undefined) {
-      throw new Error("Drift could not prepare the MCP self-test launcher.");
-    }
-    launchPath = script;
-  }
 
   return new Promise((resolve, reject) => {
     activeSelfTestPoll = undefined;
-    const proc = spawn(launchPath, [], {
+    const proc = spawnWithEnv(spec.command, spec.args, {
+      // Already parent-merged by buildSpawnEnv inside buildMcpServerSpec.
+      env: spec.env,
       stdio: ["pipe", "pipe", "pipe"],
     });
-    const cleanupLaunchScript = () => {
-      if (launchPath !== wrapperPath) {
-        void rm(launchPath, { force: true }).catch(() => undefined);
-      }
-    };
 
     // NOT a BoundedBuffer, and it must not become one. This is a line-DRAIN
     // buffer: complete lines are parsed out of it and only the trailing partial
@@ -1767,7 +1916,6 @@ async function callMcpMethod(
       if (settled) return;
       settled = true;
       try { proc.kill("SIGKILL"); } catch { /* ignore */ }
-      cleanupLaunchScript();
       activeSelfTestPoll = undefined;
       reject(new Error(`Timed out waiting for MCP response: ${methodName}`));
     }, Math.min(currentSettings.processTimeoutSeconds * 1000, 10000));
@@ -1790,7 +1938,6 @@ async function callMcpMethod(
       if (settled) return;
       settled = true;
       clearTimeout(timeout);
-      cleanupLaunchScript();
       activeSelfTestPoll = undefined;
       const trimmedStdout = stdoutBuffer.trim();
       if (trimmedStdout !== "") {
@@ -1820,7 +1967,6 @@ async function callMcpMethod(
       activeSelfTestPoll = undefined;
       callback();
       proc.stdin?.end();
-      cleanupLaunchScript();
       setTimeout(() => {
         try { proc.kill("SIGTERM"); } catch { /* ignore */ }
       }, 0);
@@ -1881,6 +2027,17 @@ async function callMcpMethod(
       stderr = appendBounded(stderr, chunk.toString());
     });
 
+    // MANDATORY, and mandatorily SYNCHRONOUS. Under Caido's LLRT a spawn failure
+    // is delivered asynchronously (modules/llrt_child_process/src/lib.rs:293-312)
+    // and, if no "error" listener is registered when the deferred task runs, it is
+    // thrown into the runtime with no JS frame to catch it. Registering it here,
+    // in the same synchronous block as the spawn, is what keeps a failed spawn a
+    // rejected promise instead of an unhandled runtime exception.
+    //
+    // The error carries a MESSAGE and no `code` under LLRT (it is an
+    // Exception::from_message reading `Child process failed to spawn "<cmd>". …`),
+    // so any classification added here must match on the message text, the way
+    // fs-retry.ts already classifies transient filesystem errors.
     proc.on("error", (error: Error) => {
       finish(() => reject(error));
     });
@@ -1918,16 +2075,10 @@ async function runSharedMcpSelfTest(): Promise<{
   checks: McpSelfTestCheck[];
   error: string;
 }> {
-  const wrapperPath = getMcpWrapperPath();
-  if (wrapperPath === undefined || !(await fileExists(wrapperPath))) {
-    const message = "Drift MCP runtime is not running.";
-    return { checks: createFailedSelfTestChecks(message), error: message };
-  }
-
-  const checks: McpSelfTestCheck[] = [];
-  let combinedError = "";
-  const selfTestEnv = buildMcpRuntimeEnv({
-    caidoToken: getEffectiveCaidoToken(),
+  // The self-test runs against EVERY tool group, so a permission setting cannot
+  // make a working server look broken. The policy is built here and handed to
+  // the keystone, which folds it into the spec's driftVars.
+  const spec = await requireMcpServerSpec({
     toolPolicy: buildMcpToolPolicy({
       enabledGroups: {
         read: true,
@@ -1940,14 +2091,33 @@ async function runSharedMcpSelfTest(): Promise<{
       confirmSensitiveActions: false,
     }),
   });
+  if (spec.kind === "Error") {
+    return {
+      checks: createFailedSelfTestChecks(spec.error),
+      error: spec.error,
+    };
+  }
+  // The staged mcp-server.mjs, not a wrapper script. Same existence check as
+  // before and the same message; what it points at is now the file the child
+  // actually executes.
+  const mcpScriptPath = spec.value.args[0];
+  if (mcpScriptPath === undefined || !(await fileExists(mcpScriptPath))) {
+    return {
+      checks: createFailedSelfTestChecks(MCP_RUNTIME_NOT_RUNNING_MESSAGE),
+      error: MCP_RUNTIME_NOT_RUNNING_MESSAGE,
+    };
+  }
+
+  const checks: McpSelfTestCheck[] = [];
+  let combinedError = "";
 
   try {
-    const toolsList = await callMcpMethod(wrapperPath, {
+    const toolsList = await callMcpMethod(spec.value, {
       jsonrpc: "2.0",
       id: 2,
       method: "tools/list",
       params: {},
-    }, selfTestEnv);
+    });
     const toolNames = toolsList.response.result?.tools
       ?.map((tool) => trimToString(tool.name))
       .filter((name) => name !== "") ?? [];
@@ -1976,7 +2146,7 @@ async function runSharedMcpSelfTest(): Promise<{
 
   for (const [offset, toolName] of ["get_environment", "search_history"].entries()) {
     try {
-      const response = await callMcpMethod(wrapperPath, {
+      const response = await callMcpMethod(spec.value, {
         jsonrpc: "2.0",
         id: 3 + offset,
         method: "tools/call",
@@ -1984,7 +2154,7 @@ async function runSharedMcpSelfTest(): Promise<{
           name: toolName,
           arguments: toolName === "search_history" ? { limit: 1 } : {},
         },
-      }, selfTestEnv);
+      });
       const ok =
         response.response.error === undefined &&
         response.response.result?.isError !== true;
@@ -2102,9 +2272,26 @@ async function runMcpSelfTest(
 
 // ── MCP registration helpers for Gemini/Codex ───────────────────────
 
-function spawnAndWait(cmd: string, args: string[]): Promise<{ code: number; stdout: string; stderr: string }> {
+// The third parameter is OPTIONAL, so the ~8 existing call sites are literally
+// unchanged — the same "PUBLIC shape unchanged" discipline the resolve-boundary
+// comment below already states. It exists because validateCaidoAuth now spawns
+// `node` directly and the env has to reach the child somehow; it used to arrive
+// through the wrapper script's `export` lines.
+//
+// The forwarding is written as two explicit spawn calls rather than a conditional
+// spread so that `env: options.env` survives as a greppable object KEY: the phase
+// gate asserts every env handed to a child process is `spec.env`,
+// `buildSpawnEnv(...)` or this forwarded value, and a spread would hide it.
+function spawnAndWait(
+  cmd: string,
+  args: string[],
+  options?: { env?: Record<string, string> },
+): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
-    const proc = spawn(cmd, args, { stdio: ["pipe", "pipe", "pipe"] });
+    const proc =
+      options?.env === undefined
+        ? spawn(cmd, args, { stdio: ["pipe", "pipe", "pipe"] })
+        : spawnWithEnv(cmd, args, { stdio: ["pipe", "pipe", "pipe"], env: options.env });
     // Head retention: every consumer of this stream reads the FIRST line - a
     // `which` path, a `node --version` string, a short `mcp add` acknowledgement.
     let stdout = createBoundedBuffer({
@@ -2379,7 +2566,7 @@ async function startMcpServer(sdk: BackendSDK): Promise<Result<McpServerInfo>> {
   // Check prerequisites
   const caidoToken = getEffectiveCaidoToken();
   if (caidoToken === "") {
-    const message = "No Caido access token is available. Open any Caido page (or reauthenticate) so Drift can pick up your session, then retry.";
+    const message = NO_CAIDO_TOKEN_MESSAGE;
     setMcpAuthStatus("invalid", message);
     await publishMcpStatus(sdk);
     return err(message);
@@ -2521,14 +2708,18 @@ async function startMcpServer(sdk: BackendSDK): Promise<Result<McpServerInfo>> {
     return err(message);
   }
 
-  const wrapperPath = await writeMcpWrapper(mcpScriptLocal, nodeExecutable.value, caidoToken);
-  if (wrapperPath === undefined) {
-    const message = "Failed to create MCP wrapper script.";
-    await cleanupMcpRuntime(sdk, "error", message);
-    return err(message);
+  // RUN-01. The wrapper write -> chmod -> validate ladder is replaced by one
+  // spec and a direct `node --validate-auth` spawn. getTempMcpScriptPath()
+  // inside the keystone resolves to exactly `mcpScriptLocal`: both are
+  // path.join(<this temp dir>, "mcp-server.mjs") and `mcpTempDir = tempDir` was
+  // assigned immediately above the staging copy.
+  const spec = await requireMcpServerSpec();
+  if (spec.kind === "Error") {
+    await cleanupMcpRuntime(sdk, "error", spec.error);
+    return err(spec.error);
   }
 
-  const validation = await validateCaidoAuth(wrapperPath);
+  const validation = await validateCaidoAuth(spec.value);
   if (!validation.ok) {
     await cleanupMcpRuntime(sdk, validation.authState, validation.message);
     return err(validation.message);
@@ -2540,7 +2731,15 @@ async function startMcpServer(sdk: BackendSDK): Promise<Result<McpServerInfo>> {
   // enabled + resolvable. The helper also populates the
   // `registeredMcpCliPaths` map so cleanup later runs against the
   // exact binary we used, regardless of future enabled-flag changes.
-  await tryRegisterMcpForProviders(wrapperPath, sdk);
+  //
+  // TASK 2 OF PLAN 05-04 DELETES THIS WRAPPER WRITE. It is temporary: the write
+  // moves inside tryRegisterMcpForProviders together with the win32 guard, and
+  // exists here only so the registration call still compiles at this task
+  // boundary. Not a permanent shape.
+  const wrapperPath = await writeMcpWrapper(mcpScriptLocal, nodeExecutable.value, caidoToken);
+  if (wrapperPath !== undefined) {
+    await tryRegisterMcpForProviders(wrapperPath, sdk);
+  }
   cliSessions.clear();
 
   await publishMcpStatus(sdk);
@@ -2719,7 +2918,7 @@ async function sendCliMessage(
         if (mcpScriptPath !== undefined) {
           if (caidoToken === "") {
             setSessionState("error", "No Caido access token is available for this provider turn.");
-            return err("No Caido access token is available. Open any Caido page (or reauthenticate) so Drift can pick up your session, then retry.");
+            return err(NO_CAIDO_TOKEN_MESSAGE);
           }
           const nodeExecutable = await requireNodeExecutable();
           if (nodeExecutable.kind === "Error") {
@@ -2781,7 +2980,7 @@ async function sendCliMessage(
         if (mcpScriptPath !== undefined) {
           if (caidoToken === "") {
             setSessionState("error", "No Caido access token is available for this provider turn.");
-            return err("No Caido access token is available. Open any Caido page (or reauthenticate) so Drift can pick up your session, then retry.");
+            return err(NO_CAIDO_TOKEN_MESSAGE);
           }
           const nodeExecutable = await requireNodeExecutable();
           if (nodeExecutable.kind === "Error") {
