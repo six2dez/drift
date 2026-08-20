@@ -1278,9 +1278,15 @@ async function resolveCommand(
   // for being moved into the resolver callback. Date.now() is read HERE and
   // never inside resolution-cache.ts, which is what keeps that module's expiry
   // tests deterministic.
+  //
+  // `clock` is the SECOND read, taken when the resolve finishes. The walk above
+  // can take seconds on a cold cache, and stamping the entry with the instant
+  // the walk STARTED would make it born already aged by that much — a slow
+  // resolve shortening its own TTL.
   return await resolveWithCache(resolutionCache, {
     key: `cmd:${command}`,
     now: Date.now(),
+    clock: () => Date.now(),
     bypass: options?.bypassCache,
     resolve: async () => {
       const pathResolution = await new Promise<string | undefined>((resolve) => {
@@ -2168,7 +2174,16 @@ async function getNodeExecutable(): Promise<string | undefined> {
 // The nesting is therefore a saving, not a duplication: a miss on the outer key
 // costs at most a CACHED inner hit instead of a second which spawn.
 async function getCachedNodeExecutable(): Promise<string | undefined> {
-  return await resolveWithCache(resolutionCache, { key: "node", now: Date.now(), resolve: getNodeExecutable });
+  // `clock` for the same reason as resolveCommand: getNodeExecutable spawns
+  // `which node`, walks every version-manager directory and runs
+  // `node --version` on each candidate, so its entry must be stamped when that
+  // finished rather than when it began.
+  return await resolveWithCache(resolutionCache, {
+    key: "node",
+    now: Date.now(),
+    clock: () => Date.now(),
+    resolve: getNodeExecutable,
+  });
 }
 
 async function requireNodeExecutable(): Promise<Result<string>> {

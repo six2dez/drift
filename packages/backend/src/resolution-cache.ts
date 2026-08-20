@@ -39,8 +39,20 @@ export type ResolutionCacheEntry = {
 // is being invalidated on every settings save (the failure mode a key-order-
 // dependent signature would cause) visible in getDiagnostics instead of merely
 // slow.
+//
+// `inFlight` is NOT a second cache. It holds the promise of a resolve that has
+// started and not yet settled, so a concurrent caller for the same key JOINS it
+// instead of running the whole walk again. PERF-03's stated aim is "collapsing
+// the repeated walk across a burst of turns", and a burst is concurrent by
+// definition: without this, getDiagnostics running while startMcpServer is
+// resolving Node performs the readdir + stat + `node --version` walk twice. It
+// is deliberately NOT cleared by clearResolutionCache — an invalidation must
+// not orphan callers already awaiting an answer; their entry is simply written
+// after the clear, which is the correct outcome for a resolve that started
+// before the settings changed.
 export type ResolutionCacheState = {
   entries: Map<string, ResolutionCacheEntry>;
+  inFlight: Map<string, Promise<string | undefined>>;
   signature: string;
   positiveTtlMs: number;
   negativeTtlMs: number;
@@ -53,6 +65,7 @@ export function createResolutionCacheState(options?: {
 }): ResolutionCacheState {
   return {
     entries: new Map<string, ResolutionCacheEntry>(),
+    inFlight: new Map<string, Promise<string | undefined>>(),
     signature: "",
     positiveTtlMs: options?.positiveTtlMs ?? RESOLUTION_POSITIVE_TTL_MS,
     negativeTtlMs: options?.negativeTtlMs ?? RESOLUTION_NEGATIVE_TTL_MS,
@@ -109,12 +122,24 @@ export function writeResolutionCache(
 // only the read would leave the stale value in place for the next caller, so
 // the user who pressed "Check" after installing a CLI would see the fresh
 // answer once and the stale one immediately afterwards.
+//
+// `clock` is the write-side timestamp and is INJECTED for the same reason `now`
+// is: determinism. `now` stays the READ timestamp so every expiry test keeps
+// working unchanged. They are two different instants on purpose — the entry is
+// stamped when the resolve FINISHED, not when it started. getNodeExecutable
+// spawns `which node`, walks every version-manager directory and runs
+// `node --version` on each candidate, which on a cold cache takes seconds;
+// stamping with the pre-resolve `now` births the entry already aged by exactly
+// that much, so a slow resolve shortens its own TTL. That bites hardest on the
+// 30 s negative TTL, whose resolve is BY DEFINITION the slow one, because a
+// miss is the input that exhausts every candidate.
 export async function resolveWithCache(
   state: ResolutionCacheState,
   input: {
     key: string;
     now: number;
     bypass?: boolean;
+    clock?: () => number;
     resolve: () => Promise<string | undefined>;
   },
 ): Promise<string | undefined> {
@@ -124,14 +149,40 @@ export async function resolveWithCache(
       now: input.now,
     });
     if (cached.hit) return cached.value;
+
+    // Join a resolve already in progress for this key rather than starting a
+    // second one. `bypass` never joins: it exists so the user's manual "Check"
+    // button gets a genuinely fresh answer, and joining a walk that started
+    // before they installed the CLI would hand back exactly the stale answer
+    // they pressed the button to escape.
+    const pending = state.inFlight.get(input.key);
+    if (pending !== undefined) return await pending;
+  }
+
+  const run = input.resolve();
+  state.inFlight.set(input.key, run);
+  let resolved: string | undefined;
+  try {
+    resolved = await run;
+  } finally {
+    // Removed on rejection too, or one failed resolve would pin every later
+    // caller to a permanently rejected promise.
+    if (state.inFlight.get(input.key) === run) {
+      state.inFlight.delete(input.key);
+    }
   }
 
   // Writes `undefined` too — that IS the negative cache, not a skipped write.
-  const resolved = await input.resolve();
+  //
+  // The default is `input.now` rather than a wall clock because this module
+  // reads no clock of its own (that is what keeps the expiry tests
+  // deterministic), and because for a resolver that completes instantly the two
+  // instants ARE the same — which is the case for every injected fake. A caller
+  // whose resolve can take seconds passes `clock` and gets the honest one.
   writeResolutionCache(state, {
     key: input.key,
     value: resolved,
-    now: input.now,
+    now: input.clock === undefined ? input.now : input.clock(),
   });
   return resolved;
 }

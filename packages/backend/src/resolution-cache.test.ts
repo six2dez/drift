@@ -39,6 +39,127 @@ describe("resolveWithCache", () => {
     expect(second).toBe("/usr/bin/node");
   });
 
+  it("collapses concurrent callers for one key onto a single in-flight resolve", async () => {
+    // PERF-03's stated aim is "collapsing the repeated walk across a burst of
+    // turns", and a burst is concurrent by definition. Without in-flight
+    // sharing, getDiagnostics running while startMcpServer resolves Node
+    // performs the readdir + stat + `node --version` walk twice.
+    const state = createResolutionCacheState();
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((resolveGate) => {
+      release = resolveGate;
+    });
+    const resolve = vi.fn(async () => {
+      await gate;
+      return "/usr/bin/node";
+    });
+
+    const first = resolveWithCache(state, { key: "node", now: 0, resolve });
+    const second = resolveWithCache(state, { key: "node", now: 0, resolve });
+    const other = resolveWithCache(state, {
+      key: "claude",
+      now: 0,
+      resolve,
+    });
+    release?.();
+
+    expect(await first).toBe("/usr/bin/node");
+    expect(await second).toBe("/usr/bin/node");
+    expect(await other).toBe("/usr/bin/node");
+    // Twice, not three times: the two "node" callers share one walk, and the
+    // different key is not collapsed into it.
+    expect(resolve).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not join an in-flight resolve when the caller asked to bypass", async () => {
+    // The bypass exists so the user's manual "Check" button gets a genuinely
+    // fresh answer. Joining a walk that started before they installed the CLI
+    // would hand back exactly the stale answer they pressed the button to
+    // escape.
+    const state = createResolutionCacheState();
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((resolveGate) => {
+      release = resolveGate;
+    });
+    const resolve = vi.fn(async () => {
+      await gate;
+      return "/usr/bin/node";
+    });
+
+    const pending = resolveWithCache(state, { key: "node", now: 0, resolve });
+    const bypassed = resolveWithCache(state, {
+      key: "node",
+      now: 0,
+      bypass: true,
+      resolve,
+    });
+    release?.();
+
+    await pending;
+    await bypassed;
+    expect(resolve).toHaveBeenCalledTimes(2);
+  });
+
+  it("releases the in-flight slot when the resolver rejects", async () => {
+    // A rejected promise left in the map would pin every later caller to that
+    // same failure for the life of the process.
+    const state = createResolutionCacheState();
+    const failing = vi.fn(async (): Promise<string | undefined> => {
+      throw new Error("walk exploded");
+    });
+
+    await expect(
+      resolveWithCache(state, { key: "node", now: 0, resolve: failing }),
+    ).rejects.toThrow("walk exploded");
+
+    const recovered = vi.fn(async () => "/usr/bin/node");
+    expect(
+      await resolveWithCache(state, {
+        key: "node",
+        now: 0,
+        resolve: recovered,
+      }),
+    ).toBe("/usr/bin/node");
+    expect(recovered).toHaveBeenCalledTimes(1);
+  });
+
+  it("stamps the entry when the resolve finished, not when it started", async () => {
+    // A cold getNodeExecutable spawns `which node`, walks every version-manager
+    // directory and runs `node --version` on each candidate. Stamping with the
+    // pre-resolve instant births the entry already aged by that much, so a slow
+    // resolve shortens its own TTL — worst for the 30 s negative TTL, whose
+    // resolve is by definition the slow one because a miss exhausts every
+    // candidate.
+    const state = createResolutionCacheState();
+    const startedAt = 0;
+    const finishedAt = RESOLUTION_NEGATIVE_TTL_MS - 1;
+    const resolve = vi.fn(async () => undefined);
+
+    await resolveWithCache(state, {
+      key: "node",
+      now: startedAt,
+      clock: () => finishedAt,
+      resolve,
+    });
+
+    // Live at finishedAt + (TTL - 1): only true if storedAt is finishedAt.
+    const stillLive = await resolveWithCache(state, {
+      key: "node",
+      now: finishedAt + RESOLUTION_NEGATIVE_TTL_MS - 1,
+      resolve,
+    });
+    expect(stillLive).toBeUndefined();
+    expect(resolve).toHaveBeenCalledTimes(1);
+
+    // And it does expire on the far side of the TTL measured from finishedAt.
+    await resolveWithCache(state, {
+      key: "node",
+      now: finishedAt + RESOLUTION_NEGATIVE_TTL_MS + 1,
+      resolve,
+    });
+    expect(resolve).toHaveBeenCalledTimes(2);
+  });
+
   it("expires a positive entry and re-resolves once the clock passes the TTL", async () => {
     const state = createResolutionCacheState();
     const resolve = vi.fn(async () => "/usr/bin/node");
