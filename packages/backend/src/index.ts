@@ -290,6 +290,12 @@ let lastProbeReport: ProbeReport | undefined;
 // the 1,500 ms ladder was long enough, so FS_RETRY_DELAYS_MS can be widened on
 // evidence rather than on a guess.
 let lastFirstWriteAttempts = 0;
+// The same evidence channel as lastFirstWriteAttempts, for the OTHER production
+// call site of the retry ladder (writeTemp). Kept separate rather than folded
+// into the field above: that one answers "did the one-time staging copy survive
+// Defender", this one answers "did a per-turn config write", and collapsing them
+// would let the hot path overwrite the start-up answer on every send.
+let lastTempWriteAttempts = 0;
 
 // PERF-02 / WR-09's evidence channel for the activity tail. The tail is the one
 // truncation site in the backend that emits NO marker into any user-visible
@@ -735,13 +741,67 @@ async function enforceOwnerOnlyDir(dir: string): Promise<number | undefined> {
   }
 }
 
+// RUN-04's second production call site for the retry ladder. Until this edit
+// the ladder wrapped exactly one operation - the one-time mcp-server.mjs
+// staging copy - and a ladder with a single caller is one refactor away from
+// being inert. (The ladder's identifier is deliberately not spelled in this
+// comment: the phase's call-site gate counts it over the RAW file, and a
+// mention in prose would inflate the count that keeps it honest.)
+//
+// TRUE SCOPE, enumerated rather than assumed. `writeTemp` has exactly two
+// callers, and the ladder covers those two and nothing else:
+//
+//   writeChatMcpConfig  - Claude's `mcp-<chatId>.json` and Copilot's
+//                         `copilot-mcp-<chatId>.json`, both of which embed the
+//                         literal Caido session token
+//   getDiagnostics      - the `test-diag.json` writability probe
+//
+// The context file and the per-session activity/approval files are written
+// through their own `writeFile` calls and do NOT pass through here, so they are
+// outside this edit. That is narrower than 05-RESEARCH.md's list, which the
+// enumeration does not support.
+//
+// WHAT THE LADDER DOES NOT COVER, stated so nobody later justifies it with a
+// failure it cannot reach: the external CLI's READ of the config file. Drift
+// does not perform that read, so Drift cannot retry it. What is retried here is
+// the WRITE - `mkdir` plus `writeFile` under an anti-virus handle - which is
+// the half Drift actually owns.
+//
+// THE TRADEOFF, so a later reader can weigh it rather than rediscover it: this
+// sits on the per-turn hot path, because writeChatMcpConfig runs on every
+// Claude and Copilot send. A transient error now costs up to the ladder's full
+// duration instead of failing fast. That duration was chosen to sit inside
+// human tolerance for a button press, which is the only reason the cost is
+// acceptable here at all - widening FS_RETRY_DELAYS_MS is not free on this path.
+//
+// Both `mode:` options stay UNCONDITIONAL. LLRT's set_mode is a total no-op
+// returning Ok(()) on non-unix and Node silently ignores mode on Windows, so a
+// platform guard would double the branch count for zero behaviour change while
+// risking a POSIX regression (T-04-30).
 async function writeTemp(dir: string, name: string, content: string): Promise<string> {
-  await mkdir(dir, { recursive: true, mode: 0o700 });
   const fp = path.join(dir, name);
-  // 0o600: these temp files can carry the Caido token (e.g. the Copilot MCP
-  // config embeds it). The 0o700 parent dir already blocks other users, but
-  // restrict the file too as defense-in-depth.
-  await writeFile(fp, content, { mode: 0o600 });
+  const written = await withFsRetry(
+    async () => {
+      await mkdir(dir, { recursive: true, mode: 0o700 });
+      // 0o600: these temp files can carry the Caido token (e.g. the Copilot MCP
+      // config embeds it). The 0o700 parent dir already blocks other users, but
+      // restrict the file too as defense-in-depth.
+      await writeFile(fp, content, { mode: 0o600 });
+    },
+    {
+      onRetry: (info) => {
+        console.error(
+          `[drift] Transient filesystem error writing ${name} (attempt ${String(info.attempt)}, code ${info.code}); retrying in ${String(info.delayMs)}ms`,
+        );
+      },
+    },
+  );
+  lastTempWriteAttempts = written.attempts;
+  // The ladder exhausted. Surface the failure to the caller rather than handing
+  // back a path to a file that may not exist or may be half-written: every
+  // caller already treats a throw from here as the write having failed, and a
+  // returned path is a promise that the content is on disk.
+  if (written.kind === "Error") throw new Error(written.error);
   return fp;
 }
 
@@ -797,6 +857,22 @@ async function writeChatMcpConfig(
   );
 }
 
+// TEMPORARY — DELETED IN PHASE 7 (PRV-03).
+//
+// POSIX-only, and it survives this phase for exactly one reason: Gemini and
+// Codex are registered with `mcp add drift -- <wrapper>`, which persists a PATH
+// and nothing else, so the `export` lines this function renders are the SOLE
+// carrier of CAIDO_URL, CAIDO_TOKEN and the DRIFT_* tool-policy variables for
+// those two CLIs on darwin and linux. Deleting it now, before Phase 7 lands
+// their env-passing registration, would be a live CMP-01 compatibility
+// regression for two shipping providers on the platforms the entire user base
+// runs today - not a theoretical one (D-01).
+//
+// The due date is named literally because an undated "temporary" comment
+// becomes permanent: Phase 7, PRV-03.
+//
+// Its `passThroughArgs` option now has exactly one caller, which is correct and
+// not an invitation to simplify the body - Phase 7 deletes the whole function.
 function renderExportExecScript(
   command: string,
   args: string[],
@@ -888,6 +964,20 @@ async function disposeSessionDebugLog(logPath: string | undefined): Promise<void
   await rm(logPath, { force: true }).catch(() => undefined);
 }
 
+// TEMPORARY — DELETED IN PHASE 7 (PRV-03).
+//
+// POSIX-only, and it exists solely to quote the values the export-script
+// renderer above writes into the surviving Gemini/Codex wrapper - the wrapper
+// whose `export` lines are the only carrier of the Caido token and the
+// tool-policy variables for those two CLIs on darwin and linux. It has no
+// caller outside that render path, so it dies with it. (That renderer's
+// identifier is deliberately not spelled here: the phase counts it over the RAW
+// file and expects exactly two - the definition and the one call.) Deleting either one before Phase 7's env-passing
+// registration lands would be a live CMP-01 regression for two shipping
+// providers on the platforms the entire user base runs today (D-01).
+//
+// The due date is named literally because an undated "temporary" comment
+// becomes permanent: Phase 7, PRV-03.
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, "'\"'\"'")}'`;
 }
@@ -975,6 +1065,15 @@ function updateCaidoHistoryContext(input: Partial<CaidoContextSnapshot>): boolea
   return changed;
 }
 
+// The path of the surviving POSIX Gemini/Codex wrapper. Its rationale and its
+// removal date live in ONE place, on writeMcpWrapper below - read that block
+// rather than this one.
+//
+// The dated literal is deliberately NOT repeated here. The phase counts those
+// notices repository-wide and expects exactly four (the Windows probe workflow
+// header plus the three functions that render and write the wrapper), so a
+// fourth copy added here to be helpful would break the count that keeps the
+// survivors owned. Say it once, in the place that does the writing.
 function getMcpWrapperPath(): string | undefined {
   if (mcpTempDir === undefined) return undefined;
   return path.join(mcpTempDir, "mcp-wrapper.sh");
@@ -1241,6 +1340,12 @@ function renderHttpContextAttachment(httpContext: HttpContextPayload | undefined
 //
 // Its ONLY caller is tryRegisterMcpForProviders, which does not call it at all on
 // win32 — so no `.sh` is written and no `chmod` is spawned there (D-02/D-03).
+//
+// The win32-unreachability tripwire D-02 asks for is the pure
+// `planMcpCliRegistration` unit case in mcp-server-spec.test.ts, NOT an
+// assertion inside this file: index.ts is not importable under vitest (no
+// caido:plugin alias), so no test can execute a line of it. The predicate is
+// what is tested; that this function sits behind it is static-gate evidence.
 // It takes the spec so the wrapper and the direct spawn can never describe two
 // different launches.
 async function writeMcpWrapper(spec: McpServerSpec): Promise<string | undefined> {
@@ -3979,6 +4084,8 @@ async function getDiagnostics(_sdk: BackendSDK): Promise<Result<Record<string, s
     // 1,500 ms ladder was long enough, and FS_RETRY_DELAYS_MS can then be
     // widened on evidence instead of on a guess.
     mcpFirstWriteAttempts: String(lastFirstWriteAttempts),
+    // Same purpose, the per-turn temp writes (the Claude/Copilot MCP configs).
+    mcpTempWriteAttempts: String(lastTempWriteAttempts),
     // The activity tail's drop tally. Bytes only — never any of the dropped
     // content, which is target-application data (T-04-04).
     activityDroppedBytes: String(lastActivityDroppedBytes),
