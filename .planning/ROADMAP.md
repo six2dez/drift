@@ -136,7 +136,7 @@ Three results bind the later phases, and Phase 4's criteria below encode the fir
 
 **Goal**: Establish the pure platform-abstraction layer and OS-portable temp/runtime plumbing that every later phase builds on, without changing macOS/Linux behavior.
 **Depends on**: Phase 3
-**Requirements**: RUN-03, RUN-04, RUN-05, CMP-02, PERF-02, PERF-03, PERF-04
+**Requirements**: RUN-03, RUN-05, CMP-02, PERF-02, PERF-03, PERF-04
 **Success Criteria** (what must be TRUE):
 
   1. A new pure `platform.ts` module (platform injected as a parameter, no I/O) is fully unit-tested on the Linux CI runner, covering temp root, `which`/`where` selection, home dirs, and executable candidate names.
@@ -186,7 +186,7 @@ Plans:
 
 **Goal**: Replace the POSIX shell-wrapper launch indirection with a single direct-`node`-spawn keystone so the MCP self-test and health check pass on Windows for the Claude path — the direct fix for the reported bug — with zero POSIX regressions.
 **Depends on**: Phase 4 (can proceed in parallel with Phase 6)
-**Requirements**: RUN-01, RUN-02, HLT-01, HLT-02, CMP-01
+**Requirements**: RUN-01, RUN-02, RUN-04, HLT-01, HLT-02, CMP-01
 **Success Criteria** (what must be TRUE):
 
   1. The MCP server launches via a single `buildMcpServerSpec()` → `spawnNode()` path that spawns `node` directly with `env`; `renderExportExecScript`, `writeMcpWrapper`, `writeLaunchScript`, `shellQuote`, every `chmod` call, and every `.sh` file are deleted from the codebase.

@@ -135,7 +135,7 @@ Which phases cover which requirements. Every v1 requirement maps to exactly one 
 | PERF-01 | Phase 2 | Pending |
 | CI-02 | Phase 3 | Complete |
 | RUN-03 | Phase 4 | Complete |
-| RUN-04 | Phase 4 | Pending |
+| RUN-04 | Phase 5 | Pending |
 | RUN-05 | Phase 4 | Complete |
 | CMP-02 | Phase 4 | Complete |
 | PERF-02 | Phase 4 | Complete |
@@ -174,30 +174,32 @@ Which phases cover which requirements. Every v1 requirement maps to exactly one 
 - Phase 1 (Restore the Verification Signal): SIG-01, SIG-02, SIG-03
 - Phase 2 (POSIX Correctness & Hardening): COR-01, COR-02, COR-03, COR-04, COR-05, SEC-01, SEC-02, SEC-03, SEC-04, SEC-05, PERF-01
 - Phase 3 (CI Spike): CI-02
-- Phase 4 (Platform Foundation): RUN-03, RUN-04, RUN-05, CMP-02, PERF-02, PERF-03, PERF-04
-- Phase 5 (Kill Shell Wrappers): RUN-01, RUN-02, HLT-01, HLT-02, CMP-01
+- Phase 4 (Platform Foundation): RUN-03, RUN-05, CMP-02, PERF-02, PERF-03, PERF-04
+- Phase 5 (Kill Shell Wrappers): RUN-01, RUN-02, RUN-04, HLT-01, HLT-02, CMP-01
 - Phase 6 (Windows Command Resolution): RES-01, RES-02, RES-03, UX-02
 - Phase 7 (Provider Spawn & Registration): PRV-01, PRV-02, PRV-03, PRV-04, PRV-05, UX-01
 - Phase 8 (Process Lifecycle): LIF-01, LIF-02
 - Phase 9 (CI Hardening): CI-01, CI-03
 - Phase 10 (Windows Polish): UX-03, UX-04
 
-**Deliberately held Pending at the close of Phase 4:**
+**Re-targeted to Phase 5 at the close of Phase 4:**
 
 - **RUN-04** — *"Drift's temp-file write→**spawn** path tolerates the Windows AV write-then-exec
   race (copy `mcp-server.mjs` once at start; bounded retry on `EPERM`/`EBUSY`)."* The parenthetical
   half **is** shipped: the one-time `mcp-server.mjs` staging copy is wrapped in `withFsRetry`
-  (`packages/backend/src/index.ts:2300`), the sole production call site, with a 6-attempt /
+  (`packages/backend/src/index.ts:2467`), the sole production call site, with a 6-attempt /
   ~1,500 ms ladder that logs code + attempt index and surfaces `mcpFirstWriteAttempts` in
   `getDiagnostics`. The headline half is **not**: the write→**exec** pair that
   `04-RESEARCH.md` names the single best-documented AV case is the `.tmp` write → `chmod +x` →
-  `rename` → spawn sequence in `writeLaunchScript` (`index.ts:642`) and `writeMcpWrapper`
-  (`index.ts:1086`), and both are still unwrapped — deliberately, because they are inside the bash
+  `rename` → spawn sequence in `writeLaunchScript` (`index.ts:728`) and `writeMcpWrapper`
+  (`index.ts:1172`), and both are still unwrapped — deliberately, because they are inside the bash
   wrapper that **Phase 5** rewrites, and Phase 4's own CMP-01 scope fence (04-11 Gate 6) forbids
   touching them. Marking RUN-04 complete now would claim coverage of the exact path that is fenced
-  off. It re-targets to Phase 5, where the rewrite makes those two sites editable, with real-machine
-  confirmation from the original reporter in Phase 9/10.
+  off. Re-assigned to **Phase 5** in the traceability table and in both rollups at the close of Phase 4,
+  so the phase that can edit those two sites owns it structurally, not just in this paragraph. The
+  rewrite is what makes them editable; real-machine confirmation comes from the original reporter in
+  Phase 9/10.
 
 ---
 *Requirements defined: 2026-06-26*
-*Last updated: 2026-08-20 — Phase 4 closed: RUN-03, RUN-05, CMP-02, PERF-02, PERF-03 and PERF-04 marked Complete; RUN-04 deliberately held Pending (see note above)*
+*Last updated: 2026-08-20 — Phase 4 closed: RUN-03, RUN-05, CMP-02, PERF-02, PERF-03 and PERF-04 marked Complete; RUN-04 re-targeted to Phase 5 (see note above)*
