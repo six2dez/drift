@@ -419,20 +419,33 @@ function probeRuntime(): Result<HostFacts> {
   }
 
   const normalized = normalizePlatform(rawPlatform);
-  // The explicit string/empty check stays: a runtime can hand back a non-string
-  // or an empty string without throwing, and either would produce a temp path
-  // rooted at nothing.
-  const facts =
-    normalized !== undefined && typeof tmpdir === "string" && tmpdir !== ""
+  // The explicit string check stays: a runtime can hand back a non-string
+  // without throwing, and that would produce a temp path rooted at nothing.
+  const candidate =
+    normalized !== undefined && typeof tmpdir === "string"
       ? { platform: normalized, tmpdir }
       : undefined;
 
-  // Built on BOTH paths, so getDiagnostics always has a report to flatten.
+  // D-05 gates on the DERIVED root, not on the raw os.tmpdir(). Every consumer
+  // reads getTempRoot(facts), which trims first, so a tmpdir of "   " passes a
+  // `tmpdir !== ""` check on the raw value and then normalises to "". The
+  // staging path is `path.join(getTempRoot(...), "drift-mcp-<token>")`, and
+  // path.join("", x) is the RELATIVE path "drift-mcp-<token>": the
+  // token-bearing runtime directory would be created inside Caido's working
+  // directory, where getSweepRoots can never see it and the orphan sweep can
+  // never reclaim it. Checking a value no consumer uses is the same
+  // silent-wrong-answer this probe exists to eliminate.
+  const tempRoot = candidate === undefined ? "" : getTempRoot(candidate);
+  const facts = tempRoot === "" ? undefined : candidate;
+
+  // Built on BOTH paths, so getDiagnostics always has a report to flatten. The
+  // already-computed root is handed over rather than recomputed, so the report
+  // can never describe a different value than the gate decided on.
   lastProbeReport = buildProbeReport({
     rawPlatform,
     normalizedPlatform: normalized,
     tmpdir,
-    tempRoot: facts === undefined ? undefined : getTempRoot(facts),
+    tempRoot,
     realpathRung: detectRealpathRung(),
     realpathRungNote: REALPATH_NATIVE_PROBE_NOTE,
     windowsEnvPresent:
