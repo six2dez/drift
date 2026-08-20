@@ -194,13 +194,13 @@ Plans:
   3. The Caido token and `DRIFT_*` vars reach the MCP server only via the spawn `env` option / config-JSON `env` field — no shell `export` wrapper — verified by the integration spawn test.
   4. The macOS/Linux launch path is unchanged behind `os.platform()` guards and the existing `provider-launch` exact-snapshot tests stay green (CMP-01).
 
-**Plans**: 2/6 plans executed (4 waves)
+**Plans**: 3/6 plans executed (4 waves)
 Plans:
 **Wave 1** *(three independent slices — no shared files, fully parallel)*
 
 - [x] 05-01-PLAN.md — TRACER: pure `mcp-server-spec.ts` (`buildMcpServerSpec`, `buildMcpDriftVars`, `toMcpConfigDocument`, `planMcpCliRegistration`, `formatSpawnDebugLine`, `findExpandableEnvKeys`) + unit suite + the D-08 integration spawn test proving `--validate-auth` and the three self-test methods through the PRODUCTION builder against the real `assets/mcp-server.mjs`
 - [x] 05-02-PLAN.md — CI-01/CI-03: reduce `build` to `caido-dev build` (measured byte-parity first), land `.gitattributes`, author the blocking `windows-latest` job with the carried-forward three-arm no-secret-material gate, re-target CI-01/CI-03 in REQUIREMENTS.md. Authors the leg; 05-06 runs it
-- [ ] 05-03-PLAN.md — D-05's reported, non-gating parent-environment metric in `runtime-probe.ts`: PATH entry count and env key count as integers, with `not probed` and `absent` distinguishable by construction
+- [x] 05-03-PLAN.md — D-05's reported, non-gating parent-environment metric in `runtime-probe.ts`: PATH entry count and env key count as integers, with `not probed` and `absent` distinguishable by construction
 
 **Wave 2** *(blocked on 05-01 and 05-03)*
 
@@ -330,7 +330,7 @@ Parallelism opportunities: Phase 2 may run alongside Phase 3 (both depend only o
 | 2. POSIX Correctness & Hardening | 0/3 | Not started | - |
 | 3. CI Spike — Prove LLRT Basics on Windows | 5/5 | Complete    | 2026-08-14 |
 | 4. Platform Foundation | 11/11 | Complete    | 2026-08-20 |
-| 5. Kill Shell Wrappers | 2/6 | In Progress|  |
+| 5. Kill Shell Wrappers | 3/6 | In Progress|  |
 | 6. Windows Command Resolution | 0/2 | Not started | - |
 | 7. Provider Spawn & Registration | 0/3 | Not started | - |
 | 8. Process Lifecycle | 0/1 | Not started | - |

@@ -4,16 +4,16 @@ milestone: v1.0
 current_phase: 05
 current_phase_name: Kill Shell Wrappers
 status: executing
-stopped_at: Completed 05-02-PLAN.md
-last_updated: "2026-08-20T12:56:50.518Z"
+stopped_at: Completed 05-03-PLAN.md
+last_updated: "2026-08-20T13:08:22.987Z"
 last_activity: 2026-08-20
 last_activity_desc: Phase 05 execution started
-state_head: 23892decc734b074d399cec7c7c49a1fef2bd5e4
+state_head: 80e119507bf2d1b784687788fd7bc3ca4a1dfa86
 progress:
   total_phases: 10
   completed_phases: 3
   total_plans: 28
-  completed_plans: 24
+  completed_plans: 25
 milestone_name: milestone
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-06-26)
 ## Current Position
 
 Phase: 05 (Kill Shell Wrappers) — EXECUTING
-Plan: 3 of 6
+Plan: 4 of 6
 Status: Ready to execute
 Last activity: 2026-08-20 — Phase 05 execution started
 
@@ -63,6 +63,7 @@ Progress: [███░░░░░░░] 30% (3 of 10 milestone phases)
 |------|----------|-------|-------|
 | Phase 05 P01 | 9 min | 3 tasks | 3 files |
 | Phase 05 P02 | 8 min | 3 tasks | 6 files |
+| Phase 05 P03 | 9 min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -154,6 +155,10 @@ Recent decisions affecting current work:
 - [Phase 05]: [05-02]: The windows-latest leg is BLOCKING from day one (no continue-on-error, no job-level if:) and is a sibling job rather than a matrix entry on verify, because the ubuntu leg runs four Node versions and this one runs a single Node 20.
 - [Phase 05]: [05-02]: The D-10 secret gate moved into ci.yml WITHOUT the probe copy test -f pre-check, so a deleted or renamed scan target routes into the third arm through grep status 2 — which is what makes the Phase 9 deletion of windows-llrt-probe.yml fail loudly instead of silently narrowing the scan. Demonstrated at all three statuses (1 clean / 0 seeded / 2 missing), never assumed.
 - [Phase 05]: [05-02]: No CI result is claimed by this plan. It authors the leg and proves everything provable locally on macOS; plan 05-06 runs it and records the run URL, per-step conclusions and the log line proving the gate mechanism. CI-01 and CI-03 stay Pending (requirements ready-ids returned 0/3 — all three are also declared by 05-06).
+- [Phase 05]: [05-03]: The parentEnv probe row REPORTS and never GATES, and it is NOT the control for the bare-dict regression. The fallback is real (MCP server spawned by absolute node path, mcp-server.mjs spawns nothing), so a thin PATH cannot break the Phase 5 health check — it bites Phase 7's PRV-01. RESEARCH L-4's hazard (Rust's Windows make_envp writes the map verbatim with no libuv back-fill, so a regression to `env: driftVars` is green on every runner this project has) is caught by the vehicle-independent static gate over index.ts's spawn sites, landing in 05-04/05-05/05-06.
+- [Phase 05]: [05-03]: The probe reports a PATH ENTRY COUNT, not a presence boolean, because "present but 4 entries" is the interesting macOS-Dock/Windows signal a boolean cannot express. Three states are kept apart by a discriminated union and asserted by INEQUALITY: `unavailable` = never measured, `absent` = measured and not there, an integer = counted. The PATH key is resolved case-insensitively (a Windows block spelling it `Path` must be measured, not reported absent) and the separator comes from the platform, never sniffed from the content — with no platform the count renders not-probed rather than a confidently wrong integer.
+- [Phase 05]: [05-03]: The row emits integers and status words only, so runtime-probe.ts's standing "never enumerates the process environment" rule survives literally — counting is not enumerating (T-05-10). The only environment key name the module may print is the literal PATH. CAPABILITY_PURPOSE was exported (one export beyond the plan's artifact list) so the suite asserts one purpose clause per capability row at runtime, not just via the compiler's Record exhaustiveness.
+- [Phase 05]: [05-03]: RUN-02 and CMP-01 were NOT marked complete — requirements.ready-ids returned 0/2, both are declared by sibling plans still running, and this plan adds only the diagnostic. buildProbeReport's parentEnv input has zero production call sites by design: the plan made it OPTIONAL so it ships independently, and 05-04 supplies process.env from index.ts's single probe site. Matches the Phase 3/4 precedent of not flipping an id on the plan that merely touched it.
 
 ### Pending Todos
 
@@ -193,8 +198,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-20T12:55:44.128Z
-Stopped at: Completed 05-02-PLAN.md
+Last session: 2026-08-20T13:08:00.889Z
+Stopped at: Completed 05-03-PLAN.md
 Resume file: None
 
 **Live on the public remote: nothing of ours.** Plan 03-04 tore down all three `scratch/*` branches (`ci-proof-windows-probe`, `ci-proof-windows-probe-negative`, `ci-proof-windows-gate-negative`) locally and remotely. Asserted with a `test -z` discrimination over the captured glob (`scratch-glob-empty=0`) plus the full unfiltered listing, which now shows only `main` at `2d8cf16` and the pre-existing, unrelated `fix/security-hotfixes` at `0cd81f3`. `origin/main` was never pushed by this phase and is still `2d8cf16`; local `main` is 23 commits ahead and deliberately unpushed. **Re-verified 2026-08-13 (plan 03-05):** the remote still lists only `main` `2d8cf16` and the pre-existing `fix/security-hotfixes` `0cd81f3`, and all eight Phase 3 run records (4 probe + 4 `CI` control) still resolve with their recorded conclusions — which is what makes the URLs in `03-FINDINGS.md` valid citations after the branches were deleted. The probe **artifacts** do not survive: they expire 2026-09-12, which is why D-11 required the committed findings document.
