@@ -5,10 +5,10 @@ current_phase: 05
 current_phase_name: Kill Shell Wrappers
 status: executing
 stopped_at: Phase 4 complete and verified; RUN-04 re-targeted to Phase 5; ready to discuss Phase 5
-last_updated: "2026-08-20T12:15:09.657Z"
+last_updated: "2026-08-20T12:28:19.755Z"
 last_activity: 2026-08-20
-last_activity_desc: "PHASE 4 COMPLETE. 11/11 plans, 5 waves. Seven phase-wide static gates EXECUTED (not inferred from diffs), all passed -- incl. Gate 6 proven by blob identity at 83c4231 vs HEAD and Gate 7 at 7-of-7 bounded accumulators. The one criterion no gate can reach -- whether the RUN-05 probe failure message is legible to a Windows user who has never seen Drift source -- was closed by a REAL HUMAN READ of two rendered variants, dated 2026-08-20, recorded as such rather than dressed up as a machine result. Code review then found 2 blockers + 11 warnings AFTER the plans closed; all 13 fixed (CR-01: the retry ladder could not classify an LLRT error at all, so it was inert on its target platform and self-concealing). Suite 134 -> 263 tests / 29 files / 0 failures. RUN-03, RUN-05, CMP-02, PERF-02, PERF-03, PERF-04 Complete; RUN-04 RE-TARGETED TO PHASE 5 structurally (traceability table + both rollups), not just in prose -- withFsRetry has one production call site (index.ts:2467) and the write->exec pair in writeLaunchScript (:728) / writeMcpWrapper (:1172) is fenced off by Gate 6."
-state_head: 0ac797fb98c5d85be8c07994b5c4318aff961b66
+last_activity_desc: Phase 05 execution started
+state_head: 6cf169c12fa7ce7f27ebd2903ab1086d4fa93bbe
 progress:
   total_phases: 10
   completed_phases: 3
@@ -24,14 +24,14 @@ milestone_name: milestone
 See: .planning/PROJECT.md (updated 2026-06-26)
 
 **Core value:** The user's local AI CLI must reliably start, attach to Caido via the MCP server, and run tools against live Caido data — on native Windows as well as macOS/Linux.
-**Current focus:** Phase 4 — Platform Foundation
+**Current focus:** Phase 05 — Kill Shell Wrappers
 
 ## Current Position
 
-Phase: 05 (Kill Shell Wrappers) — READY TO EXECUTE
-Plan: Not started
-Status: Ready to execute
-Last activity: 2026-08-20 -- PHASE 4 COMPLETE. 11/11 plans, 5 waves. Seven phase-wide static gates EXECUTED (not inferred from diffs), all passed -- incl. Gate 6 proven by blob identity at 83c4231 vs HEAD and Gate 7 at 7-of-7 bounded accumulators. The one criterion no gate can reach -- whether the RUN-05 probe failure message is legible to a Windows user who has never seen Drift source -- was closed by a REAL HUMAN READ of two rendered variants, dated 2026-08-20, recorded as such rather than dressed up as a machine result. Code review then found 2 blockers + 11 warnings AFTER the plans closed; all 13 fixed (CR-01: the retry ladder could not classify an LLRT error at all, so it was inert on its target platform and self-concealing). Suite 134 -> 263 tests / 29 files / 0 failures. RUN-03, RUN-05, CMP-02, PERF-02, PERF-03, PERF-04 Complete; RUN-04 RE-TARGETED TO PHASE 5 structurally (traceability table + both rollups), not just in prose -- withFsRetry has one production call site (index.ts:2467) and the write->exec pair in writeLaunchScript (:728) / writeMcpWrapper (:1172) is fenced off by Gate 6.
+Phase: 05 (Kill Shell Wrappers) — EXECUTING
+Plan: 1 of 6
+Status: Executing Phase 05
+Last activity: 2026-08-20 — Phase 05 execution started
 
 Progress: [███░░░░░░░] 30% (3 of 10 milestone phases)
 
