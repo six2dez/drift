@@ -14,15 +14,16 @@
 // native Windows locally, which makes "unverifiable by construction" the same
 // thing as "unverified on the only platform this milestone is about".
 //
-// The one import is `./platform`, and it is here for one reason, in the
+// The one import is `./platform`, and it is here for exactly two reasons, in the
 // `runtime-probe.ts` house style of justifying each import a module allows:
 // `buildSpawnEnv` is the single parent-merge point finding L-4 makes load-bearing
-// (see `buildMcpServerSpec` below). Deliberately NOT imported: `os` (D-02
+// (see `buildMcpServerSpec` below), and `Platform` is the narrow three-member
+// union `planMcpCliRegistration` gates on. Deliberately NOT imported: `os` (D-02
 // keeps the single `os` read in index.ts, behind the RUN-05 probe), `fs`, `path`
 // and any read of `process` — a module that touches none of them has no hidden
 // input a test cannot supply.
 
-import { buildSpawnEnv } from "./platform";
+import { buildSpawnEnv, type Platform } from "./platform";
 
 // Two projections of one launch decision, deliberately distinct.
 //
@@ -129,4 +130,132 @@ export function buildMcpServerSpec(input: {
     }),
     driftVars: input.driftVars,
   };
+}
+
+// The MCP config document both external-CLI paths write: Claude's
+// `mcp-<chatId>.json` (`--mcp-config`) and Copilot's `copilot-mcp-<chatId>.json`
+// (`--additional-mcp-config`). One spec, one projection, two callers — which is
+// what stops the two documents drifting apart the way they could while each
+// write site assembled its own object.
+export function toMcpConfigDocument(spec: McpServerSpec): {
+  mcpServers: {
+    drift: { command: string; args: string[]; env: Record<string, string> };
+  };
+} {
+  return {
+    mcpServers: {
+      drift: {
+        command: spec.command,
+        args: spec.args,
+        // `driftVars`, NEVER `spec.env`. The spawn projection merges the parent
+        // block because the child would otherwise start with almost no
+        // environment under LLRT; this projection must not, because the
+        // external CLI already gives its own child the parent environment and
+        // the only thing merging would add here is the user's entire
+        // environment, written verbatim into a token-bearing file on disk
+        // (T-05-04). The "obvious" unification of the two projections is
+        // therefore a forbidden one.
+        env: spec.driftVars,
+      },
+    },
+  };
+}
+
+// Whether the shared POSIX `mcp-wrapper.sh` may be handed to `gemini mcp add` /
+// `codex mcp add`. D-01 keeps that wrapper alive on POSIX because its `export`
+// lines are the SOLE carrier of CAIDO_URL/CAIDO_TOKEN/DRIFT_* for those two
+// CLIs; deleting it before Phase 7's `--env`/`-e` work would be a live CMP-01
+// regression for two shipping providers on the platforms the whole user base
+// runs today.
+export type McpCliRegistration =
+  | { kind: "Register"; wrapperPath: string }
+  | { kind: "Skip"; reason: string };
+
+const MCP_CLI_DISPLAY_NAMES: Record<"gemini" | "codex", string> = {
+  gemini: "Gemini",
+  codex: "Codex",
+};
+
+// Allow-list gate in `normalizePlatform`'s shape: return the explicit non-happy
+// case rather than falling through. The branch ORDER is part of the contract —
+// an unknown platform and win32 both Skip BEFORE `wrapperPath` is considered, so
+// there is no input at all on which a win32 host reaches the wrapper arm.
+export function planMcpCliRegistration(input: {
+  platform: Platform | undefined;
+  cli: "gemini" | "codex";
+  wrapperPath: string | undefined;
+}): McpCliRegistration {
+  if (input.platform === undefined) {
+    // Fail closed. Caido's LLRT hardcodes PLATFORM at compile time and its third
+    // arm is `std::env::consts::OS`, which can yield "freebsd" or "android" —
+    // values that must never flow silently into the POSIX arm (RUN-05).
+    return {
+      kind: "Skip",
+      reason:
+        "Drift could not determine the host platform, so MCP registration was skipped.",
+    };
+  }
+  if (input.platform === "win32") {
+    // Names the provider in display casing AND names the phase: a Windows user
+    // who reads "not yet supported ... (Phase 7)" learns this is sequenced work
+    // rather than a dead end (D-03). The same sentence is surfaced in-product
+    // through `skippedMcpCliReasons` and in the README.
+    return {
+      kind: "Skip",
+      reason: `Drift MCP is not yet supported for ${MCP_CLI_DISPLAY_NAMES[input.cli]} on Windows (Phase 7).`,
+    };
+  }
+  if (input.wrapperPath === undefined) {
+    return {
+      kind: "Skip",
+      reason:
+        "Drift's shared MCP wrapper was not written, so MCP registration was skipped.",
+    };
+  }
+  return { kind: "Register", wrapperPath: input.wrapperPath };
+}
+
+// D-11's session-debug line. It takes key NAMES and has no parameter through
+// which a value could arrive — that is the design, not a discipline anyone has
+// to remember. `platform.ts:262` states the same rule at the merge point:
+// `buildSpawnEnv` "returns data only and must never be used to render an
+// environment into a log or diagnostic (T-04-04)".
+//
+// Rejected, and recorded here so it is not re-proposed: dumping the merged
+// environment through a redaction regex. A regex over a whole environment fails
+// OPEN — it protects only the keys someone thought to enumerate, and the keys
+// nobody enumerated are exactly the ones a future variable will be added under.
+export function formatSpawnDebugLine(input: {
+  command: string;
+  args: string[];
+  injectedKeys: string[];
+}): string {
+  return [
+    `spawn command=${input.command}`,
+    `args=${JSON.stringify(input.args)}`,
+    `injectedEnvKeys=${[...input.injectedKeys].sort().join(",")}`,
+  ].join(" ");
+}
+
+// The two-character opener is assembled from separate string parts so this
+// source file never carries a literal variable-reference sequence that a
+// downstream tool — a shell heredoc, a template renderer, an editor snippet
+// expander — could mangle on its way through.
+const EXPANSION_OPENER = "$" + "{";
+
+// The keys a config document must not be written with. Claude Code performs
+// environment-variable expansion INSIDE a stdio server's `env` field
+// (code.claude.com/docs/en/mcp § "Environment variable expansion in .mcp.json"),
+// and an unset reference is left as unexpanded text with only a
+// `claude mcp list` warning. Either way the server starts with a token that is
+// not the token — i.e. a SILENTLY unauthenticated MCP server, which is the exact
+// failure mode D-10 rejected `${CAIDO_TOKEN}` indirection for. This predicate is
+// pure so the write site can fail loud instead (T-05-02).
+export function findExpandableEnvKeys(
+  driftVars: Record<string, string>,
+): string[] {
+  return Object.entries(driftVars)
+    .filter(([, value]) => value.includes(EXPANSION_OPENER))
+    .map(([key]) => key)
+    .sort();
 }
