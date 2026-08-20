@@ -33,17 +33,17 @@ Requirements for the hardening + native-Windows milestone. Each maps to exactly 
 ### Performance (PERF) — added 2026-08-12
 
 - [ ] **PERF-01**: Markdown rendering allocates one parser for the message list, not one `MarkdownIt` + highlight.js instance per message bubble
-- [ ] **PERF-02**: The MCP activity file is read incrementally from a byte offset instead of being fully re-read and re-parsed on every watchdog tick
-- [ ] **PERF-03**: Provider and Node binary resolution is cached with a short TTL, invalidated on command change, instead of re-probing on every turn
-- [ ] **PERF-04**: `stdout`/`stderr` accumulation and the Claude stream parser use bounded buffers with marked truncation
+- [x] **PERF-02**: The MCP activity file is read incrementally from a byte offset instead of being fully re-read and re-parsed on every watchdog tick
+- [x] **PERF-03**: Provider and Node binary resolution is cached with a short TTL, invalidated on command change, instead of re-probing on every turn
+- [x] **PERF-04**: `stdout`/`stderr` accumulation and the Claude stream parser use bounded buffers with marked truncation
 
 ### Runtime (RUN)
 
 - [ ] **RUN-01**: On native Windows, the Drift MCP server starts with no POSIX dependency — `node` is spawned directly, with no `chmod`, no `#!/bin/bash` wrapper, and no `.sh` execution
 - [ ] **RUN-02**: On Windows, the MCP environment (Caido token, `DRIFT_*` vars) reaches the MCP server via the spawn `env` option / config-JSON `env` field, not a shell `export` wrapper
-- [ ] **RUN-03**: Drift uses `os.tmpdir()` for its runtime, context, log, and orphan-sweep paths instead of a hardcoded `/tmp` (works on Windows, macOS, Linux)
+- [x] **RUN-03**: Drift uses `os.tmpdir()` for its runtime, context, log, and orphan-sweep paths instead of a hardcoded `/tmp` (works on Windows, macOS, Linux)
 - [ ] **RUN-04**: Drift's temp-file write→spawn path tolerates the Windows AV write-then-exec race (copy `mcp-server.mjs` once at start; bounded retry on `EPERM`/`EBUSY`)
-- [ ] **RUN-05**: At MCP start, Drift fails loud with an actionable message (incl. Caido/runtime version) if a required runtime capability is missing, instead of failing cryptically
+- [x] **RUN-05**: At MCP start, Drift fails loud with an actionable message (incl. Caido/runtime version) if a required runtime capability is missing, instead of failing cryptically
 
 ### Health (HLT)
 
@@ -85,7 +85,7 @@ Requirements for the hardening + native-Windows milestone. Each maps to exactly 
 ### Compatibility (CMP)
 
 - [ ] **CMP-01**: All existing macOS/Linux behavior is preserved — POSIX launch path unchanged behind `platform` guards; existing snapshot/unit tests stay green
-- [ ] **CMP-02**: The `os.tmpdir()` substitution does not break the macOS/Linux orphan-sweep (macOS tmpdir is `/var/folders/...`, not `/tmp`)
+- [x] **CMP-02**: The `os.tmpdir()` substitution does not break the macOS/Linux orphan-sweep (macOS tmpdir is `/var/folders/...`, not `/tmp`)
 
 ## v2 Requirements
 
@@ -134,13 +134,13 @@ Which phases cover which requirements. Every v1 requirement maps to exactly one 
 | SEC-05 | Phase 2 | Pending |
 | PERF-01 | Phase 2 | Pending |
 | CI-02 | Phase 3 | Complete |
-| RUN-03 | Phase 4 | Pending |
+| RUN-03 | Phase 4 | Complete |
 | RUN-04 | Phase 4 | Pending |
-| RUN-05 | Phase 4 | Pending |
-| CMP-02 | Phase 4 | Pending |
-| PERF-02 | Phase 4 | Pending |
-| PERF-03 | Phase 4 | Pending |
-| PERF-04 | Phase 4 | Pending |
+| RUN-05 | Phase 4 | Complete |
+| CMP-02 | Phase 4 | Complete |
+| PERF-02 | Phase 4 | Complete |
+| PERF-03 | Phase 4 | Complete |
+| PERF-04 | Phase 4 | Complete |
 | RUN-01 | Phase 5 | Pending |
 | RUN-02 | Phase 5 | Pending |
 | HLT-01 | Phase 5 | Pending |
@@ -182,6 +182,22 @@ Which phases cover which requirements. Every v1 requirement maps to exactly one 
 - Phase 9 (CI Hardening): CI-01, CI-03
 - Phase 10 (Windows Polish): UX-03, UX-04
 
+**Deliberately held Pending at the close of Phase 4:**
+
+- **RUN-04** — *"Drift's temp-file write→**spawn** path tolerates the Windows AV write-then-exec
+  race (copy `mcp-server.mjs` once at start; bounded retry on `EPERM`/`EBUSY`)."* The parenthetical
+  half **is** shipped: the one-time `mcp-server.mjs` staging copy is wrapped in `withFsRetry`
+  (`packages/backend/src/index.ts:2300`), the sole production call site, with a 6-attempt /
+  ~1,500 ms ladder that logs code + attempt index and surfaces `mcpFirstWriteAttempts` in
+  `getDiagnostics`. The headline half is **not**: the write→**exec** pair that
+  `04-RESEARCH.md` names the single best-documented AV case is the `.tmp` write → `chmod +x` →
+  `rename` → spawn sequence in `writeLaunchScript` (`index.ts:642`) and `writeMcpWrapper`
+  (`index.ts:1086`), and both are still unwrapped — deliberately, because they are inside the bash
+  wrapper that **Phase 5** rewrites, and Phase 4's own CMP-01 scope fence (04-11 Gate 6) forbids
+  touching them. Marking RUN-04 complete now would claim coverage of the exact path that is fenced
+  off. It re-targets to Phase 5, where the rewrite makes those two sites editable, with real-machine
+  confirmation from the original reporter in Phase 9/10.
+
 ---
 *Requirements defined: 2026-06-26*
-*Last updated: 2026-08-12 — hardening requirements added and Windows requirements re-targeted after the phase renumber*
+*Last updated: 2026-08-20 — Phase 4 closed: RUN-03, RUN-05, CMP-02, PERF-02, PERF-03 and PERF-04 marked Complete; RUN-04 deliberately held Pending (see note above)*

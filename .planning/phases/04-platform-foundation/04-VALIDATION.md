@@ -1,11 +1,12 @@
 ---
 phase: 4
 slug: platform-foundation
-status: gates-passed-pending-human-read
+status: complete
 nyquist_compliant: true
 wave_0_complete: true
 created: 2026-08-14
 gates_run: 2026-08-14
+human_read: 2026-08-20
 ---
 
 # Phase 4 — Validation Strategy
@@ -91,7 +92,7 @@ and updated by the executor. Bucket, test type, and command are fixed here.
 | RUN-05 | `buildProbeReport` marks `os.platform`/`os.tmpdir` gating, `realpath`/win-env reported (D-06) | L | 04-03 / T1–T2 | — | unit | `… -t "gating"` | ✅ | ✅ green (1 passed) |
 | RUN-05 | `normalizePlatform` **rejects** an unrecognised value instead of falling through to POSIX | L | 04-01 / T1–T2 | T-04-24 | unit | `pnpm exec vitest run packages/backend/src/platform.test.ts -t "normalizePlatform"` | ✅ | ✅ green (4 passed) |
 | RUN-05 | The probe runs before the sweep and before `mcpTempDir` assignment | L | 04-08 / T2 · asserted 04-11 / T1 **Gate 2** | — | static | Ordered-`grep` assertion over `startMcpServer`, or a comment-anchored line-order check | ✅ | ✅ green (`:2248` → `:2271` → `:2284`) |
-| RUN-05 | The failure message is legible to a real bug reporter | **N** | — [^n2] | T-04-26 | manual | Human read of one rendered example. Legibility is not machine-assertable | — | ⬜ manual |
+| RUN-05 | The failure message is legible to a real bug reporter | **N** | — [^n2] | T-04-26 | manual | Human read of one rendered example. Legibility is not machine-assertable | 04-11 / 2 | ✅ read 2026-08-20 |
 | CMP-02 | macOS sweep still finds `drift-mcp-*` under `/var/folders/…` **and** legacy `/tmp` | L | 04-01 / T1–T2 (mechanism) · 04-08 / T2 (wiring) | T-04-02 | unit | `pnpm exec vitest run packages/backend/src/platform.test.ts -t "getSweepRoots"` | ✅ | ✅ green (3 passed) |
 | CMP-01 / CMP-02 | Existing suite stays green — the real regression net | L | every plan · asserted 04-11 / T1 **Gates 5–6** | — | regression | `pnpm exec vitest run` — 134 tests stay green; `provider-launch.test.ts` exact snapshots must not move | ✅ | ✅ green (245/245; the 134 baseline is a subset — Phase 4 added 111 and moved none) |
 | PERF-02 | `consumeActivityChunk` carries a partial line across chunks | L | 04-04 / T1–T2 | — | unit | `pnpm exec vitest run packages/backend/src/activity-tail.test.ts -t "partial"` | ✅ | ✅ green (4 passed) |
@@ -197,6 +198,54 @@ newline-bearing content. CI-03 owns it in Phase 9.
 |---|---|---|---|
 | The probe failure message is legible and actionable to a real bug reporter | RUN-05 | Legibility is not machine-assertable | Render one example failure with a forced-missing primitive; read it as a Windows user would. It must name the missing primitive, what Drift needed it for, the remedy, and the version block |
 | A real Defender / AV write-then-exec lock is survived | RUN-04 | Not inducible in CI on any runner | Deferred to a real Windows machine (Phase 9/10, or the original reporter). Mitigation in-phase: every retry logs code + attempt index, and the retry count surfaces in `getDiagnostics` |
+
+**Closed at 04-11 task 2, 2026-08-20 — by a human read, not a machine result.**
+
+The maintainer read two rendered variants of `formatProbeFailure` — (a) `os.tmpdir()` absent,
+and (b) the first write failing `EPERM` after 6 attempts — and judged both legible and
+actionable against the four questions the row demands. Both renders are recorded verbatim in
+`04-11-SUMMARY.md`. What the read confirmed, question by question:
+
+| Question | Answered by |
+|---|---|
+| **What is missing?** | `Missing capability: Temp directory (os.tmpdir)` — the primitive is named, with an `Observed:` line carrying what the call actually returned |
+| **Why does Drift care?** | `Needed for: Drift needs a temp directory to stage mcp-server.mjs and the token-bearing MCP wrapper that the AI CLI executes.` |
+| **What do I do now?** | `What to do: update Caido, then reopen this panel and press Start MCP. If it still fails, open an issue…` |
+| **What do I paste?** | The `Versions:` / `Reported (did not block startup):` / `Path budget:` blocks — six version fields, every one present, `unavailable` where a source threw, contiguous and copy-pasteable |
+
+Variant (b) is the one the read most mattered for. Under D-07 the write **is** the `os.tmpdir()`
+assertion, so a Defender-locked temp dir answers every capability and still fails — which made the
+first draft read as a self-contradiction ("the write failed" immediately above "nothing is
+missing"). The shipped
+`Missing capability: none - every runtime primitive answered, so the temp directory itself is the
+problem (a read-only or full volume, a redirected %TMP%, or an anti-virus lock on the file Drift
+just wrote)` line is what resolves it, and the maintainer confirmed it lands as an explanation
+rather than as a contradiction.
+
+**T-04-04 secret scan (step 3), re-run over the rendered text at close:** zero matches for
+`CAIDO_TOKEN`, `CAIDO_AUTHENTICATION`, `Bearer `, and any `APPDATA|USERPROFILE|LOCALAPPDATA=<path>`
+form. The scanner was proven non-vacuous against a seeded `CAIDO_TOKEN=…` line and against the
+variable **names**, which do appear (`USERPROFILE=present APPDATA=present LOCALAPPDATA=present
+TEMP=missing`) — presence booleans by name, which is the designed and correct rendering.
+One residual is disclosed **by design**: the temp path itself appears in variant (b)'s
+`Write error:` line, because the OS error string names the file that could not be written and that
+path *is* the diagnosis. On Windows that path can carry the account name (`C:\Users\RUNNER~1\…`
+in the render). This is accepted, not an oversight — a message that hides the failing path cannot
+diagnose the failure it exists to report.
+
+**The two known-and-accepted gaps (step 5), both confirmed by the maintainer:**
+
+1. **SC-4's "Caido version".** The SDK exposes no *Caido* version. Correcting the record that three
+   Phase 4 artifacts got wrong: `MetaSDK` in `@caido/sdk-backend@0.55.3` (`src/typing.d.ts:164-196`)
+   declares **six** members — `id()`, `path()`, `assetsPath()`, `db()`, `version()` and
+   `updateAvailable()` — not the three earlier drafts listed. But `version()` is documented as the
+   **plugin's** version, which `driftVersion` already reports, so the substantive claim is unchanged:
+   there is no Caido version anywhere in the SDK surface. D-08's best-effort block is the closest
+   available substitute, **not** an omission. Accepted.
+2. **RUN-04's real Defender lock.** Not inducible on any CI runner. The shipped mitigation is retry
+   logging plus `mcpFirstWriteAttempts` in `getDiagnostics`; real-machine confirmation waits on the
+   original Windows reporter in Phase 9/10. Accepted as a deferral, and RUN-04 is therefore held
+   **Pending** in `REQUIREMENTS.md` rather than marked complete — see `04-11-SUMMARY.md` § *RUN-04*.
 
 ---
 
@@ -503,9 +552,12 @@ never by number, and anchor a gate on a form rather than on a position or a tota
 - [x] `pnpm build` passes (first `import … from "os"` in the backend bundle) — exit 0, specifier kept external
 - [x] `nyquist_compliant: true` set in frontmatter
 - [x] All seven phase gates run and recorded in § *Phase Gate Results* — **7 / 7 pass**
+- [x] The one non-machine-assertable criterion (RUN-05 legibility) got a real human read — approved 2026-08-20 (04-11 task 2)
 
-**Approval:** pending the blocking human-verify checkpoint (04-11 task 2) — a real person must read
-the rendered RUN-05 failure message and judge it legible and actionable to a Windows bug reporter.
-That is the one criterion in this phase that is not machine-assertable, which is why it is bucket
-**N**. On approval, the `status:` front-matter field flips from `gates-passed-pending-human-read` to
-`complete` and this line records the approval. The gates above are complete and independent of it.
+**Approval: approved 2026-08-20.** The blocking human-verify checkpoint (04-11 task 2) is closed.
+The maintainer read the two rendered RUN-05 failure messages and judged them legible and actionable
+to a Windows bug reporter, and confirmed the two known-and-accepted gaps recorded in § *Manual-Only
+Verifications* above. This is a **human read**, recorded as such — it is the one criterion in this
+phase that is not machine-assertable, which is why it is bucket **N** and why no gate can stand in
+for it. The `status:` front-matter field is now `complete`. The seven gates above were complete and
+independent of this approval.
