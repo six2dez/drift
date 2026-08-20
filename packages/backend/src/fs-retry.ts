@@ -42,6 +42,50 @@ export const FS_TRANSIENT_ERROR_CODES = [
   "UNKNOWN",
 ] as const;
 
+// The NUMERIC half of the same allow-list, for the `(os error N)` shape that
+// Rust's `std::io::Error` Display impl renders and that Caido's LLRT therefore
+// surfaces. Without this list the name list above is unreachable on LLRT and
+// the ladder is inert on the one runtime it was written for.
+//
+// N is NOT a single namespace: Rust prints the raw platform error number, so on
+// Windows it is a Win32 code and on Linux/macOS it is an errno, and the two
+// namespaces collide. Nothing in the message can be trusted to tell them apart,
+// so every entry below is justified in whichever namespace makes it transient
+// and then checked for harm in the other:
+//
+//   N     Win32                     POSIX errno   why it is here
+//   1     ERROR_INVALID_FUNCTION    EPERM         POSIX arm; mirrors the EPERM name above
+//   5     ERROR_ACCESS_DENIED       EIO           WIN32 arm; the most common Defender/indexer symptom
+//   13    ERROR_INVALID_DATA        EACCES        POSIX arm; mirrors EACCES
+//   16    ERROR_CURRENT_DIRECTORY   EBUSY         POSIX arm; mirrors EBUSY
+//   32    ERROR_SHARING_VIOLATION   EPIPE         WIN32 arm; the AV holds the file open with an
+//                                                 excluding share mode — this IS the RUN-04 symptom
+//   33    ERROR_LOCK_VIOLATION      EDOM          WIN32 arm; the scanner holds a byte-range lock
+//
+// The wrong-namespace reading of each is bounded at 1,500 ms of extra delay on
+// an error that was going to fail anyway, and none of the wrong-namespace
+// meanings can be produced by the two syscalls this ladder actually wraps
+// (`mkdir` of a fresh directory, `writeFile` of a regular file): EIO is a media
+// fault, EPIPE needs a pipe, EDOM is a math error, ERROR_INVALID_FUNCTION and
+// ERROR_CURRENT_DIRECTORY need a volume/rmdir call. That is what makes the
+// collision tolerable rather than merely convenient.
+//
+// [UNCERTAIN, deliberately EXCLUDED] 1314 ERROR_PRIVILEGE_NOT_HELD. libuv maps
+// it to EPERM, so the `.code` arm above would accept it and the two readings
+// therefore disagree about that one failure. It is excluded anyway because a
+// privilege the account does not hold does not materialise 1,500 ms later, and
+// this list follows the same rule as the exclusions above: never spend the
+// ladder on an error that cannot clear. Recorded rather than silently dropped
+// so a later phase can add it on evidence.
+export const TRANSIENT_OS_ERROR_NUMBERS = [1, 5, 13, 16, 32, 33] as const;
+
+// Pulls N out of Rust's trailing `(os error N)`. Anchored on the literal
+// parenthesised form so a message that merely contains a number cannot match.
+function osErrorNumber(message: string): number | undefined {
+  const digits = /\(os error (\d+)\)/.exec(message)?.[1];
+  return digits === undefined ? undefined : Number(digits);
+}
+
 // 5 retries → 6 attempts including the first, 1,500 ms total.
 //
 // Why these numbers, recorded so a later phase can widen them on evidence
@@ -66,14 +110,25 @@ export const FS_RETRY_DELAYS_MS = [50, 100, 200, 400, 750] as const;
 
 // True when the failure is worth retrying.
 //
-// Two shapes are accepted because the runtime is not settled. Node/libuv
-// attaches a structured `.code`. Caido's LLRT does NOT use libuv — it uses
-// `tokio::fs`/`std::fs` and throws through `or_throw_msg` with a human message,
-// so the *Win32* error is identical but the surfaced shape may carry the code
-// only inside the message text. This is the one place a message-substring check
-// is justified rather than lazy. [ASSUMED] — inferred from
-// `llrt_utils::result::ResultExt` usage in `caido/dependency-llrt`, not
-// measured. Handling both means either reading being wrong is harmless.
+// THREE shapes are accepted, because the runtime is not settled and two of the
+// three are live at the same time:
+//
+//   1. a structured `.code` — Node/libuv. [ASSUMED for Caido] Retained because
+//      the same source is exercised against plain Node by the test suite and
+//      may yet run against a libuv-backed host.
+//   2. an errno NAME inside the message (`EBUSY: resource busy`). [ASSUMED] —
+//      inferred from `llrt_utils::result::ResultExt` usage in
+//      `caido/dependency-llrt`, not measured.
+//   3. a NUMERIC `(os error N)` suffix inside the message. [MEASURED SHAPE] —
+//      this is what Rust's `impl Display for std::io::Error` emits (the OS
+//      message, then " (os error N)"), and every LLRT `tokio::fs`/`std::fs`
+//      throw passes through it: `Access is denied. (os error 5)`.
+//
+// Reading 3 is the one that matters on the target runtime. Caido's LLRT does
+// NOT use libuv, so readings 1 and 2 BOTH miss there — the *Win32* error is
+// identical but the surfaced shape carries only a number. Handling all three
+// means any one reading being wrong is harmless; handling only 1 and 2 meant
+// the ladder never fired on Windows at all.
 export function isTransientFsError(error: unknown): boolean {
   const code = (error as { code?: unknown } | undefined)?.code;
   if (
@@ -84,14 +139,33 @@ export function isTransientFsError(error: unknown): boolean {
   }
 
   const message = error instanceof Error ? error.message : String(error ?? "");
-  return FS_TRANSIENT_ERROR_CODES.some((candidate) =>
-    message.includes(candidate),
+  if (
+    FS_TRANSIENT_ERROR_CODES.some((candidate) => message.includes(candidate))
+  ) {
+    return true;
+  }
+
+  const osError = osErrorNumber(message);
+  return (
+    osError !== undefined &&
+    TRANSIENT_OS_ERROR_NUMBERS.some((candidate) => candidate === osError)
   );
 }
 
-// The code to report for retry logging and diagnostics. Same two shapes as
-// above. The `"unknown"` sentinel is lower-case on purpose so it is never
-// confused with libuv's upper-case `UNKNOWN`, which is a real classification.
+// The code to report for retry logging and diagnostics. Same three shapes as
+// above, most specific first.
+//
+// The numeric arm reports EVERY `(os error N)` it can parse, not only the
+// transient ones. `lastCode` is the field a Windows bug report is actually read
+// from, and it is the evidence channel for "was 1,500 ms enough" — an
+// `os-error-32` answers "an AV held the file" where the old `unknown` answered
+// nothing at all and was indistinguishable from "no retry happened". `unknown`
+// now means genuinely unclassifiable rather than "this is LLRT".
+//
+// The `"unknown"` sentinel is lower-case on purpose so it is never confused
+// with libuv's upper-case `UNKNOWN`, which is a real classification. The
+// `os-error-N` token is lower-case for the same reason: no libuv code can
+// collide with it.
 export function getFsErrorCode(error: unknown): string {
   const code = (error as { code?: unknown } | undefined)?.code;
   if (typeof code === "string" && code.trim() !== "") return code;
@@ -100,7 +174,10 @@ export function getFsErrorCode(error: unknown): string {
   const matched = FS_TRANSIENT_ERROR_CODES.find((candidate) =>
     message.includes(candidate),
   );
-  return matched ?? "unknown";
+  if (matched !== undefined) return matched;
+
+  const osError = osErrorNumber(message);
+  return osError === undefined ? "unknown" : `os-error-${String(osError)}`;
 }
 
 // The `kind`-discriminated shape index.ts already branches on for its inline

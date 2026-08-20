@@ -3,6 +3,7 @@ import {
   FS_RETRY_DELAYS_MS,
   getFsErrorCode,
   isTransientFsError,
+  TRANSIENT_OS_ERROR_NUMBERS,
   withFsRetry,
 } from "./fs-retry";
 
@@ -54,6 +55,53 @@ describe("isTransientFsError", () => {
     expect(isTransientFsError("EPERM: operation not permitted")).toBe(true);
   });
 
+  it("accepts the numeric (os error N) shape LLRT actually throws", () => {
+    // These three strings are what Rust's `impl Display for std::io::Error`
+    // renders, verbatim — the OS message then " (os error N)". No errno NAME
+    // appears anywhere in them, so before the numeric arm existed every one of
+    // these returned false and the RUN-04 ladder was inert on Windows.
+    expect(
+      isTransientFsError(new Error("Access is denied. (os error 5)")),
+    ).toBe(true);
+    expect(
+      isTransientFsError(
+        new Error(
+          "The process cannot access the file because it is being used by another process. (os error 32)",
+        ),
+      ),
+    ).toBe(true);
+    expect(
+      isTransientFsError(
+        new Error(
+          "The process cannot access the file because another process has locked a portion of the file. (os error 33)",
+        ),
+      ),
+    ).toBe(true);
+    // The POSIX namespace of the same rendering: LLRT throws this shape on
+    // macOS and Linux too, where N is an errno rather than a Win32 code.
+    expect(
+      isTransientFsError(new Error("Permission denied (os error 13)")),
+    ).toBe(true);
+    expect(isTransientFsError("Device or resource busy (os error 16)")).toBe(
+      true,
+    );
+  });
+
+  it("rejects an (os error N) that is not on the transient list", () => {
+    // Same exclusion rule as the name list: a missing parent or a full volume
+    // is an honest error that must surface now (T-04-11). 2 is ENOENT /
+    // ERROR_FILE_NOT_FOUND and 28 is ENOSPC; neither is on the list.
+    expect(
+      isTransientFsError(new Error("No such file or directory (os error 2)")),
+    ).toBe(false);
+    expect(
+      isTransientFsError(new Error("No space left on device (os error 28)")),
+    ).toBe(false);
+    // 1314 ERROR_PRIVILEGE_NOT_HELD is deliberately excluded and documented as
+    // such: a privilege the account lacks does not appear 1,500 ms later.
+    expect(TRANSIENT_OS_ERROR_NUMBERS).not.toContain(1314);
+  });
+
   it("rejects undefined, null and a message with no code", () => {
     expect(isTransientFsError(undefined)).toBe(false);
     expect(isTransientFsError(null)).toBe(false);
@@ -68,6 +116,32 @@ describe("getFsErrorCode", () => {
     expect(getFsErrorCode(errnoError("ENOENT"))).toBe("ENOENT");
     expect(getFsErrorCode(new Error("EPERM: operation not permitted"))).toBe(
       "EPERM",
+    );
+  });
+
+  it("reports an os-error-N token for the numeric LLRT shape", () => {
+    // The whole point of `lastCode` / `mcpFirstWriteAttempts` is that a Windows
+    // bug report can answer whether the ladder was long enough. Returning
+    // "unknown" for every LLRT failure made that channel report nothing.
+    expect(getFsErrorCode(new Error("Access is denied. (os error 5)"))).toBe(
+      "os-error-5",
+    );
+    expect(
+      getFsErrorCode(
+        new Error(
+          "The process cannot access the file because it is being used by another process. (os error 32)",
+        ),
+      ),
+    ).toBe("os-error-32");
+    // Non-transient numbers are reported too: "the volume was full" is worth
+    // more in a support bundle than "unknown".
+    expect(
+      getFsErrorCode(new Error("No space left on device (os error 28)")),
+    ).toBe("os-error-28");
+    // Lower-case token, for the same reason the sentinel below is lower-case:
+    // no libuv code can collide with it.
+    expect(getFsErrorCode(new Error("Access is denied. (os error 5)"))).toBe(
+      getFsErrorCode(new Error("Access is denied. (os error 5)")).toLowerCase(),
     );
   });
 
