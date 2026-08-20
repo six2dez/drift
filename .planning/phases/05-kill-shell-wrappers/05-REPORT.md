@@ -628,7 +628,85 @@ suite exercises the converted path at all.
 
 ## 7. Human reads
 
-*(Filled in at the blocking checkpoint — see §7.1 and §7.2 below.)*
+**These are HUMAN READS. They are not gate results, and no gate produced them.**
+
+That label is the entire point of this section. V-21 is the one criterion in this phase whose only
+possible evidence is a person reading a diff — there is no command that returns it — so a later
+reader must be able to tell these two entries apart from everything in §3, which is machine output.
+Phase 4 set this precedent with its RUN-05 legibility criterion, closed the same way. Do not
+promote either entry below into the gate tables, and do not cite either as a verified result.
+
+**Provenance, stated so the evidence class is unambiguous.** The blocking checkpoint was raised by
+the executing agent with its full payload — the report section to read, the exact `git diff`
+command, the three questions, the mechanical findings already in hand, and the two judgement calls
+most worth overturning. The approval below was returned to the executor **through the orchestrating
+workflow**, which is the designed channel for a checkpoint answer. The executor did not itself
+observe the reading. Recorded this way deliberately: a relayed human read is still a human read and
+is the normal GSD mechanism, but it is a weaker record than a maintainer's own signed note, and
+this phase does not round evidence upward. If a stronger attestation is ever wanted, the person who
+read it should amend this section directly.
+
+### 7.1 Legibility read — 2026-08-20
+
+**Read by:** six2dez (maintainer). **Recorded via:** orchestrating workflow. **Type:** human read.
+
+**What was read:** `§ 1` of this document — the non-claims — as a stranger to the codebase would
+read it: a future maintainer, the original Windows reporter, or a reviewer of the store release.
+
+**The question put:** *can that section be misread as a claim that Claude works on Windows today?*
+The test was whether a stranger draws the wrong conclusion, not whether the sentences are
+technically accurate.
+
+**Verdict: approved. No wording change requested.**
+
+The section stands as written, including its ordering — non-claims first, achievements last (§8) —
+which is the structural choice the verdict endorses.
+
+### 7.2 V-21 code review — 2026-08-20
+
+**Read by:** six2dez (maintainer). **Recorded via:** orchestrating workflow. **Type:** human read.
+
+**What was read:** `git diff cd22833..HEAD -- packages/backend/src/index.ts` — 579 insertions,
+241 deletions, one file. This is the diff that no test executes.
+
+**The three questions, and their answers. All three affirmative; no code issue found and nothing
+was sent back.**
+
+1. **Does any `spawn` or `spawnAndWait` hand a child an environment that was not merged with the
+   parent block?** — **No.** Every env-supplying site is `spec.env`, `buildSpawnEnv(...)` or the
+   forwarded `options.env`. The four sites are `:1388`, `:1998`, `:2405` and `:3412`; `:1503`
+   (`spawn("which")`) and `:2404` supply no env at all.
+
+2. **Does any surviving removal call in `finalize()` operate on a path that could be the user's own
+   `claude` binary?** — **No.** The `launchCommand` guard and its removal are both gone, together,
+   in one commit. The only removals left in `finalize()` target Drift-constructed temp paths:
+   `runtimeFiles.activityFilePath`, `runtimeFiles.approvalsFilePath` and `claudeMcpConfigPath`.
+
+3. **Is the Gemini/Codex wrapper genuinely unreachable on Windows on BOTH paths — MCP start AND
+   settings save / token sync?** — **Yes.** Both call sites reach `tryRegisterMcpForProviders`
+   (`:1762` in `refreshActiveMcpRuntime`, reached from `updateSettings` and `syncCaidoSessionToken`;
+   and `:2875` in `startMcpServer`), and the platform guard lives **inside** it, so both inherit it.
+
+### 7.3 Two judgement calls put to the reviewer explicitly, and reviewed rather than merely shipped
+
+Both were surfaced in the checkpoint payload as calls worth overturning. Neither was overturned.
+
+- **The `injectedDriftVars` gating** (`index.ts:3214`,
+  `runtimeFiles === undefined ? {} : runtimeEnv`). Put to the reviewer **as a deviation from the
+  plan text**, which read `driftVars: runtimeEnv` unconditionally. **Approved as the intended
+  behaviour:** it withholds the Caido session token from a provider child that has no MCP server to
+  reach, and preserves pre-conversion behaviour character-for-character. See §6.4 for the full
+  reasoning. This is now a *reviewed* decision, not merely a shipped one.
+
+- **RUN-04 marked Complete.** Put to the reviewer alongside the executor's own observation that
+  *"Complete"* and *"no longer applicable"* are different claims, and that Phase 4 had deliberately
+  held this requirement Pending. **Not overturned — it stays Complete.** The basis must travel with
+  the verdict, so both halves are kept adjacent by design: the structural argument lives in
+  `.planning/REQUIREMENTS.md` under *Closed at the end of Phase 5* (the write→exec pairs are
+  **eliminated** rather than retried, and `withFsRetry` gained its second production call site), and
+  the matching non-claim is **V-20** in §1.2 above (a real Defender lock on real hardware is not
+  inducible in CI, and closes only with the original reporter's confirmation in Phase 9/10). Neither
+  may be cited without the other.
 
 ---
 
