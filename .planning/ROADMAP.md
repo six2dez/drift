@@ -186,16 +186,37 @@ Plans:
 
 **Goal**: Replace the POSIX shell-wrapper launch indirection with a single direct-`node`-spawn keystone so the MCP self-test and health check pass on Windows for the Claude path — the direct fix for the reported bug — with zero POSIX regressions.
 **Depends on**: Phase 4 (can proceed in parallel with Phase 6)
-**Requirements**: RUN-01, RUN-02, RUN-04, HLT-01, HLT-02, CMP-01
+**Requirements**: RUN-01, RUN-02, RUN-04, HLT-01, HLT-02, CMP-01, **CI-01**, **CI-03** *(the last two pulled forward from Phase 9 by 05-CONTEXT.md D-07/D-09; re-targeted in REQUIREMENTS.md by plan 05-02)*
 **Success Criteria** (what must be TRUE):
 
-  1. The MCP server launches via a single `buildMcpServerSpec()` → `spawnNode()` path that spawns `node` directly with `env`; `renderExportExecScript`, `writeMcpWrapper`, `writeLaunchScript`, `shellQuote`, every `chmod` call, and every `.sh` file are deleted from the codebase.
+  1. The MCP server launches via a single `buildMcpServerSpec()` → `spawnNode()` path that spawns `node` directly with `env`; `renderExportExecScript`, `writeMcpWrapper`, `writeLaunchScript`, `shellQuote`, every `chmod` call, and every `.sh` file are deleted from the codebase. *(Amended during Phase 5 planning per 05-CONTEXT.md D-01/D-02 — plan 05-05 task 3 rewrites this criterion to match the shipped code: `writeLaunchScript`, the self-test launcher, the Claude session wrapper, the provider launch script and one of the two `chmod` spawns die, while `renderExportExecScript`, `shellQuote`, `writeMcpWrapper` and the remaining `chmod` spawn survive on darwin/linux for Gemini and Codex only, behind a platform guard, until Phase 7 PRV-03. Deleting them now would be a live CMP-01 regression for two shipping providers.)*
   2. On `windows-latest` CI, `validateCaidoAuth` (HLT-01) and the MCP self-test of `tools/list`, `get_environment`, `search_history` (HLT-02) pass for the Claude `node`/`mjs` path.
   3. The Caido token and `DRIFT_*` vars reach the MCP server only via the spawn `env` option / config-JSON `env` field — no shell `export` wrapper — verified by the integration spawn test.
   4. The macOS/Linux launch path is unchanged behind `os.platform()` guards and the existing `provider-launch` exact-snapshot tests stay green (CMP-01).
 
-**Plans**: 2 plans (provisional)
-**Research flag**: NO — design fully specified in `research/ARCHITECTURE.md`.
+**Plans**: 6 plans (4 waves)
+Plans:
+**Wave 1** *(three independent slices — no shared files, fully parallel)*
+
+- [ ] 05-01-PLAN.md — TRACER: pure `mcp-server-spec.ts` (`buildMcpServerSpec`, `buildMcpDriftVars`, `toMcpConfigDocument`, `planMcpCliRegistration`, `formatSpawnDebugLine`, `findExpandableEnvKeys`) + unit suite + the D-08 integration spawn test proving `--validate-auth` and the three self-test methods through the PRODUCTION builder against the real `assets/mcp-server.mjs`
+- [ ] 05-02-PLAN.md — CI-01/CI-03: reduce `build` to `caido-dev build` (measured byte-parity first), land `.gitattributes`, author the blocking `windows-latest` job with the carried-forward three-arm no-secret-material gate, re-target CI-01/CI-03 in REQUIREMENTS.md. Authors the leg; 05-06 runs it
+- [ ] 05-03-PLAN.md — D-05's reported, non-gating parent-environment metric in `runtime-probe.ts`: PATH entry count and env key count as integers, with `not probed` and `absent` distinguishable by construction
+
+**Wave 2** *(blocked on 05-01 and 05-03)*
+
+- [ ] 05-04-PLAN.md — `index.ts` health path: `requireMcpServerSpec`, `spawnAndWait`'s optional env, spec-taking `validateCaidoAuth`/`callMcpMethod`, **all three** `writeMcpWrapper` sites and **both** `validateCaidoAuth` sites (incl. `refreshActiveMcpRuntime`, the one CONTEXT.md missed), both config writers on one projection, the `${}`-expansion guard, and the win32 registration skip stated in-product and in the README
+
+**Wave 3** *(blocked on 05-04 — same file)*
+
+- [ ] 05-05-PLAN.md — `index.ts` provider slice: D-04's direct spawn on all platforms, the `launchCommand`/`launchArgs`/`finalize()` cleanup deleted AS ONE SET, `writeLaunchScript` gone, `withFsRetry` around `writeTemp` (RUN-04 structurally), three literal `DELETED IN PHASE 7 (PRV-03)` notices, and the SC-1 amendment + new Phase 7 criterion in this roadmap
+
+**Wave 4** *(blocked on 05-02 and 05-05)*
+
+- [ ] 05-06-PLAN.md — Phase gates executed with raw output, the real `windows-latest` run recorded with its URL/per-step conclusions/log lines, `timeout-minutes` set from the measurement, 05-VALIDATION.md reconciled (V-5's published gate is vacuous), `05-REPORT.md` leading with the non-claims, and a blocking human read of the ceiling + the V-21 code review
+
+**Research flag**: NO — design fully specified in `research/ARCHITECTURE.md`; `05-RESEARCH.md` (2026-08-20) went further and read `caido/dependency-llrt@main` and `rust-lang/rust` source directly. Three findings changed the plan: (1) Rust's Windows `make_envp` writes the supplied map **verbatim** with no libuv-style back-fill of the eleven `required_vars`, so a regression to a drift-only `env` dict is **green on every runner this project has** and broken only under the real Caido runtime — the control is a vehicle-independent static gate, not the integration test; (2) `pnpm build` **cannot run on `windows-latest`** today (the script chains `cp`/`rm`/`cd`/`zip` under `cmd.exe`, and `zip` is absent from the runner image) and the fix is a measured **deletion** — `caido-dev build` alone already emits an identical zip; (3) `index.ts` has a **third** `writeMcpWrapper` → `validateCaidoAuth` pair in `refreshActiveMcpRuntime` (`:1541`), reached from settings save and token sync, that CONTEXT.md's site list does not name — converting only the two named sites means the first token refresh on Windows tears down a working MCP runtime.
+
+**Planning note**: the provisional "2 plans" estimate is superseded. The discussion added a CI leg (D-07), a `.gitattributes`/CI-03 slice (D-09), a pure-module extraction (D-06) and an integration spawn test (D-08); research then added the `build`-script blocker and the third orchestration site. The split is driven by one constraint: `index.ts` is 4,003 lines with zero direct test coverage and cannot be imported under vitest, so anything left inside it is bucket **N** by construction. Waves 2 and 3 are sequential only because they share that file, and the D-04 change set inside wave 3 is deliberately one task and one commit — `noUnusedLocals` plus `--max-warnings 0` turn a half-done deletion set into a build failure, which is the enforcement mechanism.
 
 ### Phase 6: Windows Command Resolution
 
@@ -309,7 +330,7 @@ Parallelism opportunities: Phase 2 may run alongside Phase 3 (both depend only o
 | 2. POSIX Correctness & Hardening | 0/3 | Not started | - |
 | 3. CI Spike — Prove LLRT Basics on Windows | 5/5 | Complete    | 2026-08-14 |
 | 4. Platform Foundation | 11/11 | Complete    | 2026-08-20 |
-| 5. Kill Shell Wrappers | 0/2 | Not started | - |
+| 5. Kill Shell Wrappers | 0/6 | Not started | - |
 | 6. Windows Command Resolution | 0/2 | Not started | - |
 | 7. Provider Spawn & Registration | 0/3 | Not started | - |
 | 8. Process Lifecycle | 0/1 | Not started | - |
