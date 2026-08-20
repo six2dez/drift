@@ -10,12 +10,14 @@
 // match over the FULL test name, so a reworded title resolves to zero tests
 // while still reading correctly to a human — a silently-empty selector is
 // indistinguishable from a green run. Do not reword these.
+import { Buffer } from "buffer";
 import { describe, expect, it } from "vitest";
 import {
   appendBounded,
   buildTruncationMarker,
   createBoundedBuffer,
   drainCompleteLines,
+  lastCompleteUtf8Boundary,
   renderBoundedBuffer,
   CLI_STDERR_MAX_CHARS,
   CLI_STDOUT_MAX_CHARS,
@@ -342,5 +344,71 @@ describe("cap constants", () => {
     // construction. A future divergence should be a deliberate act with its own
     // rationale, not a drift nobody noticed.
     expect(MCP_SELFTEST_LINE_MAX_CHARS).toBe(4 * 1024 * 1024);
+  });
+});
+
+describe("lastCompleteUtf8Boundary", () => {
+  // The two CLI stdout/stderr handlers are the highest-volume decode sites in
+  // the plugin and used to call chunk.toString() per chunk, which bakes a
+  // permanent U+FFFD into any multi-byte character that straddles a pipe read.
+  // These cases are the boundary arithmetic that replaces it.
+
+  it("returns the full length for pure ASCII", () => {
+    const bytes = Buffer.from("plain ascii output\n", "utf-8");
+    expect(lastCompleteUtf8Boundary(bytes)).toBe(bytes.length);
+  });
+
+  it("returns the full length when the buffer ends on a complete sequence", () => {
+    // Em-dash (3 bytes), CJK (3 bytes) and an emoji (4 bytes) — one of each
+    // sequence length, all terminated.
+    for (const text of ["a—", "設定", "ok 🔒"]) {
+      const bytes = Buffer.from(text, "utf-8");
+      expect(lastCompleteUtf8Boundary(bytes)).toBe(bytes.length);
+    }
+  });
+
+  it("holds back the trailing bytes of a split multi-byte sequence", () => {
+    const full = Buffer.from("host—name", "utf-8");
+    const emDashStart = full.indexOf(0xe2);
+    expect(emDashStart).toBeGreaterThan(0);
+
+    // Every split inside the 3-byte em-dash must stop at its lead byte.
+    for (let held = 1; held <= 2; held += 1) {
+      const chunk = full.subarray(0, emDashStart + held);
+      expect(lastCompleteUtf8Boundary(chunk)).toBe(emDashStart);
+    }
+
+    // And the carry + next chunk reassembles the original text exactly, which
+    // is the property that actually matters at the call site.
+    const first = full.subarray(0, emDashStart + 1);
+    const safeEnd = lastCompleteUtf8Boundary(first);
+    const carried = Buffer.from(first.subarray(safeEnd));
+    const decoded =
+      first.subarray(0, safeEnd).toString("utf-8") +
+      Buffer.concat([carried, full.subarray(emDashStart + 1)]).toString(
+        "utf-8",
+      );
+    expect(decoded).toBe("host—name");
+    expect(decoded).not.toContain("\uFFFD");
+  });
+
+  it("splits a 4-byte sequence at its lead byte too", () => {
+    const full = Buffer.from("🔒", "utf-8");
+    expect(full.length).toBe(4);
+    for (let held = 1; held <= 3; held += 1) {
+      expect(lastCompleteUtf8Boundary(full.subarray(0, held))).toBe(0);
+    }
+    expect(lastCompleteUtf8Boundary(full)).toBe(4);
+  });
+
+  it("releases invalid bytes instead of carrying them forever", () => {
+    // A carry that never drains would stall the stream, and waiting cannot
+    // repair input that is not UTF-8 in the first place.
+    expect(lastCompleteUtf8Boundary(Buffer.from([0xff, 0xfe]))).toBe(2);
+    // Five continuation bytes with no lead byte in range.
+    expect(
+      lastCompleteUtf8Boundary(Buffer.from([0x80, 0x80, 0x80, 0x80, 0x80])),
+    ).toBe(5);
+    expect(lastCompleteUtf8Boundary(Buffer.alloc(0))).toBe(0);
   });
 });

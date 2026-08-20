@@ -101,6 +101,7 @@ import {
   buildTruncationMarker,
   createBoundedBuffer,
   drainCompleteLines,
+  lastCompleteUtf8Boundary,
   renderBoundedBuffer,
   CLI_STDERR_MAX_CHARS,
   CLI_STDOUT_MAX_CHARS,
@@ -2970,6 +2971,20 @@ async function sendCliMessage(
         maxChars: CLI_STDERR_MAX_CHARS,
         retention: "tail",
       });
+      // The byte carries for the two handlers below. A `data` chunk boundary
+      // falls wherever the pipe read landed, which is routinely mid-sequence in
+      // UTF-8, so the trailing bytes of an incomplete character are held here
+      // and decoded with the next chunk. Decoding per-chunk instead would bake
+      // a permanent U+FFFD into every em-dash, CJK character or IDN hostname
+      // that straddles a read boundary — the exact hazard activity-tail.ts
+      // keeps its own remainder a Buffer to avoid, at far higher volume.
+      //
+      // Buffers, not strings: once decoded the damage is unrecoverable, because
+      // the surviving bytes of the character are gone. At most 3 bytes are ever
+      // held. If the child exits mid-sequence those bytes are dropped, which is
+      // correct — they were never a character.
+      let stdoutBytes = Buffer.alloc(0);
+      let stderrBytes = Buffer.alloc(0);
       let claudePrintState = createClaudePrintState();
       let settled = false;
       let claudeRecoveryTimeout: ReturnType<typeof setTimeout> | undefined;
@@ -3246,9 +3261,22 @@ async function sendCliMessage(
       };
 
       proc.stdout?.on("data", (chunk: Buffer) => {
-        const text = chunk.toString();
-        stdout = appendBounded(stdout, text);
+        // Liveness is a property of the CHUNK, not of the decoded text, so it
+        // is recorded before the early return below: a chunk that ends
+        // mid-sequence still proves the child is alive, and the stall watchdog
+        // must not treat it as silence.
         lastStdoutAt = Date.now();
+        const merged =
+          stdoutBytes.length === 0
+            ? chunk
+            : Buffer.concat([stdoutBytes, chunk]);
+        const safeEnd = lastCompleteUtf8Boundary(merged);
+        // Copied rather than kept as a view, so a 3-byte carry cannot retain a
+        // multi-megabyte chunk.
+        stdoutBytes = Buffer.from(merged.subarray(safeEnd));
+        const text = merged.subarray(0, safeEnd).toString("utf-8");
+        if (text === "") return;
+        stdout = appendBounded(stdout, text);
         appendSessionDebugLog(
           sessionDebugLogPath,
           `[stdout] ${summarizeDebugChunk(text)}`,
@@ -3335,7 +3363,15 @@ async function sendCliMessage(
       });
 
       proc.stderr?.on("data", (chunk: Buffer) => {
-        const text = chunk.toString();
+        // Same carry discipline as stdout above.
+        const merged =
+          stderrBytes.length === 0
+            ? chunk
+            : Buffer.concat([stderrBytes, chunk]);
+        const safeEnd = lastCompleteUtf8Boundary(merged);
+        stderrBytes = Buffer.from(merged.subarray(safeEnd));
+        const text = merged.subarray(0, safeEnd).toString("utf-8");
+        if (text === "") return;
         stderr = appendBounded(stderr, text);
         appendSessionDebugLog(
           sessionDebugLogPath,

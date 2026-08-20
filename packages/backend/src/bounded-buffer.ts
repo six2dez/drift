@@ -197,6 +197,56 @@ export const MCP_SELFTEST_STDERR_MAX_CHARS = 256 * 1024;
 // briefly.
 export const MCP_SELFTEST_LINE_MAX_CHARS = 4 * 1024 * 1024;
 
+// ── The UTF-8 chunk boundary, for the streams these caps bound ─────────────
+//
+// Returns the length of the longest PREFIX of `bytes` that ends on a complete
+// UTF-8 sequence. The caller decodes `[0, safeEnd)` and carries `[safeEnd, len)`
+// — as BYTES — into the next chunk.
+//
+// Why this has to exist: a child-process `data` chunk boundary falls wherever
+// the pipe read landed, which is routinely in the middle of a multi-byte
+// sequence. `chunk.toString()` per chunk then decodes half a sequence and bakes
+// a permanent U+FFFD into the text; once decoded the damage is unrecoverable,
+// because the surviving bytes of the character are gone. An em-dash, a CJK
+// character or an IDN hostname in a model answer is enough. activity-tail.ts
+// argues this at length for its own remainder (`:120-133`) and keeps that
+// remainder a Buffer for exactly this reason; the CLI stdout/stderr handlers
+// are the same hazard at far higher volume.
+//
+// This module stays IMPORT-FREE: the parameter is a `Uint8Array` (a global) and
+// not a `Buffer`, and the function returns an INDEX rather than a decoded
+// string, so the concat/decode — the part that needs `Buffer` — stays in the
+// caller, matching how every other function here leaves I/O to index.ts.
+//
+// Only the last 4 bytes are examined, because 4 bytes is the longest UTF-8
+// sequence: a lead byte further back than that cannot still be waiting for
+// continuation bytes.
+export function lastCompleteUtf8Boundary(bytes: Uint8Array): number {
+  const length = bytes.length;
+  const lowest = length - 4 < 0 ? 0 : length - 4;
+
+  for (let index = length - 1; index >= lowest; index -= 1) {
+    const byte = bytes[index] ?? 0;
+    // 10xxxxxx — a continuation byte. Keep walking back to its lead byte.
+    if ((byte & 0xc0) === 0x80) continue;
+
+    let needed = 1;
+    if ((byte & 0x80) === 0x00) needed = 1;
+    else if ((byte & 0xe0) === 0xc0) needed = 2;
+    else if ((byte & 0xf0) === 0xe0) needed = 3;
+    else if ((byte & 0xf8) === 0xf0) needed = 4;
+    // else: not a valid lead byte at all. `needed` stays 1, so the byte is
+    // released now rather than held. Waiting cannot repair invalid input, and a
+    // carry that never drains would stall the whole stream.
+
+    return index + needed <= length ? length : index;
+  }
+
+  // Four or more continuation bytes with no lead byte in range: not valid
+  // UTF-8, and no amount of waiting changes that. Release everything.
+  return length;
+}
+
 export type LineDrainResult = {
   lines: string[];
   remainder: string;

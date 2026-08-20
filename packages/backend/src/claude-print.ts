@@ -18,6 +18,17 @@
 // buffer is a `string`, whereas activity-tail.ts counts BYTES, because its
 // remainder must stay a `Buffer` to survive a multi-byte sequence split across a
 // read boundary.
+//
+// That asymmetry is only SAFE because of a guarantee this module cannot make
+// itself: the text handed to consumeClaudePrintChunk has already been decoded
+// at a complete UTF-8 boundary by the caller — index.ts carries the trailing
+// bytes of a split sequence between `data` chunks using
+// `lastCompleteUtf8Boundary` (bounded-buffer.ts) — so a `string` buffer here
+// can no longer inherit a U+FFFD from the layer above. It previously could: the
+// handler called `chunk.toString()` per chunk, so "the buffer is a string" was
+// a description of the damage rather than a justification for it. If a future
+// caller ever feeds this module raw per-chunk decodes again, that guarantee is
+// gone and this comment is wrong.
 export const CLAUDE_LINE_BUFFER_MAX_CHARS = 4 * 1024 * 1024;
 
 type ClaudeRawUsage = {
