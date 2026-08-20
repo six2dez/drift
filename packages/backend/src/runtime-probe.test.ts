@@ -345,6 +345,63 @@ describe("buildProbeReport parentEnv row", () => {
       "sentinel-value-9f3a",
     );
   });
+
+  it("renders not probed and absent as different strings, not the same string twice", () => {
+    // T-05-11. Asserting only that both are non-empty would pass under an
+    // implementation that renders one string for both states, which is the
+    // exact failure this case exists to catch.
+    const neverProbed = buildProbeReport(probeInput());
+    const probedWithoutPath = buildProbeReport(
+      probeInput({ parentEnv: { HOME: "/x" } }),
+    );
+
+    expect(neverProbed.metrics["parentEnvPathEntryCount"]).not.toBe(
+      probedWithoutPath.metrics["parentEnvPathEntryCount"],
+    );
+
+    const neverProbedDetail = capabilityNamed(neverProbed, "parentEnv").detail;
+    const absentDetail = capabilityNamed(probedWithoutPath, "parentEnv").detail;
+
+    // The absent branch must actually use the word, or the negative assertion
+    // below would hold vacuously.
+    expect(absentDetail).toContain("absent");
+    expect(neverProbedDetail).not.toContain("absent");
+  });
+
+  it("leaks neither a key name nor a value through the flattened diagnostics fields", () => {
+    // The flattened Record is what getDiagnostics collects into the support
+    // bundle a user pastes into a public bug report (T-05-10).
+    const report = buildProbeReport(
+      probeInput({
+        parentEnv: {
+          DRIFT_FIXTURE_SENTINEL_KEY: "sentinel-value-9f3a",
+          PATH: "/usr/bin:/bin",
+        },
+      }),
+    );
+    const flattened = Object.entries(formatProbeReportFields(report))
+      .map(([key, value]) => `${key}=${value}`)
+      .join("\n");
+
+    // Premise first: an empty string would satisfy both negatives vacuously.
+    expect(flattened.length).toBeGreaterThan(0);
+    expect(flattened).toContain("parentEnvKeyCount=2");
+
+    expect(flattened).not.toContain("DRIFT_FIXTURE_SENTINEL_KEY");
+    expect(flattened).not.toContain("sentinel-value-9f3a");
+  });
+
+  it("REPORTS and never GATES: the worst parentEnv outcome leaves report.ok true", () => {
+    // Supplied, and carrying no PATH under any casing — the worst case this row
+    // can observe. Gating on it would refuse to start the MCP server on a
+    // runtime where the health check demonstrably works (D-05's rejected
+    // alternative), because the server is spawned by an absolute node path.
+    const report = buildProbeReport(probeInput({ parentEnv: { HOME: "/x" } }));
+
+    expect(capabilityNamed(report, "parentEnv").ok).toBe(true);
+    expect(capabilityNamed(report, "parentEnv").gating).toBe(false);
+    expect(report.ok).toBe(true);
+  });
 });
 
 describe("formatProbeReportFields", () => {
