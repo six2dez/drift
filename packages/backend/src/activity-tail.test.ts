@@ -279,6 +279,45 @@ describe("readActivityTick", () => {
     expect(second.cursor.offset).toBe(Buffer.byteLength(`${replacement}\n`));
   });
 
+  it("keeps the cumulative droppedBytes tally across a truncation reset", async () => {
+    // The counter is documented as CUMULATIVE and index.ts reports a drop only
+    // when the value it reads back exceeds the value it captured before the
+    // tick. Zeroing it on reset let a fresh drop in the same tick compare as
+    // smaller than the old total and vanish entirely — the repudiation gap this
+    // phase's own rule forbids. The carried half-line is counted too: those
+    // bytes were read out of the file and can never be emitted as a line.
+    const filePath = await makeActivityFile();
+    const records = ["1", "2", "3"].map((id) => JSON.stringify({ id }));
+    await writeFile(filePath, `${records.join("\n")}\n`);
+
+    const first = await readActivityTick({
+      filePath,
+      cursor: createActivityCursor(),
+    });
+    expect(first.cursor.offset).toBeGreaterThan(0);
+
+    const carried = Buffer.from('{"id":"half', "utf-8");
+    const stale = {
+      offset: first.cursor.offset,
+      partial: carried,
+      droppedBytes: 6 * 1024 * 1024,
+    };
+
+    await truncate(filePath, 0);
+    const replacement = JSON.stringify({ id: "r" });
+    await writeFile(filePath, `${replacement}\n`);
+    // Shorter than the cursor's offset, which is what makes this a truncation
+    // reset rather than an ordinary forward read.
+    expect(Buffer.byteLength(`${replacement}\n`)).toBeLessThan(stale.offset);
+
+    const second = await readActivityTick({ filePath, cursor: stale });
+
+    expect(second.lines).toEqual([replacement]);
+    expect(second.cursor.offset).toBe(Buffer.byteLength(`${replacement}\n`));
+    expect(second.cursor.partial.length).toBe(0);
+    expect(second.cursor.droppedBytes).toBe(6 * 1024 * 1024 + carried.length);
+  });
+
   it("reads only the bytes appended since the previous tick", async () => {
     const filePath = await makeActivityFile();
     const one = JSON.stringify({ id: "a" });

@@ -206,8 +206,28 @@ export async function readActivityTick(input: {
       // On "reset" the file was truncated or rotated under us, so everything the
       // old cursor knew — offset AND any half-line it was carrying — describes
       // content that no longer exists. plan.position is already 0.
+      //
+      // `droppedBytes` is the ONE field that must SURVIVE the reset, because it
+      // is documented as CUMULATIVE and index.ts depends on that monotonicity:
+      // it reports a drop only when the value read back exceeds the value it
+      // captured before the tick (index.ts:2876/2888). Zeroing it here means a
+      // cursor that had dropped 6 MiB, then truncates, then drops a fresh 5 MiB
+      // inside this same tick, compares as `5 MiB > 6 MiB` → false and the
+      // second drop is never reported at all. "A drop nobody can see is a
+      // repudiation gap" is this phase's own rule.
+      //
+      // The discarded remainder is ADDED to the tally rather than merely
+      // preserved: those bytes were read out of the file and can now never be
+      // emitted as a line, which is exactly what droppedBytes counts. Silently
+      // discarding them understated the loss.
       const cursor =
-        plan.action === "reset" ? createActivityCursor() : input.cursor;
+        plan.action === "reset"
+          ? {
+              ...createActivityCursor(),
+              droppedBytes:
+                input.cursor.droppedBytes + input.cursor.partial.length,
+            }
+          : input.cursor;
 
       // Sized EXACTLY to the read length, with offset 0. LLRT's FileHandle.read
       // ends in `dst_buf[offset..].copy_from_slice(&buf)`, and Rust's
