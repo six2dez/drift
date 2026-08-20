@@ -269,6 +269,16 @@ let lastProbeReport: ProbeReport | undefined;
 // evidence rather than on a guess.
 let lastFirstWriteAttempts = 0;
 
+// PERF-02 / WR-09's evidence channel for the activity tail. The tail is the one
+// truncation site in the backend that emits NO marker into any user-visible
+// artifact — its drops reach `sdk.console.error` and nothing else, so they are
+// absent from getDiagnostics, from the support bundle and from the transcript,
+// which is where mcpFirstWriteAttempts and resolutionCache were deliberately
+// placed for exactly this reason. Cumulative across the session, so a bundle
+// answers "did this machine lose activity records" rather than only "is it
+// losing them right now".
+let lastActivityDroppedBytes = 0;
+
 // Passed to buildProbeReport as `realpathRungNote` and rendered verbatim.
 //
 // The distinction is load-bearing and must survive review: "not probed" is NOT
@@ -2950,6 +2960,10 @@ async function sendCliMessage(
           sdk.console.error(
             `[drift] activity tail dropped ${String(tick.cursor.droppedBytes - previousDroppedBytes)} bytes of an unterminated activity line sessionId=${input.sessionId}`,
           );
+          // ...and into the artifact users actually submit. The console line
+          // alone is invisible in a bug report.
+          lastActivityDroppedBytes +=
+            tick.cursor.droppedBytes - previousDroppedBytes;
         }
         for (const line of tick.lines) {
           // The tolerant parse that parseRuntimeActivityEvents used to own, now
@@ -3713,6 +3727,9 @@ async function getDiagnostics(_sdk: BackendSDK): Promise<Result<Record<string, s
     // 1,500 ms ladder was long enough, and FS_RETRY_DELAYS_MS can then be
     // widened on evidence instead of on a guess.
     mcpFirstWriteAttempts: String(lastFirstWriteAttempts),
+    // The activity tail's drop tally. Bytes only — never any of the dropped
+    // content, which is target-application data (T-04-04).
+    activityDroppedBytes: String(lastActivityDroppedBytes),
     caidoApiUrl: currentSettings.caidoApi.url,
     caidoApiTokenSet: getEffectiveCaidoToken() !== "" ? "yes" : "no",
     caidoTokenSource: getCaidoTokenSource(),

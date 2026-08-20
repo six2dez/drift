@@ -554,7 +554,11 @@ describe("claude-print line buffer bounds", () => {
     const dropped = { ...clean, droppedChars: 4195328 };
 
     expect(finalizeClaudePrintOutput(dropped)).toBe(
-      "the answer\n…[drift: dropped 4195328 bytes of unterminated Claude stream output]",
+      // WR-09: built from TRUNCATION_MARKER_PREFIX now, so one grep finds every
+      // truncation site in the backend. The count and the site-specific tail are
+      // unchanged; only the shared token at the front moved from "dropped" to
+      // "truncated".
+      "the answer\n…[drift: truncated 4195328 bytes of unterminated Claude stream output]",
     );
     expect(
       finalizeClaudePrintOutput(dropped).endsWith(

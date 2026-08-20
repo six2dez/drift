@@ -31,6 +31,16 @@
 // gone and this comment is wrong.
 export const CLAUDE_LINE_BUFFER_MAX_CHARS = 4 * 1024 * 1024;
 
+// The ONE import this module takes, and it is a string constant rather than
+// logic. The drop notice below used to spell its own marker
+// ("…[drift: dropped N bytes…"), which meant TRUNCATION_MARKER_PREFIX — exported
+// as "one greppable string, with the count embedded" — matched two of the three
+// truncation sites in the backend and a support tool grepping for it silently
+// missed this one. The module still keeps its OWN copy of the line-drain logic,
+// for the reasons above; sharing the marker text costs nothing and is the only
+// way the "one greppable string" property can actually hold.
+import { TRUNCATION_MARKER_PREFIX } from "./bounded-buffer";
+
 type ClaudeRawUsage = {
   input_tokens?: number;
   output_tokens?: number;
@@ -393,8 +403,12 @@ export function finalizeClaudePrintOutput(state: ClaudePrintState): string {
   // greppable support-bundle token and this stream is ASCII-dominated, so the
   // two numbers coincide in practice; the discrepancy is recorded here rather
   // than being silently wrong.
+  //
+  // Built FROM TRUNCATION_MARKER_PREFIX rather than spelling a second token, so
+  // one grep finds every truncation site. The site-specific tail is kept: what
+  // was dropped matters as much as how much.
   if (state.droppedChars > 0) {
-    return `${output}\n…[drift: dropped ${String(state.droppedChars)} bytes of unterminated Claude stream output]`;
+    return `${output}${TRUNCATION_MARKER_PREFIX}${String(state.droppedChars)} bytes of unterminated Claude stream output]`;
   }
   return output;
 }
