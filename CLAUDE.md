@@ -69,7 +69,7 @@ Drift is a Caido plugin that turns the user's own local AI CLIs (Claude Code / G
 - `packages/backend/tsconfig.json`: extends root, adds `@caido/sdk-backend` types, excludes test files
 - Frontend uses `vue-tsc` for type-checking
 - `dist/plugin_package/` — produced by `caido-dev build`
-- `dist/drift.zip` — final deliverable created by the `build` script in root `package.json`; `packages/backend/assets/` is copied into `dist/plugin_package/backend/assets/` post-build
+- `dist/plugin_package.zip` — the deliverable `release.yml` signs and publishes; `caido-dev build` emits both `dist/plugin_package/` and `dist/plugin_package.zip` itself, with `packages/backend/assets/` included through `caido.config.ts`'s assets glob rather than a post-build copy
 - ESLint 10.8.1: flat config at `eslint.config.mjs` (repo root; `.mjs` because the root package is CommonJS-typed), covering TypeScript, Vue SFCs, `.mjs`, and test files. `pnpm lint` runs `eslint . --max-warnings 0` and never auto-fixes; `pnpm lint:fix` (`eslint . --fix`) is the local auto-fix entry point
 - Prettier 3.8.1: `pnpm format` formats `packages/**/src/**/*.{vue,ts,js,json}` plus root-level `*.{ts,mjs}`, which is what reaches `caido.config.ts`, `vitest.config.ts`, `vitest.setup.ts`, and `eslint.config.mjs`
 ## Platform Requirements
@@ -82,13 +82,13 @@ Drift is a Caido plugin that turns the user's own local AI CLIs (Claude Code / G
 ## Release / Signing Pipeline
 - Triggers on push/PR to `main`
 - Runs: typecheck → `vitest run` → `pnpm build`
-- Uploads `dist/drift.zip` as a GitHub artifact (14-day retention)
+- Uploads `dist/plugin_package.zip` as a GitHub artifact (14-day retention)
 - Manual `workflow_dispatch`, restricted to `main` branch only
 - Runs: typecheck → test → build
-- Signs `dist/drift.zip` with Ed25519 using `openssl pkeyutl` and the `PRIVATE_KEY` repository secret
-- Produces `dist/drift.zip.sig`
+- Signs `dist/plugin_package.zip` with Ed25519 using `openssl pkeyutl` and the `PRIVATE_KEY` repository secret
+- Produces `dist/plugin_package.zip.sig`
 - Extracts version from `manifest.json` inside the zip (via `python3`)
-- Creates GitHub release via `caido/action-release@v1` with both `drift.zip` and `drift.zip.sig` as artifacts
+- Creates GitHub release via `caido/action-release@v1` with both `plugin_package.zip` and `plugin_package.zip.sig` as artifacts
 <!-- GSD:stack-end -->
 
 <!-- GSD:conventions-start source:CONVENTIONS.md -->

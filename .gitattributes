@@ -1,0 +1,14 @@
+# Normalise line endings on checkin, check out LF everywhere.
+#
+# Prophylactic in this phase, not remedial: nothing in the repo currently
+# asserts on newline-bearing generated content. Measured before landing this —
+# no snapshot matchers exist anywhere in the tree (no toMatchSnapshot,
+# toMatchInlineSnapshot or toMatchFileSnapshot), and exactly one test reads a
+# file from disk, which it writes itself into a temp dir. So no test today can
+# go red on a CRLF checkout.
+#
+# It is landed anyway because the surviving POSIX MCP wrapper still emits
+# newline-joined shell text, and Phase 7 will test it. A guard added after the
+# first CRLF-sensitive assertion exists is a guard added one red Windows run
+# too late.
+* text=auto eol=lf
