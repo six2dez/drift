@@ -158,8 +158,8 @@ Which phases cover which requirements. Every v1 requirement maps to exactly one 
 | UX-01 | Phase 7 | Pending |
 | LIF-01 | Phase 8 | Pending |
 | LIF-02 | Phase 8 | Pending |
-| CI-01 | Phase 9 | Pending |
-| CI-03 | Phase 9 | Pending |
+| CI-01 | Phase 5 | Pending |
+| CI-03 | Phase 5 | Pending |
 | UX-03 | Phase 10 | Pending |
 | UX-04 | Phase 10 | Pending |
 
@@ -175,11 +175,11 @@ Which phases cover which requirements. Every v1 requirement maps to exactly one 
 - Phase 2 (POSIX Correctness & Hardening): COR-01, COR-02, COR-03, COR-04, COR-05, SEC-01, SEC-02, SEC-03, SEC-04, SEC-05, PERF-01
 - Phase 3 (CI Spike): CI-02
 - Phase 4 (Platform Foundation): RUN-03, RUN-05, CMP-02, PERF-02, PERF-03, PERF-04
-- Phase 5 (Kill Shell Wrappers): RUN-01, RUN-02, RUN-04, HLT-01, HLT-02, CMP-01
+- Phase 5 (Kill Shell Wrappers): RUN-01, RUN-02, RUN-04, HLT-01, HLT-02, CMP-01, CI-01, CI-03
 - Phase 6 (Windows Command Resolution): RES-01, RES-02, RES-03, UX-02
 - Phase 7 (Provider Spawn & Registration): PRV-01, PRV-02, PRV-03, PRV-04, PRV-05, UX-01
 - Phase 8 (Process Lifecycle): LIF-01, LIF-02
-- Phase 9 (CI Hardening): CI-01, CI-03
+- Phase 9 (CI Hardening): no requirement IDs of its own — both of the IDs it used to own were pulled forward into Phase 5 during Phase 5 planning (see the note below). The phase narrows to making the Windows leg required-for-merge and green for the right reasons, and to deleting the temporary probe workflow.
 - Phase 10 (Windows Polish): UX-03, UX-04
 
 **Re-targeted to Phase 5 at the close of Phase 4:**
@@ -200,6 +200,44 @@ Which phases cover which requirements. Every v1 requirement maps to exactly one 
   rewrite is what makes them editable; real-machine confirmation comes from the original reporter in
   Phase 9/10.
 
+**Pulled forward into Phase 5 during Phase 5 planning (2026-08-20):**
+
+- **CI-01** — *"A `windows-latest` CI job builds the plugin and runs vitest (the permanent
+  regression net)."* Phase 5 is the first phase with **real Windows behaviour to protect** — it
+  rewrites the MCP launch path off the bash wrapper — and every later phase inherits the net from
+  the moment it exists, so landing it at the end would leave Phases 5-8 unguarded on the OS the
+  whole port is for. The alternative was to extend `windows-llrt-probe.yml`, and that is worse on
+  both counts: its own header stamps it *DELETED IN PHASE 9*, and Phase 3's D-03 deliberately keeps
+  its output off the merge gate — so SC-2's evidence would sit in a job nobody must heed and then
+  vanish. Landed in `.github/workflows/ci.yml` as a **blocking** sibling job to `verify`
+  (`Verify (Windows)`, `windows-latest`, Node 20), carrying the D-10 no-secret-material gate in its
+  three-arm form so that gate outlives the probe rather than dying with it. Re-assigned to
+  **Phase 5** in the traceability table and in both rollups — the same structural move RUN-04 got at
+  the close of Phase 4, not a paragraph alone. Status stays **Pending**: plan 05-02 *authors* the
+  leg, plan 05-06 runs it and records the run URL and the per-step conclusions.
+
+- **CI-03** — *"Windows CI is green for the right reasons — `.gitattributes` (`eol=lf`),
+  `\r?\n`-tolerant snapshot assertions, pinned shell."* Three measurements taken during Phase 5
+  discussion (D-09) are what make this cheap enough to land now and blocking from day one rather
+  than as a narrow subset: **no snapshot matchers exist anywhere in the repo** (`toMatchSnapshot`,
+  `toMatchInlineSnapshot` and `toMatchFileSnapshot` return zero matches — the "exact-snapshot"
+  `provider-launch` tests are `toEqual` on argv arrays and are line-ending-immune); **exactly one
+  test reads a file from disk** (`mcp-server.context.test.ts`) and it writes that file itself into a
+  temp dir; and **no `.gitattributes` existed**. So the whole 278-test suite can be required on the
+  Windows leg immediately — a narrow-but-blocking subset would have left the rest unguarded until
+  Phase 9, and a `continue-on-error` leg is the weakness D-07 already rejected one layer up.
+  `.gitattributes` (`* text=auto eol=lf`) is landed in Phase 5 as prophylaxis, because the surviving
+  POSIX MCP wrapper still emits newline-joined shell text that Phase 7 will test. Status stays
+  **Pending** for the same reason as CI-01.
+
+- **What remains in Phase 9 after this move:** making the Windows job **required for merge** (a
+  branch-protection change, not a workflow change) and green for the right reasons; deleting
+  `.github/workflows/windows-llrt-probe.yml` and `scripts/windows-llrt-probe.mjs` — at which point
+  the new gate's third arm fires on `grep` status 2 and must be re-pointed, which is exactly why the
+  probe file is still in its scan-target list; and the deferred `caido:plugin` vitest alias, the one
+  item that would raise SC-2's fidelity by making `index.ts` importable in tests. Phase 9 therefore
+  owns no requirement IDs of its own, which is a narrowing, not an emptying.
+
 ---
 *Requirements defined: 2026-06-26*
-*Last updated: 2026-08-20 — Phase 4 closed: RUN-03, RUN-05, CMP-02, PERF-02, PERF-03 and PERF-04 marked Complete; RUN-04 re-targeted to Phase 5 (see note above)*
+*Last updated: 2026-08-20 — Phase 4 closed: RUN-03, RUN-05, CMP-02, PERF-02, PERF-03 and PERF-04 marked Complete; RUN-04 re-targeted to Phase 5. CI-01 and CI-03 pulled forward from Phase 9 into Phase 5 by plan 05-02 (see notes above); both remain Pending*
