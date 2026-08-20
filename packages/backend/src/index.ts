@@ -103,6 +103,9 @@ import {
 import {
   buildMcpDriftVars,
   buildMcpServerSpec,
+  findExpandableEnvKeys,
+  planMcpCliRegistration,
+  toMcpConfigDocument,
   type McpServerSpec,
 } from "./mcp-server-spec";
 import { withFsRetry } from "./fs-retry";
@@ -750,21 +753,46 @@ function getMcpContextFilePath(): string | undefined {
   return path.join(mcpTempDir, "mcp-context.json");
 }
 
+// RUN-02 / D-10. The SINGLE projection point: Claude's `mcp-<chatId>.json` and
+// Copilot's `copilot-mcp-<chatId>.json` are now the same document built by the
+// same pure function from the same spec, rather than two writers that happened
+// to agree. The document carries `spec.driftVars` and never the parent-merged
+// `spec.env` — the projection helper in mcp-server-spec.ts states at its own
+// `env` line why that asymmetry is deliberate (T-05-04).
 async function writeChatMcpConfig(
   name: string,
-  server: {
-    command: string;
-    args: string[];
-    env?: Record<string, string>;
-  },
+  spec: McpServerSpec,
+  sdk: BackendSDK,
 ): Promise<string | undefined> {
   if (mcpTempDir === undefined) return undefined;
-  if (!(await fileExists(server.command))) return undefined;
-  return writeTemp(mcpTempDir, name, JSON.stringify({
-    mcpServers: {
-      drift: server,
-    },
-  }, null, 2));
+  // Unchanged, and it GAINS meaning: `command` used to be the wrapper `.sh` this
+  // very plan deletes, and is now the absolute `node` path the CLI will execute.
+  if (!(await fileExists(spec.command))) return undefined;
+
+  // T-05-13. Claude Code expands variable references INSIDE a stdio server's
+  // `env` field, and an unset reference is left as unexpanded text with only a
+  // `claude mcp list` warning — either way the server would start holding a
+  // token that is not the token, i.e. a SILENTLY unauthenticated MCP server.
+  // Failing loud here is strictly better than writing a config that fails quiet.
+  //
+  // This is a guard against ACCIDENTAL expansion of a literal value. It is not
+  // the `${CAIDO_TOKEN}` indirection D-10 rejected — Drift still writes the
+  // literal token, exactly as the shipping Copilot path already does.
+  //
+  // KEY NAMES only, never a value (D-11 / T-04-04).
+  const expandableKeys = findExpandableEnvKeys(spec.driftVars);
+  if (expandableKeys.length > 0) {
+    sdk.console.error(
+      `[drift] Refusing to write ${name}: the value of ${expandableKeys.join(", ")} carries a sequence Claude Code expands as a variable reference inside a stdio server's env field. Writing it would produce a silently unauthenticated MCP server. Re-authenticate in Caido to obtain a fresh session token, then retry.`,
+    );
+    return undefined;
+  }
+
+  return writeTemp(
+    mcpTempDir,
+    name,
+    JSON.stringify(toMcpConfigDocument(spec), null, 2),
+  );
 }
 
 async function writeLaunchScript(
@@ -1214,38 +1242,33 @@ function renderHttpContextAttachment(httpContext: HttpContextPayload | undefined
   return `${headerLines.join("\n")}\n`;
 }
 
-async function writeMcpWrapper(
-  mcpScriptPath: string,
-  nodeExecutable: string,
-  caidoToken: string,
-  options?: {
-    name?: string;
-    toolPolicy?: McpToolPolicy;
-    activityFilePath?: string;
-    approvalsFilePath?: string;
-  },
-): Promise<string | undefined> {
+// DELETED IN PHASE 7 (PRV-03).
+//
+// The last surviving POSIX shell wrapper, and it serves ONLY Gemini and Codex:
+// `gemini/codex mcp add drift -- <wrapper>` persists a PATH, so this script's
+// `export` lines are the sole carrier of CAIDO_URL/CAIDO_TOKEN/DRIFT_* for those
+// two CLIs. Deleting it before Phase 7 lands their `--env`/`-e` registration
+// would be a live CMP-01 regression for two shipping providers on the platforms
+// the entire user base runs today (D-01). Phase 7 is named literally because an
+// undated "temporary" comment becomes permanent.
+//
+// Its ONLY caller is tryRegisterMcpForProviders, which does not call it at all on
+// win32 — so no `.sh` is written and no `chmod` is spawned there (D-02/D-03).
+// It takes the spec so the wrapper and the direct spawn can never describe two
+// different launches.
+async function writeMcpWrapper(spec: McpServerSpec): Promise<string | undefined> {
   if (mcpTempDir === undefined) return undefined;
-  // getMcpWrapperPath() is now the single source of truth for the surviving
-  // POSIX wrapper path — the one D-01 keeps alive for Gemini/Codex until Phase 7
-  // (PRV-03) lands their --env/-e registration. Taking the default from it
-  // instead of re-joining the literal here also keeps that function from
-  // becoming an unused local once the self-test stops calling it.
-  const wrapperPath =
-    options?.name !== undefined
-      ? path.join(mcpTempDir, options.name)
-      : getMcpWrapperPath();
+  // getMcpWrapperPath() is the single source of truth for the surviving POSIX
+  // wrapper path, which also keeps it from becoming an unused local now that the
+  // self-test no longer calls it.
+  const wrapperPath = getMcpWrapperPath();
   if (wrapperPath === undefined) return undefined;
   const tempWrapperPath = `${wrapperPath}.tmp`;
-  const runtimeEnv = buildMcpRuntimeEnv({
-    caidoToken,
-    toolPolicy: options?.toolPolicy,
-    activityFilePath: options?.activityFilePath,
-    approvalsFilePath: options?.approvalsFilePath,
-  });
   await writeFile(
     tempWrapperPath,
-    renderExportExecScript(nodeExecutable, [mcpScriptPath], runtimeEnv, {
+    // spec.driftVars, not spec.env: the wrapper exports Drift's own variables
+    // and `exec`s into a shell that already carries the parent environment.
+    renderExportExecScript(spec.command, spec.args, spec.driftVars, {
       passThroughArgs: true,
     }),
     // 0o700: the wrapper exports the Caido token and must be executable.
@@ -1641,14 +1664,7 @@ async function refreshActiveMcpRuntime(sdk: BackendSDK): Promise<string | undefi
   }
 
   setMcpAuthStatus("valid", "");
-  // TASK 2 OF PLAN 05-04 DELETES THIS WRAPPER WRITE. It is temporary: the write
-  // moves inside tryRegisterMcpForProviders together with the win32 guard, and
-  // exists here only so the registration call still compiles at this task
-  // boundary. Not a permanent shape.
-  const wrapperPath = await writeMcpWrapper(mcpScriptPath, spec.value.command, caidoToken);
-  if (wrapperPath !== undefined) {
-    await tryRegisterMcpForProviders(wrapperPath, sdk);
-  }
+  await tryRegisterMcpForProviders(spec.value, sdk);
   await publishMcpStatus(sdk);
   return undefined;
 }
@@ -2460,7 +2476,27 @@ async function registerMcpWithCli(
   return false;
 }
 
-async function tryRegisterMcpForProviders(mcpScript: string, sdk: BackendSDK): Promise<void> {
+// D-01/D-02/D-03. The ONE place the surviving POSIX wrapper is written after
+// this plan, which is why the platform guard lives HERE: both callers — MCP
+// start and the settings-save / token-sync refresh — inherit it, and guarding
+// only one would leave a win32 hole on the settings-save path.
+//
+// On win32 (and on an unrecognised platform) writeMcpWrapper is not called AT
+// ALL: no `.sh` is written and no `chmod` is spawned, so MCP start cannot fail
+// on a POSIX-only step (T-05-17). A wrapper-write failure on POSIX is likewise a
+// SKIP REASON and never an MCP-start failure — after this plan the wrapper serves
+// only Gemini and Codex, so failing the health check on it would be a regression
+// dressed as strictness.
+//
+// The decision itself is a pure predicate in mcp-server-spec.ts, precisely
+// because an `if (platform === "win32")` inside this file is unassertable:
+// index.ts cannot be imported under vitest.
+async function tryRegisterMcpForProviders(spec: McpServerSpec, sdk: BackendSDK): Promise<void> {
+  const wrapperPath =
+    host !== undefined && host.platform !== "win32"
+      ? await writeMcpWrapper(spec)
+      : undefined;
+
   for (const cli of ["gemini", "codex"] as const) {
     const providerId = MCP_CLI_TO_PROVIDER[cli];
     const providerConfig = currentSettings.providers[providerId];
@@ -2485,7 +2521,17 @@ async function tryRegisterMcpForProviders(mcpScript: string, sdk: BackendSDK): P
       );
       continue;
     }
-    await registerMcpWithCli(cli, resolved, mcpScript, sdk);
+    const registration = planMcpCliRegistration({
+      platform: host?.platform,
+      cli,
+      wrapperPath,
+    });
+    if (registration.kind === "Skip") {
+      skippedMcpCliReasons.set(cli, registration.reason);
+      sdk.console.log(`[drift] ${cli} mcp register skipped: ${registration.reason}`);
+      continue;
+    }
+    await registerMcpWithCli(cli, resolved, registration.wrapperPath, sdk);
   }
 }
 
@@ -2696,12 +2742,9 @@ async function startMcpServer(sdk: BackendSDK): Promise<Result<McpServerInfo>> {
 
   await refreshProjectContext(sdk);
 
-  const nodeExecutable = await requireNodeExecutable();
-  if (nodeExecutable.kind === "Error") {
-    await cleanupMcpRuntime(sdk, "error", nodeExecutable.error);
-    return err(nodeExecutable.error);
-  }
-
+  // The explicit requireNodeExecutable() call that used to sit here is gone:
+  // requireMcpServerSpec resolves Node itself and returns the same
+  // NODE_EXECUTABLE_ERROR through the same cleanup-and-err shape below.
   if ((await writeMcpContextFile()) === undefined) {
     const message = "Failed to create MCP context file.";
     await cleanupMcpRuntime(sdk, "error", message);
@@ -2732,14 +2775,9 @@ async function startMcpServer(sdk: BackendSDK): Promise<Result<McpServerInfo>> {
   // `registeredMcpCliPaths` map so cleanup later runs against the
   // exact binary we used, regardless of future enabled-flag changes.
   //
-  // TASK 2 OF PLAN 05-04 DELETES THIS WRAPPER WRITE. It is temporary: the write
-  // moves inside tryRegisterMcpForProviders together with the win32 guard, and
-  // exists here only so the registration call still compiles at this task
-  // boundary. Not a permanent shape.
-  const wrapperPath = await writeMcpWrapper(mcpScriptLocal, nodeExecutable.value, caidoToken);
-  if (wrapperPath !== undefined) {
-    await tryRegisterMcpForProviders(wrapperPath, sdk);
-  }
+  // The wrapper write moved INSIDE the helper together with the win32 guard, so
+  // this path writes no `.sh` and spawns no chmod on Windows.
+  await tryRegisterMcpForProviders(spec.value, sdk);
   cliSessions.clear();
 
   await publishMcpStatus(sdk);
@@ -2901,7 +2939,6 @@ async function sendCliMessage(
     // ── Build args per provider ──
     const args: string[] = [];
     const sessionDebugLogPath: string | undefined = getSessionDebugLogPath(input.sessionId);
-    let claudeMcpWrapperPath: string | undefined;
     let claudeMcpConfigPath: string | undefined;
 
     switch (providerId) {
@@ -2916,42 +2953,35 @@ async function sendCliMessage(
         // Rewrite MCP config on each send so token/url/script path cannot go stale.
         let claudeMcpConfigForLaunch: string | undefined;
         if (mcpScriptPath !== undefined) {
-          if (caidoToken === "") {
-            setSessionState("error", "No Caido access token is available for this provider turn.");
-            return err(NO_CAIDO_TOKEN_MESSAGE);
-          }
-          const nodeExecutable = await requireNodeExecutable();
-          if (nodeExecutable.kind === "Error") {
-            setSessionState("error", nodeExecutable.error);
-            return err(nodeExecutable.error);
-          }
-          const sessionWrapperPath = await writeMcpWrapper(
-            mcpScriptPath,
-            nodeExecutable.value,
-            caidoToken,
-            {
-              name: `mcp-wrapper-${input.sessionId}.sh`,
-              toolPolicy,
-              activityFilePath: runtimeFiles?.activityFilePath,
-              approvalsFilePath: runtimeFiles?.approvalsFilePath,
-            },
-          );
-          if (sessionWrapperPath === undefined) {
-            setSessionState("error", "Drift could not prepare the Claude MCP wrapper script.");
-            return err("Drift could not prepare the Claude MCP wrapper script.");
+          // RUN-02 / D-10. The per-session `mcp-wrapper-<sessionId>.sh` is GONE.
+          // Claude now receives the same document Copilot does — one spec, one
+          // projection, two callers — with the token in the config `env` field
+          // instead of a shell `export` line. The file moves from a 0o700 `.sh`
+          // to a 0o600 `.json` in the same 0o700 directory with the same
+          // lifetime and the same finalize() cleanup.
+          //
+          // requireMcpServerSpec already produces both user-facing failures this
+          // branch used to compose by hand (the no-token sentence and
+          // NODE_EXECUTABLE_ERROR), so its error is routed through the existing
+          // setSessionState + err shape rather than being restated.
+          const spec = await requireMcpServerSpec({
+            toolPolicy,
+            activityFilePath: runtimeFiles?.activityFilePath,
+            approvalsFilePath: runtimeFiles?.approvalsFilePath,
+          });
+          if (spec.kind === "Error") {
+            setSessionState("error", spec.error);
+            return err(spec.error);
           }
           const cfgFile = await writeChatMcpConfig(
             `mcp-${input.chatId}.json`,
-            {
-              command: sessionWrapperPath,
-              args: [],
-            },
+            spec.value,
+            sdk,
           );
           if (cfgFile === undefined) {
             setSessionState("error", "Drift could not prepare the Claude MCP configuration file.");
             return err("Drift could not prepare the Claude MCP configuration file.");
           }
-          claudeMcpWrapperPath = sessionWrapperPath;
           claudeMcpConfigPath = cfgFile;
           claudeMcpConfigForLaunch = cfgFile;
         }
@@ -2978,27 +3008,24 @@ async function sendCliMessage(
         const mcpScriptPath = getTempMcpScriptPath();
         let copilotMcpConfigForLaunch: string | undefined;
         if (mcpScriptPath !== undefined) {
-          if (caidoToken === "") {
-            setSessionState("error", "No Caido access token is available for this provider turn.");
-            return err(NO_CAIDO_TOKEN_MESSAGE);
-          }
-          const nodeExecutable = await requireNodeExecutable();
-          if (nodeExecutable.kind === "Error") {
-            setSessionState("error", nodeExecutable.error);
-            return err(nodeExecutable.error);
+          // The shipping template, now reading from the shared spec instead of
+          // assembling its own object. The document it writes is byte-identical
+          // to what this branch wrote before: same command, same single arg, and
+          // an `env` field carrying the same DRIFT_*/CAIDO_* keys in the same
+          // insertion order (CMP-01).
+          const spec = await requireMcpServerSpec({
+            toolPolicy,
+            activityFilePath: runtimeFiles?.activityFilePath,
+            approvalsFilePath: runtimeFiles?.approvalsFilePath,
+          });
+          if (spec.kind === "Error") {
+            setSessionState("error", spec.error);
+            return err(spec.error);
           }
           const cfgFile = await writeChatMcpConfig(
             `copilot-mcp-${input.chatId}.json`,
-            {
-              command: nodeExecutable.value,
-              args: [mcpScriptPath],
-              env: buildMcpRuntimeEnv({
-                caidoToken,
-                toolPolicy,
-                activityFilePath: runtimeFiles?.activityFilePath,
-                approvalsFilePath: runtimeFiles?.approvalsFilePath,
-              }),
-            },
+            spec.value,
+            sdk,
           );
           if (cfgFile === undefined) {
             setSessionState("error", "Drift could not prepare the Copilot MCP configuration file.");
@@ -3099,16 +3126,9 @@ async function sendCliMessage(
       sessionDebugLogPath,
       `sendCliMessage start provider=${providerId} mcpAttached=${String(mcpTempDir !== undefined)} timeoutSeconds=${String(currentSettings.processTimeoutSeconds)}`,
     );
-    if (claudeMcpWrapperPath !== undefined) {
-      appendSessionDebugLog(
-        sessionDebugLogPath,
-        `Claude MCP wrapper path=${claudeMcpWrapperPath}`,
-      );
-      appendSessionDebugLog(
-        sessionDebugLogPath,
-        `Claude MCP wrapper content:\n${redactDebugText(await readFile(claudeMcpWrapperPath, "utf-8"))}`,
-      );
-    }
+    // The Claude MCP wrapper dump that used to sit here has no successor,
+    // because there is no wrapper (D-11). The CONFIG dump below stays: its
+    // content is JSON and redactDebugText's JSON arm already covers it.
     if (claudeMcpConfigPath !== undefined) {
       appendSessionDebugLog(
         sessionDebugLogPath,
@@ -3499,10 +3519,6 @@ async function sendCliMessage(
           if (claudeMcpConfigPath !== undefined) {
             appendSessionDebugLog(sessionDebugLogPath, `finalize(): rm ${claudeMcpConfigPath}`);
             await rm(claudeMcpConfigPath, { force: true }).catch(() => undefined);
-          }
-          if (claudeMcpWrapperPath !== undefined) {
-            appendSessionDebugLog(sessionDebugLogPath, `finalize(): rm ${claudeMcpWrapperPath}`);
-            await rm(claudeMcpWrapperPath, { force: true }).catch(() => undefined);
           }
           if (launchCommand !== resolved) {
             appendSessionDebugLog(sessionDebugLogPath, `finalize(): rm ${launchCommand}`);

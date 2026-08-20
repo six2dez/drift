@@ -40,8 +40,8 @@ In Settings, set the command path for each CLI tool. Drift first tries the confi
 | Provider | Resume | MCP | Status |
 |----------|--------|-----|--------|
 | Claude Code | Yes (`--session-id`/`--resume`) | Yes (per-invocation stdio config) | **Stable** — structured `stream-json` parser, dedicated tests, watchdog recovery |
-| Gemini CLI | No | Yes (registered wrapper) | **Experimental** — text output, mutates `~/.gemini/settings.json` on start/stop |
-| Codex CLI | No | Yes (pre-registered via `codex mcp add`) | **Experimental** — text output, thin wiring |
+| Gemini CLI | No | Yes (registered wrapper) | **Experimental** — text output, mutates `~/.gemini/settings.json` on start/stop. Drift MCP is not yet supported for Gemini on Windows (Phase 7). |
+| Codex CLI | No | Yes (pre-registered via `codex mcp add`) | **Experimental** — text output, thin wiring. Drift MCP is not yet supported for Codex on Windows (Phase 7). |
 | Copilot CLI | No | Yes (`--additional-mcp-config`) | **Experimental** — text output, per-chat MCP config file |
 
 All four providers share the same MCP/runtime contract: if a provider is enabled and installed, Drift exposes the same 18 MCP tools, the same effective Caido context model, and the same live-test semantics. The **Experimental** providers are functional today but depend on their upstream CLI's text output; an upstream change can break parsing silently. Run **Settings → MCP Server → Run Self-Test** against each provider before trusting it for production work.
