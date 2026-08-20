@@ -2,7 +2,7 @@
 phase: 5
 slug: kill-shell-wrappers
 # status lifecycle: draft (seeded by plan-phase) → validated (set by validate-phase §6)
-status: draft
+status: validated
 nyquist_compliant: true
 wave_0_complete: true
 created: 2026-08-20
@@ -84,10 +84,10 @@ each task must map onto.
 | V-13 | HLT-02 | `tools/list`, `get_environment`, `search_history` all succeed over the spawned spec | L | integration | `… -t "self-test methods"` | ✅ exists | ✅ **green** — 1 passed / 1 skipped |
 | V-14 | CMP-01 | Existing suite stays green — the real regression net | L | regression | `pnpm exec vitest run` + `pnpm -r typecheck` + `pnpm lint` | ✅ exists | ✅ **green** — 290 / 31 files / 0 failures; typecheck 0; lint 0. **Zero tests removed as obsolete** |
 | V-15 | CI-03 (D-09) | `.gitattributes` exists with `* text=auto eol=lf` | L | static | `grep -q 'eol=lf' .gitattributes && grep -q 'text=auto' .gitattributes` | ✅ exists | ✅ **green** — both present |
-| V-16 | HLT-01 (SC-2) | **V-12 passes on `windows-latest`** | W | integration | the Windows leg's `Test` step | ❌ W0 (job) | ⏳ **awaiting the task-2 `windows-latest` run** — never pre-filled (Phase 3 D-11) |
-| V-17 | HLT-02 (SC-2) | **V-13 passes on `windows-latest`** | W | integration | same | ❌ W0 (job) | ⏳ **awaiting the task-2 `windows-latest` run** — never pre-filled (Phase 3 D-11) |
-| V-18 | CI-01 | `pnpm build` succeeds on `windows-latest` | W | build | the Windows leg's `Build` step — **requires 05-RESEARCH.md § Finding C-1** | ❌ W0 (job) | ⏳ **awaiting the task-2 `windows-latest` run** — never pre-filled (Phase 3 D-11) |
-| V-19 | CI-03 | The **whole** post-phase suite (290 tests / 31 files) is green on `windows-latest`, for code reasons | W | regression | the Windows leg's `Test` step | ❌ W0 (job) | ⏳ **awaiting the task-2 `windows-latest` run** — never pre-filled (Phase 3 D-11) |
+| V-16 | HLT-01 (SC-2) | **V-12 passes on `windows-latest`** | W | integration | the Windows leg's `Test` step — [run 32378434081](https://github.com/six2dez/drift/actions/runs/32378434081) | ✅ exists | ✅ **green on `windows-latest`** — `Tests 290 passed (290)`, 0 skipped; `mcp-server-spec.spawn.test.ts (2 tests)` ✓, `authenticates against a stub Caido via --validate-auth 364ms` |
+| V-17 | HLT-02 (SC-2) | **V-13 passes on `windows-latest`** | W | integration | same run, same step — [run 32378434081](https://github.com/six2dez/drift/actions/runs/32378434081) | ✅ exists | ✅ **green on `windows-latest`** — both spawn cases **executed, not skipped** (`(2 tests)` with 0 skips in the whole step) |
+| V-18 | CI-01 | `pnpm build` succeeds on `windows-latest` | W | build | the Windows leg's `Build` step — [run 32378434081](https://github.com/six2dez/drift/actions/runs/32378434081) | ✅ exists | ✅ **green on `windows-latest`** — `-rw-r--r-- 1 runneradmin 197121 2487350 Aug 20 14:10 dist/plugin_package.zip`, asserted by path |
+| V-19 | CI-03 | The **whole** post-phase suite (290 tests / 31 files) is green on `windows-latest`, for code reasons | W | regression | the Windows leg's `Test` step — [run 32378434081](https://github.com/six2dez/drift/actions/runs/32378434081) | ✅ exists | ✅ **green on `windows-latest`** — `Test Files 31 passed (31)` / `Tests 290 passed (290)`, matching the local post-phase count exactly |
 
 ---
 
@@ -173,9 +173,12 @@ again in 05-05 — cannot inflate it.
 - [x] Wave 0 covers all MISSING references
 - [x] No watch-mode flags
 - [x] Feedback latency < 1 s locally — full suite 824 ms measured
-- [ ] Every bucket-N row above appears in the phase report as an explicit non-claim — **05-06 task 3**
+- [x] Every bucket-N row above appears in the phase report as an explicit non-claim — `05-REPORT.md`
 - [x] `nyquist_compliant: true` set in frontmatter
 
-**Approval:** pending — frontmatter `status` stays `draft` until V-16…V-19 carry a real
-`windows-latest` run (05-06 task 2) and the bucket-N rows are reproduced in `05-REPORT.md`
-(05-06 task 3). Rows V-1…V-15 are green and executed as of 2026-08-20.
+**Approval:** **validated 2026-08-20** — every row V-1 … V-19 is green and was **executed**, not
+inferred from a diff. Rows V-16 … V-19 rest on a real `windows-latest` run,
+[32378434081](https://github.com/six2dez/drift/actions/runs/32378434081), with its per-step
+conclusions and its proving log lines recorded in `05-06-SUMMARY.md` and `05-REPORT.md`. Rows
+V-20 … V-24 are unchanged and remain **non-claims**; they are reproduced as explicit non-claims in
+`05-REPORT.md`, which is what closes the bucket-N sign-off item above.
