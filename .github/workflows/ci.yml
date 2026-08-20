@@ -85,13 +85,21 @@ jobs:
     # and `verify`-job permissions are untouched.
     permissions:
       contents: read
-    # A starting value, not a measured one. The probe workflow's 10 was sized
-    # for a single dependency-free step; this leg installs, typechecks, lints,
-    # runs the whole suite and builds. Plan 05-06 replaces this ceiling with a
-    # number derived from the first real run's duration and records that run's
-    # URL beside it. Until then it only has to beat the 360-minute default,
-    # which would hold a Windows runner open for six hours on a hung spawn.
-    timeout-minutes: 20
+    # MEASURED, not a starting value. The first green run of this leg took
+    # 87 seconds wall-clock end to end — and it was a COLD-CACHE run
+    # ("pnpm cache is not found" in its Setup Node step), so 87s is the
+    # pessimistic install case, not the warm one:
+    #   https://github.com/six2dez/drift/actions/runs/32377727473
+    #   Verify (Windows): started 14:02:20Z, completed 14:03:47Z (2026-08-20)
+    #
+    # 6 minutes is ~4x that, which absorbs normal Windows runner variance
+    # without letting a genuinely hung child hold a runner. Note what this
+    # ceiling does NOT guard: a slow spawn fails its own test timeout
+    # (15000ms in mcp-server-spec.spawn.test.ts, 5000ms in the transport
+    # tests) long before this fires. This only bounds a hang.
+    #
+    # Re-derive it, do not raise it reflexively, if this leg ever grows a step.
+    timeout-minutes: 6
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -193,6 +201,16 @@ jobs:
       # is only runnable here because the root build script was reduced to a
       # single cross-platform command in the same plan. pnpm runs script bodies
       # through cmd.exe on this OS, and the runner image ships no `zip`.
+      #
+      # The `test -f` is not decoration. caido-dev's own success line reads
+      # "Plugin package zip file created successfully" and names no path, so on
+      # its own it proves a zip, not THE zip release.yml signs. Asserting the
+      # exact artifact path is what makes this step evidence for CI-01 rather
+      # than a green tick — and it is the one place a Windows-only packaging
+      # divergence would surface.
       - name: Build
         shell: bash
-        run: pnpm build
+        run: |
+          pnpm build
+          test -f dist/plugin_package.zip
+          ls -l dist/plugin_package.zip
