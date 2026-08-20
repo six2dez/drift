@@ -2908,7 +2908,9 @@ async function sendCliMessage(
     // that point is then re-read. This Set is the correctness backstop, and the
     // re-entrancy flag under it is a separate guard that is also still needed.
     const seenActivityIds = new Set<string>();
-    let readingActivities = false;
+    // The in-flight tick, held as a PROMISE rather than a boolean so a caller
+    // that must not be skipped can await it. See flushActivities below.
+    let activityFlush: Promise<void> | undefined;
     // PERF-02's byte cursor. It lives HERE, in sendCliMessage's closure, and not
     // in a module-level Map keyed by session id: all three callers (the 250 ms
     // setInterval heartbeat, runWatchdog and finalize) close over this scope, so
@@ -2917,9 +2919,11 @@ async function sendCliMessage(
     let activityCursor = createActivityCursor();
     let notifyClaudeToolActivity: (() => void) | undefined;
 
-    const flushActivities = async () => {
-      if (runtimeFiles === undefined || readingActivities) return;
-      readingActivities = true;
+    // ONE tick of the tail. Byte-clamped by readActivityTick to
+    // ACTIVITY_MAX_TICK_BYTES, which is why `flushActivities({ drain: true })`
+    // below exists for the one caller that must catch up completely.
+    const readActivitiesOnce = async () => {
+      if (runtimeFiles === undefined) return;
       try {
         // Captured BEFORE the read, and the ordering is the entire mitigation:
         // assigning the returned cursor back into the closure variable below
@@ -2979,8 +2983,60 @@ async function sendCliMessage(
         }
       } catch {
         // Best-effort only.
+      }
+    };
+
+    // The re-entrancy guard, and the one caller that must not be turned away by
+    // it.
+    //
+    // `drain` is for finalize. Before PERF-02 the finalize flush was a readFile
+    // of the WHOLE activity file, so a single call always caught up. A tick is
+    // now clamped to ACTIVITY_MAX_TICK_BYTES (1 MiB) and there is no follow-up
+    // tick after finalize — the 250 ms heartbeat has already been torn down — so
+    // one tick silently loses every activity beyond the first 1 MiB of
+    // un-consumed bytes, and with it the turn's mcpActivities and
+    // buildClaudePostToolStallFallback input.
+    //
+    // The re-entrancy guard compounded that: a boolean that makes a concurrent
+    // caller return IMMEDIATELY is right for the heartbeat (the next tick is
+    // 250 ms away) and wrong for finalize, where "skip this one" means "never".
+    // Holding the in-flight PROMISE rather than a flag lets finalize wait it out
+    // by awaiting work that is already scheduled — no timer, so nothing here
+    // depends on setTimeout firing while an RPC handler is suspended, which
+    // Caido's runtime does not guarantee.
+    const flushActivities = async (options?: { drain?: boolean }) => {
+      if (runtimeFiles === undefined) return;
+
+      // Bounded, because a caller that keeps arriving must not spin here.
+      for (
+        let waited = 0;
+        activityFlush !== undefined && waited < 8;
+        waited += 1
+      ) {
+        if (options?.drain !== true) return;
+        await activityFlush;
+      }
+      if (activityFlush !== undefined) return;
+
+      const run = (async () => {
+        // 64 ticks is 64 MiB of catch-up, which is far past any real activity
+        // file; the bound exists so a writer appending faster than this drains
+        // cannot hold finalize open forever.
+        for (let tick = 0; tick < 64; tick += 1) {
+          const before = activityCursor.offset;
+          await readActivitiesOnce();
+          if (options?.drain !== true) return;
+          // Idle: the offset did not move, so there was nothing left to read. A
+          // truncation reset MOVES it (backwards), so this keeps draining.
+          if (activityCursor.offset === before) return;
+        }
+      })();
+
+      activityFlush = run;
+      try {
+        await run;
       } finally {
-        readingActivities = false;
+        if (activityFlush === run) activityFlush = undefined;
       }
     };
 
@@ -3193,7 +3249,8 @@ async function sendCliMessage(
         activeProcesses.delete(input.sessionId);
         void (async () => {
           appendSessionDebugLog(sessionDebugLogPath, "finalize(): flushActivities start");
-          await flushActivities();
+          // drain: one tick is byte-clamped and there is no tick after this one.
+          await flushActivities({ drain: true });
           appendSessionDebugLog(sessionDebugLogPath, "finalize(): flushActivities end");
           if (runtimeFiles !== undefined) {
             sessionRuntimeFiles.delete(input.sessionId);
