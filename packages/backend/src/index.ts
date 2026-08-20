@@ -2096,9 +2096,36 @@ async function getNodeExecutable(): Promise<string | undefined> {
     execPath: processRef.process?.execPath,
     pathResolution: await resolveCommand("node"),
     homeDirs: getKnownHomeDirs(),
-    absoluteProviderCommands: Object.values(currentSettings.providers)
-      .map((provider) => provider.command)
-      .filter((command): command is string => path.isAbsolute(command)),
+    // The DEFENSIVE reading of `providers[*].command`, chosen so this module and
+    // buildProviderCommandSignature (resolution-cache.ts) stop holding opposite
+    // beliefs about the same field: that function already declares the command
+    // optional and carries a MISSING_COMMAND_PLACEHOLDER sentinel for it, while
+    // this line used to hand the value straight to path.isAbsolute.
+    //
+    // The defensive reading is the correct one. `Settings.providers` is TYPED
+    // Record<string, { command: string; enabled: boolean }>, but the value is
+    // rehydrated from persisted JSON with `{ ...DEFAULT_SETTINGS, ...s }`, which
+    // REPLACES the whole `providers` object rather than merging per provider —
+    // so a legacy or hand-edited blob can supply an entry with no `command` at
+    // all, and the type is a claim about that blob rather than a guarantee about
+    // it. Unguarded, path.isAbsolute(undefined) throws `TypeError: The "path"
+    // argument must be of type string` inside getNodeExecutable, which escapes
+    // resolveWithCache -> requireNodeExecutable -> startMcpServer with no catch
+    // on the path and reaches the user as an unhandled RPC rejection instead of
+    // a Drift error message.
+    absoluteProviderCommands: Object.values(
+      currentSettings.providers as Record<
+        string,
+        { command?: string } | undefined
+      >,
+    )
+      .map((provider) => provider?.command)
+      .filter(
+        (command): command is string =>
+          typeof command === "string" &&
+          command !== "" &&
+          path.isAbsolute(command),
+      ),
   });
   lastNodeSearchCandidates = candidates;
 
