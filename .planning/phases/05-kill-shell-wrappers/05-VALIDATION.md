@@ -3,9 +3,10 @@ phase: 5
 slug: kill-shell-wrappers
 # status lifecycle: draft (seeded by plan-phase) → validated (set by validate-phase §6)
 status: draft
-nyquist_compliant: false
-wave_0_complete: false
+nyquist_compliant: true
+wave_0_complete: true
 created: 2026-08-20
+reconciled: 2026-08-20  # plan 05-06 task 1 — every V-1..V-19 row executed, V-5 and V-6 corrected
 ---
 
 # Phase 5 — Validation Strategy
@@ -26,7 +27,7 @@ created: 2026-08-20
 | **Quick run command** | `pnpm exec vitest run packages/backend/src/mcp-server-spec.test.ts packages/backend/src/platform.test.ts packages/backend/src/provider-launch.test.ts` |
 | **Full suite command** | `pnpm exec vitest run` |
 | **Static gates** | `pnpm -r typecheck` and `pnpm lint` (`--max-warnings 0`, never `--fix`) |
-| **Estimated runtime** | Quick: sub-second. Full suite: **measured baseline 263 tests / 29 files / 0 failures / 779 ms** |
+| **Estimated runtime** | Quick: sub-second. Full suite: pre-phase baseline **263 tests / 29 files / 0 failures / 779 ms**; **post-phase measured 290 tests / 31 files / 0 failures / 824 ms** (05-06 task 1). No test was removed as obsolete |
 | **New in this phase** | A `windows-latest` leg of `ci.yml` running the same commands plus `pnpm build` (D-07) |
 
 ---
@@ -68,25 +69,60 @@ each task must map onto.
 
 | # | Req | Behavior | Bucket | Test Type | Automated Command | File Exists | Status |
 |---|-----|----------|--------|-----------|-------------------|-------------|--------|
-| V-1 | RUN-01 | `buildMcpServerSpec` returns `{command: node, args: [mjs], env}` from injected inputs | L | unit | `pnpm exec vitest run packages/backend/src/mcp-server-spec.test.ts -t "buildMcpServerSpec"` | ❌ W0 | ⬜ pending |
-| V-2 | RUN-02 | The spec's `env` is the parent block merged with `driftVars` — a parent-only key survives, a drift key overrides | L | unit | `… -t "merges the parent environment"` | ❌ W0 | ⬜ pending |
-| V-3 | RUN-02 | The spec's env carries `CAIDO_URL`, `CAIDO_TOKEN` and every `DRIFT_*` key `mcp-server.mjs:12-38` reads — **including `DRIFT_ALLOWLIST_ACTIVE`** | L | unit | `… -t "carries every DRIFT_ key"` | ❌ W0 | ⬜ pending |
-| V-4 | RUN-01/02 | Claude's and Copilot's config documents are the **same projection** of one spec | L | unit | `… -t "one spec, two callers"` | ❌ W0 | ⬜ pending |
-| V-5 | RUN-01 | `writeLaunchScript`, `mcp-self-test-*.sh`, `mcp-wrapper-<sid>.sh`, `provider-launch-<sid>.sh` are gone; exactly **2** `.sh` literals survive | L | static | `test "$(grep -c '\.sh"' packages/backend/src/index.ts)" -eq 2` | ❌ W0 | ⬜ pending |
-| V-6 | RUN-01 | Exactly **one** `spawnAndWait("chmod"` survives; `enforceOwnerOnlyDir`'s namespace `chmod` untouched | L | static | `test "$(grep -c 'spawnAndWait("chmod"' …)" -eq 1` + blob-identity check on `:660-690` | ❌ W0 | ⬜ pending |
-| V-7 | RUN-01 | **All three** `writeMcpWrapper` sites and **both** `validateCaidoAuth` sites accounted for | L | static | `grep -n "writeMcpWrapper(\|validateCaidoAuth(\|tryRegisterMcpForProviders(" …` vs expected line set | ❌ W0 | ⬜ pending |
-| V-8 | CMP-01 (D-01/D-02) | `planMcpCliRegistration({platform:"win32"})` returns `Skip` — wrapper path unreachable on win32 | L | unit | `… -t "unreachable on win32"` | ❌ W0 | ⬜ pending |
-| V-9 | CMP-01 (D-03) | The win32 skip reason names the provider **and** Phase 7, verbatim | L | unit | `… -t "skip reason names Phase 7"` | ❌ W0 | ⬜ pending |
-| V-10 | RUN-02 (D-11) | The spawn debug line contains injected env **key names** and never a value | L | unit | `… -t "never logs an env value"` | ❌ W0 | ⬜ pending |
-| V-11 | CMP-01 | `provider-launch` argv arrays byte-identical — the CMP-01 tripwire | L | regression | `pnpm exec vitest run packages/backend/src/provider-launch.test.ts` — **must not be edited** | ✅ exists | ⬜ pending |
-| V-12 | HLT-01 | The **production** spec spawns and `--validate-auth` returns `{ok:true}` against a local HTTP stub | L | integration | `pnpm exec vitest run packages/backend/src/mcp-server-spec.spawn.test.ts -t "validate-auth"` | ❌ W0 | ⬜ pending |
-| V-13 | HLT-02 | `tools/list`, `get_environment`, `search_history` all succeed over the spawned spec | L | integration | `… -t "self-test methods"` | ❌ W0 | ⬜ pending |
-| V-14 | CMP-01 | Existing suite stays green — the real regression net | L | regression | `pnpm exec vitest run` — 263 stay green, minus any test made obsolete by a deletion (**state each removal explicitly**) | ✅ exists | ⬜ pending |
-| V-15 | CI-03 (D-09) | `.gitattributes` exists with `* text=auto eol=lf` | L | static | `grep -q 'eol=lf' .gitattributes` | ❌ W0 | ⬜ pending |
-| V-16 | HLT-01 (SC-2) | **V-12 passes on `windows-latest`** | W | integration | the Windows leg's `Test` step | ❌ W0 (job) | ⬜ pending |
-| V-17 | HLT-02 (SC-2) | **V-13 passes on `windows-latest`** | W | integration | same | ❌ W0 (job) | ⬜ pending |
-| V-18 | CI-01 | `pnpm build` succeeds on `windows-latest` | W | build | the Windows leg's `Build` step — **requires 05-RESEARCH.md § Finding C-1** | ❌ W0 (job) | ⬜ pending |
-| V-19 | CI-03 | The **whole** 263-test suite is green on `windows-latest`, for code reasons | W | regression | the Windows leg's `Test` step | ❌ W0 (job) | ⬜ pending |
+| V-1 | RUN-01 | `buildMcpServerSpec` returns `{command: node, args: [mjs], env}` from injected inputs | L | unit | `pnpm exec vitest run packages/backend/src/mcp-server-spec.test.ts -t "buildMcpServerSpec"` | ✅ exists | ✅ **green** — 2 passed / 11 skipped |
+| V-2 | RUN-02 | The spec's `env` is the parent block merged with `driftVars` — a parent-only key survives, a drift key overrides | L | unit | `… -t "merges the parent environment"` | ✅ exists | ✅ **green** — 1 passed / 12 skipped |
+| V-3 | RUN-02 | The spec's env carries `CAIDO_URL`, `CAIDO_TOKEN` and every `DRIFT_*` key `mcp-server.mjs:12-38` reads — **including `DRIFT_ALLOWLIST_ACTIVE`** | L | unit | `… -t "carries every DRIFT_ key"` | ✅ exists | ✅ **green** — 1 passed / 12 skipped |
+| V-4 | RUN-01/02 | Claude's and Copilot's config documents are the **same projection** of one spec | L | unit | `… -t "one spec, two callers"` | ✅ exists | ✅ **green** — 1 passed / 12 skipped |
+| V-5 | RUN-01 | `writeLaunchScript`, `mcp-self-test-*.sh`, `mcp-wrapper-<sid>.sh`, `provider-launch-<sid>.sh` are gone; exactly **1** `.sh` literal survives — `getMcpWrapperPath`'s own, the D-01 Gemini/Codex wrapper | L | static | **CORRECTED (05-06 task 1):** `test "$(sed -e 's://.*::' packages/backend/src/index.ts | grep -c '\.sh')" -eq 1` | ✅ exists | ✅ **green** — measured 1, at `index.ts:1082` inside `getMcpWrapperPath` |
+| V-6 | RUN-01 | Exactly **one** `spawnAndWait("chmod"` survives; `enforceOwnerOnlyDir`'s namespace `chmod` untouched and the whole-file `chmod` count stays non-zero | L | static | **CORRECTED FORM (05-06 task 1):** `test "$(sed -e 's://.*::' packages/backend/src/index.ts | grep -c 'spawnAndWait("chmod"')" -eq 1` + whole-file `grep -c 'chmod'` > 0 + body-identity diff of `enforceOwnerOnlyDir` against `cd22833` | ✅ exists | ✅ **green** — spawn count 1 at `:1372`; whole-file 15; body byte-identical (25 lines) |
+| V-7 | RUN-01 | **All three** `writeMcpWrapper` sites and **both** `validateCaidoAuth` sites accounted for | L | static | `grep -n "writeMcpWrapper(\|validateCaidoAuth(\|tryRegisterMcpForProviders(\|callMcpMethod(\|writeChatMcpConfig(" packages/backend/src/index.ts` | ✅ exists | ✅ **green** — 1 def + 1 call / 1 def + 2 calls / 1 def + 2 calls, measured |
+| V-8 | CMP-01 (D-01/D-02) | `planMcpCliRegistration({platform:"win32"})` returns `Skip` — wrapper path unreachable on win32 | L | unit | `… -t "unreachable on win32"` | ✅ exists | ✅ **green** — 1 passed / 12 skipped |
+| V-9 | CMP-01 (D-03) | The win32 skip reason names the provider **and** Phase 7, verbatim | L | unit | `… -t "skip reason names Phase 7"` | ✅ exists | ✅ **green** — 1 passed / 12 skipped |
+| V-10 | RUN-02 (D-11) | The spawn debug line contains injected env **key names** and never a value | L | unit | `… -t "never logs an env value"` | ✅ exists | ✅ **green** — 1 passed / 12 skipped |
+| V-11 | CMP-01 | `provider-launch` argv arrays byte-identical — the CMP-01 tripwire | L | regression | `git diff --stat cd22833 -- packages/backend/src/provider-launch.ts packages/backend/src/provider-launch.test.ts` (empty) + `pnpm exec vitest run packages/backend/src/provider-launch.test.ts` | ✅ exists | ✅ **green** — empty diff; 11 passed |
+| V-12 | HLT-01 | The **production** spec spawns and `--validate-auth` returns `{ok:true}` against a local HTTP stub | L | integration | `pnpm exec vitest run packages/backend/src/mcp-server-spec.spawn.test.ts -t "validate-auth"` | ✅ exists | ✅ **green** — 1 passed / 1 skipped |
+| V-13 | HLT-02 | `tools/list`, `get_environment`, `search_history` all succeed over the spawned spec | L | integration | `… -t "self-test methods"` | ✅ exists | ✅ **green** — 1 passed / 1 skipped |
+| V-14 | CMP-01 | Existing suite stays green — the real regression net | L | regression | `pnpm exec vitest run` + `pnpm -r typecheck` + `pnpm lint` | ✅ exists | ✅ **green** — 290 / 31 files / 0 failures; typecheck 0; lint 0. **Zero tests removed as obsolete** |
+| V-15 | CI-03 (D-09) | `.gitattributes` exists with `* text=auto eol=lf` | L | static | `grep -q 'eol=lf' .gitattributes && grep -q 'text=auto' .gitattributes` | ✅ exists | ✅ **green** — both present |
+| V-16 | HLT-01 (SC-2) | **V-12 passes on `windows-latest`** | W | integration | the Windows leg's `Test` step | ❌ W0 (job) | ⏳ **awaiting the task-2 `windows-latest` run** — never pre-filled (Phase 3 D-11) |
+| V-17 | HLT-02 (SC-2) | **V-13 passes on `windows-latest`** | W | integration | same | ❌ W0 (job) | ⏳ **awaiting the task-2 `windows-latest` run** — never pre-filled (Phase 3 D-11) |
+| V-18 | CI-01 | `pnpm build` succeeds on `windows-latest` | W | build | the Windows leg's `Build` step — **requires 05-RESEARCH.md § Finding C-1** | ❌ W0 (job) | ⏳ **awaiting the task-2 `windows-latest` run** — never pre-filled (Phase 3 D-11) |
+| V-19 | CI-03 | The **whole** post-phase suite (290 tests / 31 files) is green on `windows-latest`, for code reasons | W | regression | the Windows leg's `Test` step | ❌ W0 (job) | ⏳ **awaiting the task-2 `windows-latest` run** — never pre-filled (Phase 3 D-11) |
+
+---
+
+### The two gate corrections, declared — not retuned
+
+Recorded here and in `05-REPORT.md` because a threshold that quietly moves is indistinguishable
+from a threshold that was wrong. Neither correction was made to accommodate an implementation.
+
+**V-5 — the published gate was VACUOUS, and the count changes 2 → 1.**
+
+The published command was `test "$(grep -c '\.sh"' packages/backend/src/index.ts)" -eq 2`. Two
+independent defects:
+
+1. *It was already satisfied before any work was done.* Measured on the pre-phase commit
+   `cd22833`, `grep -c '\.sh"'` returns **2** — the exact expected value — because it counts only
+   the two occurrences terminated by a double quote (`:923` and `:1184`) and is blind to the three
+   template-literal forms (`:1720`, `:2734`, `:2885`) that were the actual deletion targets. A gate
+   that passes on the tree it is supposed to discriminate against proves nothing. The corrected
+   form is comment-stripped and quote-agnostic and returns **5** on that same pre-phase tree.
+2. *The expected value is 1, not 2.* `writeMcpWrapper`'s inline `path.join(mcpTempDir, … "mcp-wrapper.sh")`
+   default (`:1184` pre-phase) was replaced by a call to `getMcpWrapperPath()` in plan 05-04, leaving
+   that function as the single source of truth for the surviving wrapper path. One literal, one owner.
+
+Corrected form: `test "$(sed -e 's://.*::' packages/backend/src/index.ts | grep -c '\.sh')" -eq 1`.
+Note that the *published* form now returns **1** on the shipped tree, so it would fail against its own
+published expectation of 2 — a second, independent reason it could not stand.
+
+**V-6 — the count was right; only the view needed hardening. CLOSED, not corrected.**
+
+`.planning/WINDOWS.md` item 2 was opened at the close of 05-04, when the measured
+`spawnAndWait("chmod"` count was 2, against a published expectation of 1. Plan 05-05 deleted
+`writeLaunchScript` and took it to **1**, so the published expected value is factually correct at the
+phase boundary and is left at 1. The only change is that the gate now runs over the comment-stripped
+view, so a rationale comment naming the call — the exact defect that bit twice in 05-04 and twice
+again in 05-05 — cannot inflate it.
 
 ---
 
@@ -119,25 +155,27 @@ each task must map onto.
 
 ## Wave 0 Requirements
 
-- [ ] `packages/backend/src/mcp-server-spec.ts` + `mcp-server-spec.test.ts` — covers V-1…V-4, V-8…V-10
-- [ ] `packages/backend/src/mcp-server-spec.spawn.test.ts` — covers V-12, V-13 (and V-16, V-17 on the Windows leg). Template: `mcp-server.transport.test.ts:124-190`
-- [ ] `.gitattributes` (`* text=auto eol=lf`) — covers V-15
-- [ ] `.github/workflows/ci.yml` `windows-latest` job — covers V-16…V-19. **Blocked on 05-RESEARCH.md § Finding C-1** (the `build` script) for V-18
-- [ ] The static-gate script/target holding V-5, V-6, V-7 and the V-22 parent-spread gate — **executed** at the phase gate, not asserted in prose
-- [ ] `runtime-probe.ts` extension for D-05's reported `PATH`-entry-count / env-key-count metric (non-gating, per Phase 4 D-06)
-- [ ] Framework install: **none needed** — vitest 4.0.18 present and configured
-- [ ] Shared fixtures: **none needed** — the local-HTTP-stub + `mkdtemp` + `afterEach` pattern already exists in `mcp-server.transport.test.ts:20-22,43-88`
+- [x] `packages/backend/src/mcp-server-spec.ts` + `mcp-server-spec.test.ts` — covers V-1…V-4, V-8…V-10 *(plan 05-01)*
+- [x] `packages/backend/src/mcp-server-spec.spawn.test.ts` — covers V-12, V-13 (and V-16, V-17 on the Windows leg) *(plan 05-01)*
+- [x] `.gitattributes` (`* text=auto eol=lf`) — covers V-15 *(plan 05-02)*
+- [x] `.github/workflows/ci.yml` `windows-latest` job — covers V-16…V-19 *(plan 05-02; Finding C-1's `build` reduction landed with it)*
+- [x] The static-gate set holding V-5, V-6, V-7 and the V-22 parent-spread gate — **executed** at the phase gate with raw output recorded *(05-04 task 3, 05-05, and 05-06 task 1)*
+- [x] `runtime-probe.ts` extension for D-05's reported `PATH`-entry-count / env-key-count metric (non-gating, per Phase 4 D-06) *(plan 05-03, wired by 05-04)*
+- [x] Framework install: **none needed** — vitest 4.0.18 present and configured
+- [x] Shared fixtures: **none needed** — the local-HTTP-stub + `mkdtemp` + `afterEach` pattern already exists in `mcp-server.transport.test.ts:20-22,43-88`
 
 ---
 
 ## Validation Sign-Off
 
-- [ ] All tasks have `<automated>` verify or Wave 0 dependencies
-- [ ] Sampling continuity: no 3 consecutive tasks without automated verify
-- [ ] Wave 0 covers all MISSING references
-- [ ] No watch-mode flags
-- [ ] Feedback latency < 1 s locally
-- [ ] Every bucket-N row above appears in the phase report as an explicit non-claim
-- [ ] `nyquist_compliant: true` set in frontmatter
+- [x] All tasks have `<automated>` verify or Wave 0 dependencies
+- [x] Sampling continuity: no 3 consecutive tasks without automated verify
+- [x] Wave 0 covers all MISSING references
+- [x] No watch-mode flags
+- [x] Feedback latency < 1 s locally — full suite 824 ms measured
+- [ ] Every bucket-N row above appears in the phase report as an explicit non-claim — **05-06 task 3**
+- [x] `nyquist_compliant: true` set in frontmatter
 
-**Approval:** pending
+**Approval:** pending — frontmatter `status` stays `draft` until V-16…V-19 carry a real
+`windows-latest` run (05-06 task 2) and the bucket-N rows are reproduced in `05-REPORT.md`
+(05-06 task 3). Rows V-1…V-15 are green and executed as of 2026-08-20.
