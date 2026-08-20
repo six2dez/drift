@@ -44,10 +44,46 @@ export function pushUniqueCandidate(candidates: string[], candidate: string | un
   if (!candidates.includes(normalized)) candidates.push(normalized);
 }
 
+// Collapse "." and ".." against a POSIX "/" separator, with no dependence on
+// the host platform. This exists because `path.normalize` is platform-FLAVOURED:
+// on a win32 host it rewrites "/Users/six2dez/.local/bin/claude" to
+// "\\Users\\six2dez\\.local\\bin\\claude", so neither prefix arm in
+// extractHomeDir below can ever match and the function silently returns
+// undefined for every input it was written to recognise.
+//
+// MEASURED, not precautionary — this is what took the first real `windows-latest`
+// leg red, on run 32376894337's sibling CI run 32376894371 (2026-08-20):
+//   AssertionError: expected undefined to be '/Users/six2dez'
+//
+// `path.posix.normalize` would be the one-line fix on Node and is deliberately
+// NOT used: Caido's LLRT `path` surface exposes no `posix` namespace at all
+// (@caido/quickjs-types/src/llrt/path.d.ts declares a flat surface whose only
+// separator affordance is `sep`). Reaching for an API the shipping runtime does
+// not have is the same class of error as trusting a published type that omits a
+// capability — see 05-RESEARCH.md § Pitfall 7. Phase 4's platform.ts sets the
+// precedent this follows: a pure path decision imports nothing.
+//
+// This does NOT teach the function about "C:\\Users\\<name>". That is RES-03
+// and it belongs to Phase 6.
+function normalizePosixPath(input: string): string {
+  const isAbsolute = input.startsWith("/");
+  const out: string[] = [];
+  for (const segment of input.split("/")) {
+    if (segment === "" || segment === ".") continue;
+    if (segment === "..") {
+      if (out.length > 0 && out[out.length - 1] !== "..") out.pop();
+      else if (!isAbsolute) out.push("..");
+      continue;
+    }
+    out.push(segment);
+  }
+  return `${isAbsolute ? "/" : ""}${out.join("/")}`;
+}
+
 export function extractHomeDir(candidatePath: string | undefined): string | undefined {
   const normalized = candidatePath?.trim();
   if (normalized === undefined || normalized === "") return undefined;
-  const resolved = path.normalize(normalized);
+  const resolved = normalizePosixPath(normalized);
 
   if (resolved.startsWith("/Users/")) {
     const parts = resolved.split("/").filter(Boolean);

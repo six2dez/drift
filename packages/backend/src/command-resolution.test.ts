@@ -91,16 +91,33 @@ describe("command resolution helpers", () => {
     const homeDir = await mkdtemp(path.join(os.tmpdir(), "drift-home-"));
     tempDirs.push(homeDir);
 
+    // The provider directory is a SECOND temp dir, deliberately not homeDir.
+    // getNodeExecutableCandidates already emits `<homeDir>/.local/bin/node`
+    // from its homeDirs loop, so asserting a provider-adjacent path underneath
+    // homeDir would still pass with the absoluteProviderCommands loop deleted.
+    // A separate root is what keeps this assertion falsifiable.
+    //
+    // It is built with path.join rather than written as a "/Users/..." literal
+    // because getNodeExecutableCandidates derives the sibling with
+    // path.join(path.dirname(cmd), "node") — host-flavoured by design, and
+    // correct on a real Windows host where the command is "C:\...\claude.cmd".
+    // The POSIX literal this replaced could only ever hold when `path` was
+    // POSIX, so it failed the first real windows-latest run (CI run
+    // 32376894371, 2026-08-20) for the test's reasons, not the code's:
+    //   expected [ '/usr/local/bin/node', …(6) ] to include '/Users/six2dez/.local/bin/node'
+    const providerDir = await mkdtemp(path.join(os.tmpdir(), "drift-provider-"));
+    tempDirs.push(providerDir);
+
     const candidates = await getNodeExecutableCandidates({
       execPath: "/usr/local/bin/node",
       pathResolution: "/opt/homebrew/bin/node",
       homeDirs: [homeDir],
-      absoluteProviderCommands: ["/Users/six2dez/.local/bin/claude"],
+      absoluteProviderCommands: [path.join(providerDir, "claude")],
     });
 
     expect(candidates).toContain("/usr/local/bin/node");
     expect(candidates).toContain("/opt/homebrew/bin/node");
-    expect(candidates).toContain("/Users/six2dez/.local/bin/node");
+    expect(candidates).toContain(path.join(providerDir, "node"));
     expect(candidates).toContain(path.join(homeDir, ".volta", "bin", "node"));
   });
 });
