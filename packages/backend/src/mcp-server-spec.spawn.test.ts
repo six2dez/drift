@@ -6,6 +6,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { MCP_TOOL_NAMES } from "./mcp-runtime";
 import { buildMcpDriftVars, buildMcpServerSpec } from "./mcp-server-spec";
 
 // D-08's integration proof, and the only place in this phase where the spec is
@@ -21,6 +22,22 @@ import { buildMcpDriftVars, buildMcpServerSpec } from "./mcp-server-spec";
 // ephemeral port, the newline-drain loop, the timeout-plus-SIGKILL guard) is
 // lifted from `mcp-server.transport.test.ts`, which already runs cross-platform
 // via `os.tmpdir()` and `process.execPath`.
+//
+// WHAT THIS FILE PROVES, AND WHAT IT DOES NOT — read this before citing a green
+// run of it. In Phase 3's vehicle-caveat voice, because the distinction is the
+// whole reason the caveat exists:
+//
+//   It proves the spec, the server and the spawn contract.
+//
+// It does NOT prove `index.ts`'s WIRING of them: `index.ts` cannot be imported
+// under vitest (no `caido:plugin` alias), so no test here executes a single line
+// of the orchestrator that will call `buildMcpServerSpec` in production. Nor is
+// a green run here evidence that a real Claude CLI connects to Drift on Windows
+// — that is PRV-01 and it belongs to Phase 7. And the environment contract it
+// exercises is the NODE one: libuv back-fills eleven `required_vars` on Windows,
+// so a regression to a bare drift-only `env` dict would pass every assertion in
+// this file while breaking under Caido's LLRT (finding L-4). The gate for that
+// is static, not this file.
 
 // One constant, referenced by every case, so a future raise cannot apply to one
 // of them only. 15 s rather than the transport test's 5 s because Windows
@@ -31,6 +48,15 @@ import { buildMcpDriftVars, buildMcpServerSpec } from "./mcp-server-spec";
 const SPAWN_TIMEOUT_MS = 15000;
 
 const FIXTURE_TOKEN = "drift-spawn-test-token";
+
+type JsonRpcResponse = {
+  id?: number;
+  result?: {
+    tools?: Array<{ name?: string }>;
+    isError?: boolean;
+  };
+  error?: { message?: string };
+};
 
 const tempDirs: string[] = [];
 
@@ -136,7 +162,12 @@ function buildSpecForStub(input: { caidoUrl: string; contextFile: string }) {
       caidoUrl: input.caidoUrl,
       caidoToken: FIXTURE_TOKEN,
       contextFilePath: input.contextFile,
-      allowedToolNames: ["get_environment", "search_history"],
+      // Every tool, which is what `runSharedMcpSelfTest` does too (it builds a
+      // policy with all six groups enabled). Narrowing this would make the
+      // tool-discovery assertion below unfalsifiable in the wrong direction:
+      // `mcp-server.mjs:613` filters `tools/list` by the allowlist, so a subset
+      // here would be indistinguishable from a server that lost tools.
+      allowedToolNames: [...MCP_TOOL_NAMES],
       confirmationRequiredToolNames: [],
       confirmSensitiveActions: false,
     }),
@@ -192,6 +223,132 @@ describe("mcp-server-spec spawn", () => {
       expect(JSON.parse(stdout.trim()) as { ok: boolean }).toMatchObject({
         ok: true,
       });
+    } finally {
+      await caido.close();
+    }
+  });
+
+  it("drives all three self-test methods over stdio JSON-RPC", async () => {
+    const contextFile = await createTempContextFile();
+    const caido = await startCaidoStub();
+    const spec = buildSpecForStub({
+      caidoUrl: caido.url,
+      contextFile,
+    });
+
+    try {
+      const responses = await new Promise<Map<number, JsonRpcResponse>>(
+        (resolve, reject) => {
+          const proc = spawn(spec.command, spec.args, {
+            env: spec.env,
+            stdio: ["pipe", "pipe", "pipe"],
+          });
+
+          const seen = new Map<number, JsonRpcResponse>();
+          let stdoutBuffer = "";
+          let stderr = "";
+          const timeout = setTimeout(() => {
+            try {
+              proc.kill("SIGKILL");
+            } catch {
+              /* ignore */
+            }
+            reject(
+              new Error(
+                `Timed out waiting for the self-test responses. Saw ids [${[...seen.keys()].join(",")}]. ${stderr}`,
+              ),
+            );
+          }, SPAWN_TIMEOUT_MS);
+
+          proc.stdout.setEncoding("utf-8");
+          proc.stdout.on("data", (chunk: string) => {
+            stdoutBuffer += chunk;
+            let newlineIndex = stdoutBuffer.indexOf("\n");
+            while (newlineIndex !== -1) {
+              const line = stdoutBuffer.slice(0, newlineIndex).trim();
+              stdoutBuffer = stdoutBuffer.slice(newlineIndex + 1);
+              newlineIndex = stdoutBuffer.indexOf("\n");
+              if (line === "") continue;
+              const parsed = JSON.parse(line) as JsonRpcResponse;
+              // Correlate by id — the server answers concurrently and makes no
+              // promise about ordering.
+              if (parsed.id !== undefined) seen.set(parsed.id, parsed);
+              if (seen.has(2) && seen.has(3) && seen.has(4)) {
+                clearTimeout(timeout);
+                resolve(seen);
+              }
+            }
+          });
+
+          proc.stderr.setEncoding("utf-8");
+          proc.stderr.on("data", (chunk: string) => {
+            stderr += chunk;
+          });
+
+          proc.on("error", (error) => {
+            clearTimeout(timeout);
+            reject(error);
+          });
+
+          proc.stdin.write(
+            `${JSON.stringify({
+              jsonrpc: "2.0",
+              id: 1,
+              method: "initialize",
+              params: {
+                protocolVersion: "2024-11-05",
+                capabilities: {},
+                clientInfo: { name: "drift-spec-spawn-test", version: "1.0.0" },
+              },
+            })}\n`,
+          );
+          proc.stdin.write(
+            `${JSON.stringify({
+              jsonrpc: "2.0",
+              method: "notifications/initialized",
+              params: {},
+            })}\n`,
+          );
+          proc.stdin.write(
+            `${JSON.stringify({
+              jsonrpc: "2.0",
+              id: 2,
+              method: "tools/list",
+              params: {},
+            })}\n`,
+          );
+          proc.stdin.write(
+            `${JSON.stringify({
+              jsonrpc: "2.0",
+              id: 3,
+              method: "tools/call",
+              params: { name: "get_environment", arguments: {} },
+            })}\n`,
+          );
+          proc.stdin.write(
+            `${JSON.stringify({
+              jsonrpc: "2.0",
+              id: 4,
+              method: "tools/call",
+              params: { name: "search_history", arguments: { limit: 1 } },
+            })}\n`,
+          );
+          proc.stdin.end();
+        },
+      );
+
+      // Tool discovery, asserted against the SHARED constant rather than a
+      // restated list — a change to `MCP_TOOL_DEFINITIONS` must not be able to
+      // silently narrow what this case demands.
+      const discovered = (responses.get(2)?.result?.tools ?? []).map(
+        (tool) => tool.name,
+      );
+      for (const name of MCP_TOOL_NAMES) {
+        expect(discovered).toContain(name);
+      }
+
+      expect(responses.get(3)?.result?.isError).not.toBe(true);
+      expect(responses.get(4)?.result?.isError).not.toBe(true);
     } finally {
       await caido.close();
     }
