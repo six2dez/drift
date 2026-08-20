@@ -85,14 +85,20 @@ jobs:
     # and `verify`-job permissions are untouched.
     permissions:
       contents: read
-    # MEASURED, not a starting value. The first green run of this leg took
-    # 87 seconds wall-clock end to end — and it was a COLD-CACHE run
-    # ("pnpm cache is not found" in its Setup Node step), so 87s is the
-    # pessimistic install case, not the warm one:
-    #   https://github.com/six2dez/drift/actions/runs/32377727473
-    #   Verify (Windows): started 14:02:20Z, completed 14:03:47Z (2026-08-20)
+    # MEASURED, not a starting value. Two real green runs of this leg, both
+    # 2026-08-20, both wall-clock for the `Verify (Windows)` job:
+    #   87s  COLD pnpm cache ("pnpm cache is not found")
+    #        https://github.com/six2dez/drift/actions/runs/32377727473
+    #   91s  WARM pnpm cache ("Cache restored successfully")
+    #        https://github.com/six2dez/drift/actions/runs/32378144861
     #
-    # 6 minutes is ~4x that, which absorbs normal Windows runner variance
+    # Note which way round those came out. The warm run was 4s SLOWER, so the
+    # pnpm store cache is NOT the dominant term here and a cold cache is not
+    # the worst case — install is ~8s of a ~90s job either way. Recorded as
+    # measured rather than as the "cold is pessimistic" story that would have
+    # been reasonable to assume and is wrong.
+    #
+    # 6 minutes is ~4x the measured ~90s, which absorbs Windows runner variance
     # without letting a genuinely hung child hold a runner. Note what this
     # ceiling does NOT guard: a slow spawn fails its own test timeout
     # (15000ms in mcp-server-spec.spawn.test.ts, 5000ms in the transport
