@@ -2,10 +2,10 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: verifying
-stopped_at: "Completed 04-11 and with it PHASE 4 (seven gates 7/7 + the blocking human read, approved 2026-08-20); next: /gsd-verify-work for phase 4, then plan Phase 5"
-last_updated: "2026-08-20T08:44:03.940Z"
-last_activity: "2026-08-20 -- 04-11 complete, and with it PHASE 4. Seven phase-wide static gates were EXECUTED (not inferred from diffs) and all seven passed, incl. Gate 6 proven by blob identity at 83c4231 vs HEAD and Gate 7's 7-of-7 bounded accumulators; the one criterion no gate can reach -- whether the RUN-05 probe failure message is legible to a Windows user who has never seen Drift's source -- was closed by a REAL HUMAN READ of two rendered variants on 2026-08-20 and is recorded as such, dated, not dressed up as a machine result. Re-rendering both variants here rather than transcribing the prior agent's paste caught a VACUOUS secret-scan pattern (a shell-quoted double backslash that could never match) in the inherited step-3 result. RUN-03, RUN-05, CMP-02, PERF-02, PERF-03 and PERF-04 marked Complete; RUN-04 deliberately HELD PENDING and re-targeted to Phase 5, because withFsRetry has exactly ONE production call site (index.ts:2300) and the write->exec pair in writeLaunchScript (:642) / writeMcpWrapper (:1086) that 04-RESEARCH names the best-documented AV case is fenced off by this plan's own Gate 6. Suite unchanged at 29 files / 245 tests / 0 failures"
+status: ready
+stopped_at: "Phase 4 complete and verified; RUN-04 re-targeted to Phase 5; ready to discuss Phase 5"
+last_updated: "2026-08-20T10:05:35.277Z"
+last_activity: "2026-08-20 -- PHASE 4 COMPLETE. 11/11 plans, 5 waves. Seven phase-wide static gates EXECUTED (not inferred from diffs), all passed -- incl. Gate 6 proven by blob identity at 83c4231 vs HEAD and Gate 7 at 7-of-7 bounded accumulators. The one criterion no gate can reach -- whether the RUN-05 probe failure message is legible to a Windows user who has never seen Drift source -- was closed by a REAL HUMAN READ of two rendered variants, dated 2026-08-20, recorded as such rather than dressed up as a machine result. Code review then found 2 blockers + 11 warnings AFTER the plans closed; all 13 fixed (CR-01: the retry ladder could not classify an LLRT error at all, so it was inert on its target platform and self-concealing). Suite 134 -> 263 tests / 29 files / 0 failures. RUN-03, RUN-05, CMP-02, PERF-02, PERF-03, PERF-04 Complete; RUN-04 RE-TARGETED TO PHASE 5 structurally (traceability table + both rollups), not just in prose -- withFsRetry has one production call site (index.ts:2467) and the write->exec pair in writeLaunchScript (:728) / writeMcpWrapper (:1172) is fenced off by Gate 6."
 progress:
   total_phases: 21
   completed_phases: 3
@@ -25,10 +25,10 @@ See: .planning/PROJECT.md (updated 2026-06-26)
 
 ## Current Position
 
-Phase: 4 (Platform Foundation) — COMPLETE
-Plan: 11 of 11
-Status: Phase complete — ready for verification
-Last activity: 2026-08-20 -- 04-11 complete, and with it PHASE 4. Seven phase-wide static gates were EXECUTED (not inferred from diffs) and all seven passed, incl. Gate 6 proven by blob identity at 83c4231 vs HEAD and Gate 7's 7-of-7 bounded accumulators; the one criterion no gate can reach -- whether the RUN-05 probe failure message is legible to a Windows user who has never seen Drift's source -- was closed by a REAL HUMAN READ of two rendered variants on 2026-08-20 and is recorded as such, dated, not dressed up as a machine result. Re-rendering both variants here rather than transcribing the prior agent's paste caught a VACUOUS secret-scan pattern (a shell-quoted double backslash that could never match) in the inherited step-3 result. RUN-03, RUN-05, CMP-02, PERF-02, PERF-03 and PERF-04 marked Complete; RUN-04 deliberately HELD PENDING and re-targeted to Phase 5, because withFsRetry has exactly ONE production call site (index.ts:2300) and the write->exec pair in writeLaunchScript (:642) / writeMcpWrapper (:1086) that 04-RESEARCH names the best-documented AV case is fenced off by this plan's own Gate 6. Suite unchanged at 29 files / 245 tests / 0 failures
+Phase: 5
+Plan: Not started
+Status: Phase 4 complete and verified (04-VERIFICATION.md status `passed`, 10/10 must-haves). Code review ran after plan close: 2 blockers + 11 warnings, all 13 fixed. Ready to discuss Phase 5.
+Last activity: 2026-08-20 -- PHASE 4 COMPLETE. 11/11 plans, 5 waves. Seven phase-wide static gates EXECUTED (not inferred from diffs), all passed -- incl. Gate 6 proven by blob identity at 83c4231 vs HEAD and Gate 7 at 7-of-7 bounded accumulators. The one criterion no gate can reach -- whether the RUN-05 probe failure message is legible to a Windows user who has never seen Drift source -- was closed by a REAL HUMAN READ of two rendered variants, dated 2026-08-20, recorded as such rather than dressed up as a machine result. Code review then found 2 blockers + 11 warnings AFTER the plans closed; all 13 fixed (CR-01: the retry ladder could not classify an LLRT error at all, so it was inert on its target platform and self-concealing). Suite 134 -> 263 tests / 29 files / 0 failures. RUN-03, RUN-05, CMP-02, PERF-02, PERF-03, PERF-04 Complete; RUN-04 RE-TARGETED TO PHASE 5 structurally (traceability table + both rollups), not just in prose -- withFsRetry has one production call site (index.ts:2467) and the write->exec pair in writeLaunchScript (:728) / writeMcpWrapper (:1172) is fenced off by Gate 6.
 
 Progress: [███░░░░░░░] 30% (3 of 10 milestone phases)
 
@@ -36,7 +36,7 @@ Progress: [███░░░░░░░] 30% (3 of 10 milestone phases)
 
 **Velocity:**
 
-- Total plans completed: 26 (plus 1 quick task)
+- Total plans completed: 22 (plus 1 quick task) — measured from `*-SUMMARY.md` on disk (Phase 1: 6, Phase 3: 5, Phase 4: 11), not hand-incremented
 - Average duration: ~10 min
 - Total execution time: ~3.7 hours
 
