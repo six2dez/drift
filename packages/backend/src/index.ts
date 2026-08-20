@@ -1312,10 +1312,20 @@ async function resolveCommand(
           if (settled) return;
           settled = true;
           clearTimeout(timeout);
-          // Read once. Below the cap the rendered value is byte-identical to the
-          // string this used to accumulate, so the returned path is unchanged
-          // for every real input — a which hit is one short line.
-          const resolved = renderBoundedBuffer(out).trim();
+          // The HEAD's FIRST LINE, never renderBoundedBuffer. Above the cap the
+          // rendered value splices `\n…[drift: truncated N bytes]…\n` BETWEEN
+          // head and tail; the marker begins with a newline, so it survives
+          // `.trim()`, and the result — head + marker — would be returned as a
+          // resolved executable path and handed to fileExists/spawn. A path
+          // consumer must never be shown the truncation marker: the marker is
+          // for humans reading diagnostics, and this value is for the OS.
+          //
+          // Taking one line is also correct on its own terms rather than merely
+          // safe: `which` prints one path per line and only the first is the
+          // resolution (Phase 3's P1-WHERE measured where.exe printing two).
+          // Below the cap and for a single-line hit — every real input — the
+          // returned path is unchanged.
+          const resolved = out.head.split("\n", 1)[0]?.trim() ?? "";
           resolve(code === 0 && resolved !== "" ? resolved : undefined);
         });
         child.on("error", () => {
