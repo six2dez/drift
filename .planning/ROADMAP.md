@@ -27,7 +27,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [ ] **Phase 2: POSIX Correctness & Hardening** - Fix `check_scope`, `list_workflows`, settings-churn, token blast radius, and the frontend quick wins
 - [x] **Phase 3: CI Spike — Prove LLRT Basics on Windows** - Prove the 7 LLRT runtime primitives on `windows-latest` before writing any port code (completed 2026-08-14)
 - [x] **Phase 4: Platform Foundation** - Pure `platform.ts`, `os.tmpdir()` everywhere, AV-retry, fail-loud runtime probe, bounded buffers (completed 2026-08-20)
-- [ ] **Phase 5: Kill Shell Wrappers** - Direct `node` spawn + `env` injection; the headline bug fix; health check green on Windows
+- [x] **Phase 5: Kill Shell Wrappers** - Direct `node` spawn + `env` injection; the headline bug fix; health check green on Windows (completed 2026-08-20)
 - [ ] **Phase 6: Windows Command Resolution** - `where`/`PATHEXT`/install-location discovery of `node.exe` and provider CLIs
 - [ ] **Phase 7: Provider Spawn & Registration** - Claude end-to-end (MVP) + safe `.cmd` spawning + Gemini/Codex/Copilot registration and approval channel
 - [ ] **Phase 8: Process Lifecycle** - Process-tree death on Windows *and* POSIX so cancel/timeout leaves no token-bearing orphan
@@ -202,7 +202,7 @@ Plans:
 | The launch **shape**: no `.sh`, no `chmod`, no `#!/bin/bash` on any Windows-reachable path, proven by static gates and a `windows-latest` build+vitest leg | That any of it works under the **real Caido LLRT runtime** — unverified in either direction; CI spawns through Node, where libuv back-fills environment names LLRT does not | Phase 9/10, on a real Windows Caido install, with the original reporter's confirmation |
 | macOS/Linux behaviour preserved, existing suite green | Gemini/Codex on Windows — registration is **skipped** there with a stated reason | Phase 7, **PRV-03** |
 
-**Plans**: 6/6 plans executed (4 waves)
+**Plans**: 6/6 plans complete (4 waves)
 Plans:
 **Wave 1** *(three independent slices — no shared files, fully parallel)*
 
@@ -339,7 +339,7 @@ Parallelism opportunities: Phase 2 may run alongside Phase 3 (both depend only o
 | 2. POSIX Correctness & Hardening | 0/3 | Not started | - |
 | 3. CI Spike — Prove LLRT Basics on Windows | 5/5 | Complete    | 2026-08-14 |
 | 4. Platform Foundation | 11/11 | Complete    | 2026-08-20 |
-| 5. Kill Shell Wrappers | 6/6 | In Progress|  |
+| 5. Kill Shell Wrappers | 6/6 | Complete   | 2026-08-20 |
 | 6. Windows Command Resolution | 0/2 | Not started | - |
 | 7. Provider Spawn & Registration | 0/3 | Not started | - |
 | 8. Process Lifecycle | 0/1 | Not started | - |
