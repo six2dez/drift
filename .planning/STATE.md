@@ -180,9 +180,9 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-20T08:43:15.834Z
-Stopped at: Completed 04-11 and with it PHASE 4 (seven gates 7/7 + the blocking human read, approved 2026-08-20); next: /gsd-verify-work for phase 4, then plan Phase 5
-Resume file: .planning/phases/04-platform-foundation/04-VALIDATION.md
+Last session: 2026-08-20
+Stopped at: Phase 5 context gathered (05-CONTEXT.md, 11 decisions across 4 areas); next: /gsd-plan-phase 5
+Resume file: .planning/phases/05-kill-shell-wrappers/05-CONTEXT.md
 
 **Live on the public remote: nothing of ours.** Plan 03-04 tore down all three `scratch/*` branches (`ci-proof-windows-probe`, `ci-proof-windows-probe-negative`, `ci-proof-windows-gate-negative`) locally and remotely. Asserted with a `test -z` discrimination over the captured glob (`scratch-glob-empty=0`) plus the full unfiltered listing, which now shows only `main` at `2d8cf16` and the pre-existing, unrelated `fix/security-hotfixes` at `0cd81f3`. `origin/main` was never pushed by this phase and is still `2d8cf16`; local `main` is 23 commits ahead and deliberately unpushed. **Re-verified 2026-08-13 (plan 03-05):** the remote still lists only `main` `2d8cf16` and the pre-existing `fix/security-hotfixes` `0cd81f3`, and all eight Phase 3 run records (4 probe + 4 `CI` control) still resolve with their recorded conclusions — which is what makes the URLs in `03-FINDINGS.md` valid citations after the branches were deleted. The probe **artifacts** do not survive: they expire 2026-09-12, which is why D-11 required the committed findings document.
 
