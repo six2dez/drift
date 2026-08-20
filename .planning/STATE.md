@@ -4,16 +4,16 @@ milestone: v1.0
 current_phase: 05
 current_phase_name: Kill Shell Wrappers
 status: executing
-stopped_at: Phase 4 complete and verified; RUN-04 re-targeted to Phase 5; ready to discuss Phase 5
-last_updated: "2026-08-20T12:28:19.755Z"
+stopped_at: Completed 05-01-PLAN.md
+last_updated: "2026-08-20T12:42:33.155Z"
 last_activity: 2026-08-20
 last_activity_desc: Phase 05 execution started
-state_head: 6cf169c12fa7ce7f27ebd2903ab1086d4fa93bbe
+state_head: 1cc9a08b663c4392543392c5a7dda86aa93c432c
 progress:
   total_phases: 10
   completed_phases: 3
   total_plans: 28
-  completed_plans: 22
+  completed_plans: 23
 milestone_name: milestone
 ---
 
@@ -29,8 +29,8 @@ See: .planning/PROJECT.md (updated 2026-06-26)
 ## Current Position
 
 Phase: 05 (Kill Shell Wrappers) — EXECUTING
-Plan: 1 of 6
-Status: Executing Phase 05
+Plan: 2 of 6
+Status: Ready to execute
 Last activity: 2026-08-20 — Phase 05 execution started
 
 Progress: [███░░░░░░░] 30% (3 of 10 milestone phases)
@@ -57,6 +57,11 @@ Progress: [███░░░░░░░] 30% (3 of 10 milestone phases)
 - Trend: steady; 04-08 (25 min) is the single longest plan in the project, and it burned no CI at all — the cost was three unanticipated compile issues. 01-06 (21 min) is the longest CI-bound one, because it waits on three real CI runs and a three-Node local pre-flight. 03-03 came in at 9 min despite needing two real `windows-latest` runs — the Windows probe job completes in 16-18s, so the CI wait is far cheaper than the ubuntu matrix. 03-04 waited on four runs (2 Windows probe + 2 ubuntu matrix) and still finished in 11 min for the same reason. 03-05 burned no runner at all: it only re-queried the six existing run records and transcribed their measured output.
 
 *Updated after each plan completion*
+**Per-Plan Metrics:**
+
+| Plan | Duration | Tasks | Files |
+|------|----------|-------|-------|
+| Phase 05 P01 | 9 min | 3 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -183,9 +188,9 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-20
-Stopped at: Phase 5 context gathered (05-CONTEXT.md, 11 decisions across 4 areas); next: /gsd-plan-phase 5
-Resume file: .planning/phases/05-kill-shell-wrappers/05-CONTEXT.md
+Last session: 2026-08-20T12:42:33.104Z
+Stopped at: Completed 05-01-PLAN.md
+Resume file: None
 
 **Live on the public remote: nothing of ours.** Plan 03-04 tore down all three `scratch/*` branches (`ci-proof-windows-probe`, `ci-proof-windows-probe-negative`, `ci-proof-windows-gate-negative`) locally and remotely. Asserted with a `test -z` discrimination over the captured glob (`scratch-glob-empty=0`) plus the full unfiltered listing, which now shows only `main` at `2d8cf16` and the pre-existing, unrelated `fix/security-hotfixes` at `0cd81f3`. `origin/main` was never pushed by this phase and is still `2d8cf16`; local `main` is 23 commits ahead and deliberately unpushed. **Re-verified 2026-08-13 (plan 03-05):** the remote still lists only `main` `2d8cf16` and the pre-existing `fix/security-hotfixes` `0cd81f3`, and all eight Phase 3 run records (4 probe + 4 `CI` control) still resolve with their recorded conclusions — which is what makes the URLs in `03-FINDINGS.md` valid citations after the branches were deleted. The probe **artifacts** do not survive: they expire 2026-09-12, which is why D-11 required the committed findings document.
 
