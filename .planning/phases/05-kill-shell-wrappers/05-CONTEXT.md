@@ -28,7 +28,7 @@ the same way RUN-04 was re-targeted at the close of Phase 4).
 
 ### Five code facts verified during this discussion — planners must not re-derive them
 
-1. **Copilot already emits the target shape.** `index.ts:2792` writes
+1. **Copilot already emits the target shape.** `index.ts:2791` writes
    `copilot-mcp-<chatId>.json` as `{ command: <node>, args: [<mjs>], env: buildMcpRuntimeEnv(...) }`.
    This is the working, shipping template for `buildMcpServerSpec()` — not new design. Claude's
    config writer converges on it; it does not invent a shape.
@@ -44,7 +44,7 @@ the same way RUN-04 was re-targeted at the close of Phase 4).
    (`index.ts:1917`) always does. `spawnNode` passes env directly, so this file stops existing:
    a net **reduction** in token blast radius, not a relocation.
 5. **`index.ts` is not importable under vitest.** No test file imports it, and `vitest.config.ts`
-   declares no `caido:plugin` alias. SC-2 names `validateCaidoAuth` (`index.ts:1208`) and the
+   declares no `caido:plugin` alias. SC-2 names `validateCaidoAuth` (`index.ts:1209`) and the
    self-test, both of which live there. D-08 is how that gap is closed honestly.
 
 </domain>
@@ -54,8 +54,8 @@ the same way RUN-04 was re-targeted at the close of Phase 4).
 
 ### Gemini/Codex fallout — what happens when `mcp-wrapper.sh` dies
 
-- **D-01: The shared `mcp-wrapper.sh` SURVIVES on darwin/linux, for Gemini and Codex only, behind
-  an `os.platform()` guard. On `win32`, their registration is skipped with a stated reason.**
+- **D-01: The shared `mcp-wrapper.sh` survives on POSIX for Gemini/Codex only, behind a guard.**
+  On `win32` their registration is skipped with a stated reason.
 
   The load-bearing fact: `registerMcpWithCli` (`index.ts:2249`) runs `mcp add drift -- <wrapper>`,
   and the wrapper's `export` lines are the **sole** carrier of `CAIDO_URL` / `CAIDO_TOKEN` /
@@ -97,8 +97,8 @@ the same way RUN-04 was re-targeted at the close of Phase 4).
 
 ### The provider launch script
 
-- **D-04: `provider-launch-<sessionId>.sh` (`index.ts:2884`) is converted to a direct spawn on
-  ALL platforms — no platform branch.**
+- **D-04: `provider-launch-<sessionId>.sh` is converted to a direct spawn on ALL platforms.**
+  No platform branch (`index.ts:2884`).
 
   ```ts
   spawn(resolved, args, {
@@ -150,8 +150,8 @@ the same way RUN-04 was re-targeted at the close of Phase 4).
   imported, so anything left inside it is unverifiable by construction. This is the sixth-plus
   instance of an existing house pattern, not a new one.
 
-- **D-07: CI-01's PERMANENT `windows-latest` build+vitest job is pulled forward into `ci.yml`
-  NOW, as a blocking leg.**
+- **D-07: CI-01's permanent `windows-latest` build+vitest job is pulled forward now.**
+  It lands in `ci.yml` as a blocking leg.
 
   Phase 5 is the first phase with real Windows behaviour to protect, and every later phase
   inherits the net. It also replaces `windows-llrt-probe.yml` with something that **outlives** it,
@@ -162,8 +162,8 @@ the same way RUN-04 was re-targeted at the close of Phase 4).
   Phase 3 means its output pollutes no merge gate — so SC-2's evidence would sit in a job nobody
   must look at, then vanish). Rejected: a third temporary workflow (same continuity problem).
 
-- **D-08: SC-2 is proved by the pure spec module PLUS an integration spawn test that SHARES the
-  production builder — with the vehicle caveat recorded verbatim.**
+- **D-08: SC-2 is proved by the pure spec module plus a spawn test sharing the production builder.**
+  The vehicle caveat is recorded verbatim.
 
   The test imports **the same `buildMcpServerSpec` `index.ts` calls**, feeds it fixture inputs,
   then spawns `spec.command` / `spec.args` with `spec.env` against a local HTTP stub — the exact
@@ -197,8 +197,8 @@ the same way RUN-04 was re-targeted at the close of Phase 4).
 
 ### Token on disk
 
-- **D-10: Claude's `mcp-<chatId>.json` carries the LITERAL token in its `env` field — byte-identical
-  to what `copilot-mcp-<chatId>.json` already does.**
+- **D-10: Claude's `mcp-<chatId>.json` carries the LITERAL token in its `env` field.**
+  Byte-identical to what `copilot-mcp-<chatId>.json` already does.
 
   Phase 5 introduces **no new exposure class**; it moves one file's worth of token from a `0o700`
   `.sh` to a `0o600` `.json`, in the same `0o700`/`%TEMP%` directory, with the same lifetime and
@@ -311,10 +311,10 @@ Recorded as the discussed-and-agreed starting point — **not** unexamined gaps.
 - `packages/backend/src/index.ts` — the sites this phase edits:
   `writeLaunchScript` **:728**, `renderExportExecScript` **:749**, `shellQuote` **:834**,
   `getMcpWrapperPath` **:921**, `buildMcpRuntimeEnv` **:1013**, `writeMcpWrapper` **:1172**,
-  `validateCaidoAuth` **:1208**, `callMcpMethod` **:1710** (self-test `.sh` at **:1719**),
+  `validateCaidoAuth` **:1209**, `callMcpMethod` **:1710** (self-test `.sh` at **:1719**),
   `runSharedMcpSelfTest` **:1917**, `skippedMcpCliReasons` **:2240**, `registerMcpWithCli` **:2249**,
   the `startMcpServer` wrapper+validate pair **:2524–2532**, the Claude session wrapper **:2729**,
-  the Copilot config writer (**the template**) **:2792**, the provider launch script **:2884**,
+  the Copilot config writer (**the template**) **:2791**, the provider launch script **:2884**,
   the debug dumps **:2910/:2920**, and `finalize()`'s cleanup **:3300–3311**.
 - `packages/backend/src/platform.ts:262` — `buildSpawnEnv`, and the **T-04-04** comment that
   decides D-11.
@@ -331,7 +331,7 @@ Recorded as the discussed-and-agreed starting point — **not** unexamined gaps.
 
 ### Reusable Assets
 
-- **`index.ts:2792`, the Copilot MCP config writer** — already emits
+- **`index.ts:2791`, the Copilot MCP config writer** — already emits
   `{ command, args, env }`. `buildMcpServerSpec()` generalises **this**, shipping code, rather than
   designing something new. Claude's writer becomes a second caller.
 - **`platform.ts:262` `buildSpawnEnv({ parentEnv, driftVars })`** — Phase 4's SC-9 merge, already
@@ -368,13 +368,25 @@ Recorded as the discussed-and-agreed starting point — **not** unexamined gaps.
   integration spawn test.
 - **New:** a `windows-latest` job in `.github/workflows/ci.yml`, plus `.gitattributes` at the repo
   root.
+- **`index.ts:1541` `refreshActiveMcpRuntime`** — **the third `writeMcpWrapper` → `validateCaidoAuth`
+  pair, which this document's original site list MISSED.** Corrected 2026-08-20 from
+  `05-RESEARCH.md` § *Complete Site Inventory*, which is authoritative over the list below:
+  **3** `writeMcpWrapper` sites (`:1564`, `:2524`, `:2729`), **2** `validateCaidoAuth` sites
+  (`:1571`, `:2531`), **2** `tryRegisterMcpForProviders` sites (`:1578`, `:2543`). This pair is
+  reached from settings save (`:1521`) and Caido token sync (`:1596`), and calls
+  `cleanupMcpRuntime` on validation failure — so converting only the two sites named below would
+  mean the first token refresh on Windows **tears down a working MCP runtime**.
+- **`spawnAndWait` (`index.ts:2105`) takes no `env` parameter.** Added 2026-08-20 from
+  `05-PATTERNS.md`. `validateCaidoAuth` is `spawnAndWait(wrapperPath, ["--validate-auth"])` and
+  works today only because the wrapper's `export` lines carry the env; its signature must gain an
+  optional env. Named in neither `research/ARCHITECTURE.md` nor the original site list.
 - **`index.ts:2524–2532`** — `startMcpServer`'s `writeMcpWrapper` → `validateCaidoAuth` pair
   becomes `buildMcpServerSpec()` → `spawnNode(spec, ["--validate-auth"])`. The Gemini/Codex
   registration below it keeps the wrapper on POSIX (D-01).
 - **`index.ts:1710–1740` `callMcpMethod`** — drops the `writeLaunchScript` branch entirely and
   takes the spec, passing env to `spawn` directly. `runSharedMcpSelfTest` (`:1917`) follows.
 - **`index.ts:2729–2760`** — the Claude session wrapper is replaced by writing the spec into
-  `mcp-<chatId>.json`'s `env`, exactly as Copilot does at `:2792`.
+  `mcp-<chatId>.json`'s `env`, exactly as Copilot does at `:2791`.
 - **`index.ts:2878–2896`** — the provider spawn conversion (D-04), and **`:3308`** its paired
   cleanup deletion.
 - **Test-suite guard:** the `provider-launch` exact-`toEqual` tests are the CMP-01 tripwire.
