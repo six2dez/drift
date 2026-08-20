@@ -26,7 +26,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 1: Restore the Verification Signal** - Green suite on Node 20/22/24/26, real ESLint in CI, CI on every branch (completed 2026-08-13)
 - [ ] **Phase 2: POSIX Correctness & Hardening** - Fix `check_scope`, `list_workflows`, settings-churn, token blast radius, and the frontend quick wins
 - [x] **Phase 3: CI Spike — Prove LLRT Basics on Windows** - Prove the 7 LLRT runtime primitives on `windows-latest` before writing any port code (completed 2026-08-14)
-- [ ] **Phase 4: Platform Foundation** - Pure `platform.ts`, `os.tmpdir()` everywhere, AV-retry, fail-loud runtime probe, bounded buffers
+- [x] **Phase 4: Platform Foundation** - Pure `platform.ts`, `os.tmpdir()` everywhere, AV-retry, fail-loud runtime probe, bounded buffers (completed 2026-08-20)
 - [ ] **Phase 5: Kill Shell Wrappers** - Direct `node` spawn + `env` injection; the headline bug fix; health check green on Windows
 - [ ] **Phase 6: Windows Command Resolution** - `where`/`PATHEXT`/install-location discovery of `node.exe` and provider CLIs
 - [ ] **Phase 7: Provider Spawn & Registration** - Claude end-to-end (MVP) + safe `.cmd` spawning + Gemini/Codex/Copilot registration and approval channel
@@ -176,7 +176,7 @@ Plans:
 
 **Wave 5** *(blocked on 04-06, 04-10)*
 
-- [ ] 04-11-PLAN.md — Phase gates (no hardcoded `/tmp`, probe ordering, SC-9 cross-check, D-04 survival, `pnpm build`, CMP-01 tripwire) + the blocking human read of the RUN-05 failure message
+- [x] 04-11-PLAN.md — Phase gates (no hardcoded `/tmp`, probe ordering, SC-9 cross-check, D-04 survival, `pnpm build`, CMP-01 tripwire) + the blocking human read of the RUN-05 failure message
 
 **Research flag**: NO — well-documented Node/Windows APIs; Phase 3 confirms the LLRT surface (see its Results table). `04-RESEARCH.md` (2026-08-14) went further and read Caido's own LLRT fork source, which overturned three planning assumptions: `realpath` is **absent** from `caido/dependency-llrt@main`'s `fs` module, so SC-10's ladder always lands on `path.resolve` under Caido (ship the shape, report the rung); LLRT's `os.tmpdir()` can return a **trailing backslash** where Node strips it, so every temp path uses `path.join`; and LLRT's `FileHandle.read` panics unless the buffer is sized exactly to the read length, which is unobservable on Node.
 
@@ -308,7 +308,7 @@ Parallelism opportunities: Phase 2 may run alongside Phase 3 (both depend only o
 | 1. Restore the Verification Signal | 6/6 | Complete    | 2026-08-13 |
 | 2. POSIX Correctness & Hardening | 0/3 | Not started | - |
 | 3. CI Spike — Prove LLRT Basics on Windows | 5/5 | Complete    | 2026-08-14 |
-| 4. Platform Foundation | 10/11 | In Progress | - |
+| 4. Platform Foundation | 11/11 | Complete   | 2026-08-20 |
 | 5. Kill Shell Wrappers | 0/2 | Not started | - |
 | 6. Windows Command Resolution | 0/2 | Not started | - |
 | 7. Provider Spawn & Registration | 0/3 | Not started | - |
