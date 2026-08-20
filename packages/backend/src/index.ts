@@ -89,6 +89,7 @@ import {
 } from "./claude-print";
 import { getPersistenceDbHandle, type PersistenceDbHandle } from "./persistence";
 import {
+  buildSpawnEnv,
   getSweepRoots,
   getTempRoot,
   isAbsolutePath,
@@ -104,6 +105,7 @@ import {
   buildMcpDriftVars,
   buildMcpServerSpec,
   findExpandableEnvKeys,
+  formatSpawnDebugLine,
   planMcpCliRegistration,
   toMcpConfigDocument,
   type McpServerSpec,
@@ -795,27 +797,6 @@ async function writeChatMcpConfig(
   );
 }
 
-async function writeLaunchScript(
-  name: string,
-  command: string,
-  args: string[],
-  envVars: Record<string, string>,
-): Promise<string | undefined> {
-  if (mcpTempDir === undefined) return undefined;
-  const scriptPath = path.join(mcpTempDir, name);
-  const tempScriptPath = `${scriptPath}.tmp`;
-  const content = renderExportExecScript(command, args, envVars);
-  // 0o700: launch scripts export the Caido token and must be executable.
-  await writeFile(tempScriptPath, content, { mode: 0o700 });
-  const chmodResult = await spawnAndWait("chmod", ["+x", tempScriptPath]);
-  if (chmodResult.code !== 0) {
-    await rm(tempScriptPath, { force: true });
-    return undefined;
-  }
-  await rename(tempScriptPath, scriptPath);
-  return scriptPath;
-}
-
 function renderExportExecScript(
   command: string,
   args: string[],
@@ -854,6 +835,12 @@ function summarizeDebugChunk(text: string, maxChars = DEBUG_CHUNK_PREVIEW_CHARS)
 
 function redactDebugText(text: string): string {
   return text
+    // The shell arm. It outlives the provider launch script deleted in this
+    // plan, because the surviving POSIX Gemini/Codex wrapper still renders
+    // `export CAIDO_TOKEN='...'` lines and Phase 7 (PRV-03) is what removes
+    // both the wrapper and this arm. Narrowing a redactor as cosmetic cleanup
+    // is the wrong direction: a redactor that no longer covers a shape that
+    // still exists fails OPEN, and the failure is a token in a support bundle.
     .replace(/(CAIDO_TOKEN=)'[^']*'/g, "$1'[redacted]'")
     .replace(/("CAIDO_TOKEN"\s*:\s*)"[^"]*"/g, "$1\"[redacted]\"");
 }
@@ -3102,26 +3089,24 @@ async function sendCliMessage(
     prompt += input.text;
 
     // ── Spawn process ──
-    let launchCommand = resolved;
-    let launchArgs = args;
-    let launchScriptPreview = "";
-    if (runtimeFiles !== undefined) {
-      launchScriptPreview = renderExportExecScript(resolved, args, runtimeEnv);
-      const launchScriptPath = await writeLaunchScript(
-        `provider-launch-${input.sessionId}.sh`,
-        resolved,
-        args,
-        runtimeEnv,
-      );
-      if (launchScriptPath === undefined) {
-        setSessionState("error", "Drift could not prepare the provider launcher with the current MCP runtime settings.");
-        return err("Drift could not prepare the provider launcher with the current MCP runtime settings.");
-      }
-      launchCommand = launchScriptPath;
-      launchArgs = [];
-    }
+    //
+    // D-04. There is no generated launch script on any platform any more. The
+    // script only ever exported-then-`exec`'d, so on POSIX the direct spawn is
+    // behaviourally identical for the CHILD - same pid, same pipes, same
+    // effective environment - which is why the existing macOS/Linux suite
+    // exercises this path in full rather than leaving a Windows-only arm no CI
+    // can reach. What also disappears is the FILE, and with it the write ->
+    // chmod -> rename -> exec ladder that literally cannot run on Windows.
+    //
+    // The variables Drift injects into the provider child. Gated on the MCP
+    // runtime being attached, which is exactly the condition that used to gate
+    // the launch script: `runtimeEnv` carries the Caido session token, and with
+    // no MCP server for the CLI to reach there is nothing the token buys - so
+    // handing it over would widen its blast radius for no capability (D-10).
+    const injectedDriftVars: Record<string, string> =
+      runtimeFiles === undefined ? {} : runtimeEnv;
 
-    lastSpawnArgs = [launchCommand, ...launchArgs];
+    lastSpawnArgs = [resolved, ...args];
     appendSessionDebugLog(
       sessionDebugLogPath,
       `sendCliMessage start provider=${providerId} mcpAttached=${String(mcpTempDir !== undefined)} timeoutSeconds=${String(currentSettings.processTimeoutSeconds)}`,
@@ -3139,15 +3124,26 @@ async function sendCliMessage(
         `Claude MCP config content:\n${redactDebugText(await readFile(claudeMcpConfigPath, "utf-8"))}`,
       );
     }
-    if (launchScriptPreview !== "") {
-      appendSessionDebugLog(
-        sessionDebugLogPath,
-        `Provider launch script preview:\n${redactDebugText(launchScriptPreview)}`,
-      );
-    }
+    // D-11. Command, args and the injected env KEY NAMES - never a value. The
+    // wrapper-content dump that used to sit here has no successor because there
+    // is no wrapper, and the old `Resolved launch:` line is subsumed by this
+    // one, so neither is kept alongside it.
+    //
+    // Rejected, and recorded so it is not re-proposed: dumping the merged
+    // environment through a redaction regex. A regex over a WHOLE environment
+    // fails open - it protects only the keys someone thought to enumerate, and
+    // the key nobody enumerated is exactly the one the next variable is added
+    // under. The formatter this calls has no parameter through which a value
+    // could arrive, which is the design rather than a discipline to remember
+    // (T-04-04, and `platform.ts`'s buildSpawnEnv states the same rule at the
+    // merge point).
     appendSessionDebugLog(
       sessionDebugLogPath,
-      `Resolved launch: ${JSON.stringify([launchCommand, ...launchArgs])}`,
+      formatSpawnDebugLine({
+        command: resolved,
+        args,
+        injectedKeys: Object.keys(injectedDriftVars),
+      }),
     );
     setSessionState("running", "Provider turn running.", {
       mcpAttached: mcpTempDir !== undefined,
@@ -3298,7 +3294,17 @@ async function sendCliMessage(
     };
 
     return new Promise<Result<SendCliMessageOutput>>((resolve) => {
-      const proc = spawn(launchCommand, launchArgs, {
+      // The parent block first, Drift's own variables overlaid on top - the
+      // single merge point, never a hand-rolled spread here. A bare drift-only
+      // dict is a defect on BOTH platforms, not a Windows-only one: the spawn
+      // `env` option REPLACES the parent block, and under Caido's LLRT there is
+      // no libuv to back-fill even the eleven names Windows would otherwise
+      // restore.
+      const proc = spawnWithEnv(resolved, args, {
+        env: buildSpawnEnv({
+          parentEnv: readParentEnv(),
+          driftVars: injectedDriftVars,
+        }),
         stdio: ["pipe", "pipe", "pipe"],
       });
       appendSessionDebugLog(
@@ -3519,10 +3525,6 @@ async function sendCliMessage(
           if (claudeMcpConfigPath !== undefined) {
             appendSessionDebugLog(sessionDebugLogPath, `finalize(): rm ${claudeMcpConfigPath}`);
             await rm(claudeMcpConfigPath, { force: true }).catch(() => undefined);
-          }
-          if (launchCommand !== resolved) {
-            appendSessionDebugLog(sessionDebugLogPath, `finalize(): rm ${launchCommand}`);
-            await rm(launchCommand, { force: true }).catch(() => undefined);
           }
           appendSessionDebugLog(
             sessionDebugLogPath,
@@ -3779,6 +3781,17 @@ async function sendCliMessage(
         }, 250);
       });
 
+      // Attached SYNCHRONOUSLY, in the same turn as the spawn above, and that is
+      // a hard requirement rather than a nicety. Under Caido's runtime a spawn
+      // failure is delivered asynchronously through a deferred task; with no
+      // listener registered when that task runs, the error is thrown with no JS
+      // frame left to catch it and the plugin - not the turn - is what dies. Do
+      // not move this behind an `await`, a `queueMicrotask` or a conditional.
+      //
+      // Note also what the error does NOT carry: a `code`. It carries a message
+      // and nothing else, so any future classification of spawn failures must
+      // match on the MESSAGE, the way fs-retry.ts already does for the
+      // `(os error N)` shape rather than reading `.code`.
       proc.on("error", (e) => {
         sdk.console.log(`[drift watchdog] proc.error fired sessionId=${input.sessionId} message=${e.message}`);
         appendSessionDebugLog(sessionDebugLogPath, `process error ${e.message}`);
