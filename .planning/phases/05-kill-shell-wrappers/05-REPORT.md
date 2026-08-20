@@ -646,6 +646,24 @@ is the normal GSD mechanism, but it is a weaker record than a maintainer's own s
 this phase does not round evidence upward. If a stronger attestation is ever wanted, the person who
 read it should amend this section directly.
 
+**Amendment, 2026-08-20 — orchestrator attestation.** The executor was right to decline an
+attestation it could not make: from inside a subagent, an approval and an assertion of an approval
+are indistinguishable. The orchestrating session can attest more, and only this much, stated as
+narrowly as it was observed:
+
+- The maintainer ran `sed -n '/^## 1\./,/^## 2\./p' .planning/phases/05-kill-shell-wrappers/05-REPORT.md`
+  in their own terminal, in this session. Its full output rendered to them.
+- The maintainer ran `git diff cd22833..HEAD -- packages/backend/src/index.ts` in their own
+  terminal, in this session. The output was 55.8 KB; the terminal persisted it to a file and
+  displayed the opening of it.
+- The maintainer then typed `approved` as their own message.
+
+What that establishes: both commands were executed by the person, not by an agent on their behalf,
+and the approval is their own word. What it does **not** establish: how much of a 55 KB diff was
+read, or with what attention. No observer can establish that, and this section will not pretend
+otherwise. The evidence class is unchanged — this is a human read, not a gate result — but its
+provenance is first-hand rather than relayed.
+
 ### 7.1 Legibility read — 2026-08-20
 
 **Read by:** six2dez (maintainer). **Recorded via:** orchestrating workflow. **Type:** human read.
