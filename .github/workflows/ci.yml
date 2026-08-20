@@ -67,3 +67,132 @@ jobs:
           path: dist/plugin_package.zip
           if-no-files-found: error
           retention-days: 14
+
+  windows:
+    name: Verify (Windows)
+    # A sibling job, not a matrix entry on `verify`. The ubuntu leg runs four
+    # Node versions and this one runs a single Node 20; folding them into one
+    # matrix would either quadruple Windows minutes or dilute the Node matrix.
+    #
+    # Blocking from day one, deliberately: no continue-on-error and no `if:`
+    # guard on the job. A leg nobody must heed is the weakness that already
+    # applies to the probe workflow, and this job exists to replace that probe
+    # with something permanent.
+    runs-on: windows-latest
+    # Read-only content access is all this job needs — it uploads nothing and
+    # writes nothing back. A deliberate narrowing of the write-capable default
+    # this workflow otherwise inherits on same-repo pushes. The workflow-level
+    # and `verify`-job permissions are untouched.
+    permissions:
+      contents: read
+    # A starting value, not a measured one. The probe workflow's 10 was sized
+    # for a single dependency-free step; this leg installs, typechecks, lints,
+    # runs the whole suite and builds. Plan 05-06 replaces this ceiling with a
+    # number derived from the first real run's duration and records that run's
+    # URL beside it. Until then it only has to beat the 360-minute default,
+    # which would hold a Windows runner open for six hours on a hung spawn.
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      # Must stay ahead of Setup Node, whose pnpm store cache needs the pnpm
+      # binary to already exist — the same ordering the ubuntu job above
+      # documents. The stakes are higher on this OS and the failure was
+      # measured, not inferred: the Node setup action's pnpm cache default is
+      # deliberately left at its shipped value, and it auto-enables pnpm
+      # caching whenever package.json carries a packageManager field (this
+      # one's says pnpm@9.0.0), so the action shells out to a pnpm binary. A
+      # Windows job with no prior pnpm step therefore dies right here with
+      # "Unable to locate executable file: pnpm" before a step of its own ever
+      # runs — observed on run 31702174047 (2026-08-13).
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: '20'
+          cache: pnpm
+
+      # `shell: bash` is pinned on every run step in this job and is not
+      # stylistic. The default shell on a Windows runner is pwsh; GitHub
+      # Actions maps `shell: bash` to `bash --noprofile --norc -eo pipefail
+      # {0}` identically on every OS, and pipefail is what makes a piped
+      # command return the real exit code instead of the last stage's.
+      #
+      # This gate runs before Install dependencies so an install failure cannot
+      # skip it, and so it fails fast before anything could be printed.
+      #
+      # The step name states exactly what the pattern below can prove — a Caido
+      # token reference and a GitHub secrets expression — and nothing wider. A
+      # literal credential pasted into either file (a bare JWT, a hex blob, a
+      # Bearer header) is the likeliest real accident and this grep cannot see
+      # it; neither can it see bracket-indexed expressions or env-var
+      # indirection. Overstating the guarantee is worse than the gap, because
+      # later phases inherit this gate as standing protection.
+      #
+      # The pattern is written to be self-non-matching against its own source
+      # text, and that property is load-bearing: a pattern that matched this
+      # file would fail the gate permanently. Fix the name, not the regex.
+      #
+      # windows-llrt-probe.yml stays in the scan-target list on purpose even
+      # though it is stamped for deletion in Phase 9. When that deletion lands,
+      # grep returns 2 and the third arm below fails this job loudly — which is
+      # the intended prompt to re-point the list, instead of a scan that
+      # silently narrows to one file. Carrying this gate here is what lets it
+      # outlive the probe it came from.
+      - name: 'Gate: no secret material in CI configuration'
+        shell: bash
+        run: |
+          # No `test -f` pre-check here, unlike the probe workflow's copy: the
+          # third arm IS the missing-target guard, so a deleted or renamed scan
+          # target fails through grep's own status rather than through a
+          # separate assertion that would shadow it.
+          #
+          # `shell: bash` resolves to `bash --noprofile --norc -eo pipefail
+          # {0}`, so -e is active and a bare non-zero grep would abort this
+          # step before any branch could run. The left side of || is a
+          # condition context, so this form is -e-safe and still captures the
+          # status.
+          status=0
+          grep -nE 'CAIDO_(TOKEN)|secret(s)\.' \
+            .github/workflows/ci.yml \
+            .github/workflows/windows-llrt-probe.yml || status=$?
+          # Three arms, not two. grep exits 0 on a match, 1 on no match, and 2
+          # when a target is missing or unreadable. An if/else would route that
+          # 2 into the pass arm and silently green-light exactly the edit this
+          # gate exists to catch. Do NOT collapse the third arm into the second.
+          if [ "$status" -eq 0 ]; then
+            echo "Gate failed: a Caido token reference or a GitHub secrets expression appears in a scanned file (see the match above)."
+            exit 1
+          elif [ "$status" -eq 1 ]; then
+            echo "Gate passed: no Caido token reference and no GitHub secrets expression in .github/workflows/ci.yml or .github/workflows/windows-llrt-probe.yml"
+          else
+            echo "Gate failed: could not read its scan targets (grep status $status)."
+            exit 1
+          fi
+
+      - name: Install dependencies
+        shell: bash
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        shell: bash
+        run: pnpm -r typecheck
+
+      - name: Lint
+        shell: bash
+        run: pnpm lint
+
+      - name: Test
+        shell: bash
+        run: pnpm exec vitest run
+
+      # The one step this whole leg exists for on top of the suite: `pnpm build`
+      # is only runnable here because the root build script was reduced to a
+      # single cross-platform command in the same plan. pnpm runs script bodies
+      # through cmd.exe on this OS, and the runner image ships no `zip`.
+      - name: Build
+        shell: bash
+        run: pnpm build
