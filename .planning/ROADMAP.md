@@ -202,7 +202,7 @@ Plans:
 | The launch **shape**: no `.sh`, no `chmod`, no `#!/bin/bash` on any Windows-reachable path, proven by static gates and a `windows-latest` build+vitest leg | That any of it works under the **real Caido LLRT runtime** — unverified in either direction; CI spawns through Node, where libuv back-fills environment names LLRT does not | Phase 9/10, on a real Windows Caido install, with the original reporter's confirmation |
 | macOS/Linux behaviour preserved, existing suite green | Gemini/Codex on Windows — registration is **skipped** there with a stated reason | Phase 7, **PRV-03** |
 
-**Plans**: 5/6 plans executed (4 waves)
+**Plans**: 6/6 plans executed (4 waves)
 Plans:
 **Wave 1** *(three independent slices — no shared files, fully parallel)*
 
@@ -220,7 +220,7 @@ Plans:
 
 **Wave 4** *(blocked on 05-02 and 05-05)*
 
-- [ ] 05-06-PLAN.md — Phase gates executed with raw output, the real `windows-latest` run recorded with its URL/per-step conclusions/log lines, `timeout-minutes` set from the measurement, 05-VALIDATION.md reconciled (V-5's published gate is vacuous), `05-REPORT.md` leading with the non-claims, and a blocking human read of the ceiling + the V-21 code review
+- [x] 05-06-PLAN.md — Phase gates executed with raw output, the real `windows-latest` run recorded with its URL/per-step conclusions/log lines, `timeout-minutes` set from the measurement, 05-VALIDATION.md reconciled (V-5's published gate is vacuous), `05-REPORT.md` leading with the non-claims, and a blocking human read of the ceiling + the V-21 code review
 
 **Research flag**: NO — design fully specified in `research/ARCHITECTURE.md`; `05-RESEARCH.md` (2026-08-20) went further and read `caido/dependency-llrt@main` and `rust-lang/rust` source directly. Three findings changed the plan: (1) Rust's Windows `make_envp` writes the supplied map **verbatim** with no libuv-style back-fill of the eleven `required_vars`, so a regression to a drift-only `env` dict is **green on every runner this project has** and broken only under the real Caido runtime — the control is a vehicle-independent static gate, not the integration test; (2) `pnpm build` **cannot run on `windows-latest`** today (the script chains `cp`/`rm`/`cd`/`zip` under `cmd.exe`, and `zip` is absent from the runner image) and the fix is a measured **deletion** — `caido-dev build` alone already emits an identical zip; (3) `index.ts` has a **third** `writeMcpWrapper` → `validateCaidoAuth` pair in `refreshActiveMcpRuntime` (`:1541`), reached from settings save and token sync, that CONTEXT.md's site list does not name — converting only the two named sites means the first token refresh on Windows tears down a working MCP runtime.
 
@@ -339,7 +339,7 @@ Parallelism opportunities: Phase 2 may run alongside Phase 3 (both depend only o
 | 2. POSIX Correctness & Hardening | 0/3 | Not started | - |
 | 3. CI Spike — Prove LLRT Basics on Windows | 5/5 | Complete    | 2026-08-14 |
 | 4. Platform Foundation | 11/11 | Complete    | 2026-08-20 |
-| 5. Kill Shell Wrappers | 5/6 | In Progress|  |
+| 5. Kill Shell Wrappers | 6/6 | In Progress|  |
 | 6. Windows Command Resolution | 0/2 | Not started | - |
 | 7. Provider Spawn & Registration | 0/3 | Not started | - |
 | 8. Process Lifecycle | 0/1 | Not started | - |

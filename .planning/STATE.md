@@ -3,17 +3,17 @@ gsd_state_version: 1.0
 milestone: v1.0
 current_phase: 05
 current_phase_name: Kill Shell Wrappers
-status: executing
-stopped_at: Completed 05-05-PLAN.md
-last_updated: "2026-08-20T13:45:47.988Z"
+status: verifying
+stopped_at: Completed 05-06-PLAN.md — Phase 5 complete
+last_updated: "2026-08-20T18:14:59.222Z"
 last_activity: 2026-08-20
 last_activity_desc: Phase 05 execution started
-state_head: eb1c07f2fc115802294cbb94bf49ec569b0bae27
+state_head: 17b576f15ec81a82e1544340fc90cd55203f672c
 progress:
   total_phases: 10
   completed_phases: 3
   total_plans: 28
-  completed_plans: 27
+  completed_plans: 28
 milestone_name: milestone
 ---
 
@@ -28,10 +28,10 @@ See: .planning/PROJECT.md (updated 2026-06-26)
 
 ## Current Position
 
-Phase: 05 (Kill Shell Wrappers) — EXECUTING
-Plan: 6 of 6
-Status: Ready to execute
-Last activity: 2026-08-20 — Phase 05 execution started
+Phase: 05 (Kill Shell Wrappers) — EXECUTED, AWAITING VERIFICATION
+Plan: 6 of 6 (all six have SUMMARYs)
+Status: Phase complete on disk — ready for `/gsd-verify-work 05`. ROADMAP stays `In Progress` until that runs; it is not hand-edited to Complete.
+Last activity: 2026-08-20 — Phase 05 closed on evidence (05-06)
 
 Progress: [███░░░░░░░] 30% (3 of 10 milestone phases)
 
@@ -66,6 +66,7 @@ Progress: [███░░░░░░░] 30% (3 of 10 milestone phases)
 | Phase 05 P03 | 9 min | 2 tasks | 2 files |
 | Phase 05 P04 | 11 min | 3 tasks | 2 files |
 | Phase 05 P05 | 8 min | 3 tasks | 2 files |
+| Phase 05 P06 | 2h 17min | 4 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -168,6 +169,11 @@ Recent decisions affecting current work:
 - [Phase 05]: The provider spawn injects driftVars only when the MCP runtime is attached, preserving the pre-conversion condition so no Caido token reaches an MCP-detached provider child (D-10)
 - [Phase 05]: writeTemp throws on an exhausted retry ladder rather than returning a path to a possibly-absent file; its attempt count surfaces as a NEW getDiagnostics field, mcpTempWriteAttempts
 - [Phase 05]: Phase 5 SC-1 amended to the shipped code and Phase 7 gains SC-7 as the structural owner of the surviving POSIX functions (D-01/D-02)
+- [Phase 05]: [05-06]: A published gate must be measured against the PRE-phase tree before it is trusted. V-5 returned its expected 2 on the pre-phase commit cd22833 — vacuous — and was corrected to a comment-stripped, quote-agnostic form expecting 1. V-6 was CLOSED rather than corrected, because 05-05 made the published value factually right. A gate that passes on the tree it exists to discriminate against proves nothing.
+- [Phase 05]: [05-06]: The first real windows-latest run was red for NEITHER candidate cause named in advance, and its two failures belonged to two different layers: extractHomeDir normalising with the platform-flavoured path.normalize (a production defect, dead on win32) and a POSIX-literal assertion against a deliberately host-flavoured helper (a test defect). Weakening the first would have hidden a real bug; fixing the code for the second would have broken correct Windows behaviour. Distinguishing them IS CI-03.
+- [Phase 05]: [05-06]: path.posix is NOT available under Caido LLRT — @caido/quickjs-types path.d.ts declares a flat surface whose only separator affordance is sep. Any platform-independent path decision must be plain string logic, following the platform.ts imports-nothing precedent. Reaching for an API the shipping runtime lacks is the same class of error as trusting a published type that omits a capability (Pitfall 7).
+- [Phase 05]: [05-06]: A cold pnpm store cache is NOT the worst case for the Windows leg. Measured: warm 91s vs cold 87s, so install is ~8s of a ~90s job and the cache is not the dominant term. The first draft of the timeout-minutes rationale asserted the opposite and was corrected in ci.yml rather than left standing. timeout-minutes is 6, ~4x the measured ~90s, with all three run URLs beside the value.
+- [Phase 05]: [05-06]: A human read is recorded WITH ITS PROVENANCE. V-21 has no command that returns it, so its two reads are labelled HUMAN READS and never gate results; and because the approval reached the executor through the orchestrating workflow rather than being observed first-hand, 05-REPORT.md section 7 says so. A relayed human read is still a human read but is a weaker record, and this phase does not round evidence upward.
 
 ### Pending Todos
 
@@ -207,8 +213,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-20T13:45:36.064Z
-Stopped at: Completed 05-05-PLAN.md
+Last session: 2026-08-20T18:13:25.377Z
+Stopped at: Completed 05-06-PLAN.md — Phase 5 complete
 Resume file: None
 
 **Live on the public remote: nothing of ours.** Plan 03-04 tore down all three `scratch/*` branches (`ci-proof-windows-probe`, `ci-proof-windows-probe-negative`, `ci-proof-windows-gate-negative`) locally and remotely. Asserted with a `test -z` discrimination over the captured glob (`scratch-glob-empty=0`) plus the full unfiltered listing, which now shows only `main` at `2d8cf16` and the pre-existing, unrelated `fix/security-hotfixes` at `0cd81f3`. `origin/main` was never pushed by this phase and is still `2d8cf16`; local `main` is 23 commits ahead and deliberately unpushed. **Re-verified 2026-08-13 (plan 03-05):** the remote still lists only `main` `2d8cf16` and the pre-existing `fix/security-hotfixes` `0cd81f3`, and all eight Phase 3 run records (4 probe + 4 `CI` control) still resolve with their recorded conclusions — which is what makes the URLs in `03-FINDINGS.md` valid citations after the branches were deleted. The probe **artifacts** do not survive: they expire 2026-09-12, which is why D-11 required the committed findings document.
