@@ -615,6 +615,54 @@ async function fileExists(p: string): Promise<boolean> {
   try { await stat(p); return true; } catch { return false; }
 }
 
+// Re-asserts 0o700 on a directory Drift is about to fill with token-bearing
+// files, and REPORTS whether the guarantee actually holds.
+//
+// Why this exists: `mkdir(dir, { recursive: true, mode: 0o700 })` does not throw
+// EEXIST on an existing directory and does NOT apply `mode` to it — the mode is
+// honoured only for directories mkdir actually creates. On Linux os.tmpdir()
+// defaults to the shared, world-writable /tmp, and the directory name is 80 bits
+// of `Math.random()` rather than a CSPRNG, so "nobody can pre-create it" is a
+// probability argument, not a guarantee. Requesting a mode and then asserting a
+// confidentiality property from it is claiming more than the code delivers.
+//
+// Returns the offending permission bits when it POSITIVELY MEASURED a directory
+// that grants group or other access, and `undefined` when the directory is
+// either fine or unmeasurable. "Could not tell" must never be reported as a
+// measurement — the same discipline runtime-probe.ts applies to the realpath
+// rung — because LLRT's stat is not guaranteed to carry a numeric `mode`.
+//
+// `chmod` is reached through the fs/promises NAMESPACE, never a named import: a
+// named import of an export Caido's LLRT does not provide is an ESM link error
+// that kills the entire plugin at load, while a namespace member read yields
+// `undefined` and degrades to the check below (the same reasoning as
+// `detectRealpathRung`).
+async function enforceOwnerOnlyDir(dir: string): Promise<number | undefined> {
+  const chmodFn = (
+    fsPromisesNs as unknown as {
+      chmod?: (p: string, mode: number) => Promise<void>;
+    }
+  ).chmod;
+  if (typeof chmodFn === "function") {
+    try {
+      await chmodFn(dir, 0o700);
+    } catch {
+      // Absent, unsupported (LLRT's set_mode is a no-op off unix), or the
+      // directory is not ours to chmod. The measurement below is what decides.
+    }
+  }
+
+  try {
+    const info = await stat(dir);
+    const mode = (info as unknown as { mode?: unknown }).mode;
+    if (typeof mode !== "number") return undefined;
+    const permissions = mode & 0o777;
+    return (permissions & 0o077) === 0 ? undefined : permissions;
+  } catch {
+    return undefined;
+  }
+}
+
 async function writeTemp(dir: string, name: string, content: string): Promise<string> {
   await mkdir(dir, { recursive: true, mode: 0o700 });
   const fp = path.join(dir, name);
@@ -2286,8 +2334,13 @@ async function startMcpServer(sdk: BackendSDK): Promise<Result<McpServerInfo>> {
   // Stage the MCP runtime under the resolved temp root rather than under the
   // plugin asset path - the Caido plugin path has spaces ("Application Support")
   // which breaks Claude Code's --mcp-config path parsing.
-  // 0o700 so other local users cannot read the token-bearing wrapper/config
-  // files written inside.
+  //
+  // 0o700 is REQUESTED here and ASSERTED below, because requesting it is not
+  // enough: mkdir(recursive) does not apply `mode` to a directory that already
+  // exists, so on a shared /tmp the "other local users cannot read the
+  // token-bearing wrapper/config files written inside" property holds only for
+  // a directory Drift itself created. enforceOwnerOnlyDir closes that gap and,
+  // where it cannot, says so instead of assuming.
   //
   // ALWAYS path.join, never template concatenation: LLRT's os.tmpdir() is
   // std::env::temp_dir() (GetTempPath2 on Windows, $TMPDIR on macOS) and can
@@ -2345,6 +2398,26 @@ async function startMcpServer(sdk: BackendSDK): Promise<Result<McpServerInfo>> {
     });
     await cleanupMcpRuntime(sdk, "error", message);
     return err(message);
+  }
+
+  // The 0o700 post-condition. Fails CLOSED: this directory is about to hold the
+  // Caido session token, so "it already existed and other users can read it" is
+  // not a warning, it is a reason not to write the token. Skipped on win32,
+  // which has no POSIX mode bits at all — Node synthesises 0o777 for directories
+  // there, so checking would fail closed on every Windows start (the same
+  // reasoning that keeps the `mode:` options themselves unconditional: they are
+  // a documented no-op off unix, whereas this ASSERTION is not).
+  //
+  // The message carries the octal mode but never the path: this string reaches
+  // mcpAuthMessage and therefore the downloadable support bundle, where a temp
+  // path would carry the user's account name (T-04-04).
+  if (probe.value.platform !== "win32") {
+    const insecureMode = await enforceOwnerOnlyDir(tempDir);
+    if (insecureMode !== undefined) {
+      const message = `Drift stopped starting the MCP server: its staging directory under the system temp root already existed with mode 0${insecureMode.toString(8)}, which grants access to other local users on this machine. That directory holds the Caido session token, so Drift will not write it there. Remove any leftover drift-mcp-* directory from your temp directory and press Start MCP again.`;
+      await cleanupMcpRuntime(sdk, "error", message);
+      return err(message);
+    }
   }
 
   await refreshProjectContext(sdk);
