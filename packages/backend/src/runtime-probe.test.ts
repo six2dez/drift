@@ -203,6 +203,127 @@ describe("buildProbeReport", () => {
     });
   });
 });
+// ── D-05's reported parentEnv row (RUN-02) ─────────────────────────────────
+//
+// Every case here injects the environment as a parameter, which is the whole
+// reason a Linux runner can prove a Windows-shaped `Path` block at all. The
+// row REPORTS and never GATES: the MCP server is spawned by an absolute node
+// path and mcp-server.mjs spawns nothing itself, so a thin or absent PATH
+// cannot break the Phase 5 health-check path (05-CONTEXT.md D-05, Phase 4 D-06).
+describe("buildProbeReport parentEnv row", () => {
+  it("reports not probed, never the digit 0, when no environment was supplied", () => {
+    const report = buildProbeReport(probeInput());
+    const row = capabilityNamed(report, "parentEnv");
+
+    expect(row.gating).toBe(false);
+    expect(row.ok).toBe(true);
+    expect(row.detail).toContain("not probed");
+
+    // "unavailable" is the module's standing marker for a measurement Drift
+    // never took. Rendering 0 here would be a confidently wrong integer.
+    expect(report.metrics["parentEnvKeyCount"]).toBe("unavailable");
+    expect(report.metrics["parentEnvPathEntryCount"]).toBe("unavailable");
+    expect(report.metrics["parentEnvKeyCount"]).not.toBe("0");
+    expect(report.metrics["parentEnvPathEntryCount"]).not.toBe("0");
+  });
+
+  it("counts keys and colon-separated PATH entries on a POSIX platform", () => {
+    const report = buildProbeReport(
+      probeInput({ parentEnv: { PATH: "/usr/bin:/bin", HOME: "/x" } }),
+    );
+
+    expect(report.metrics["parentEnvKeyCount"]).toBe("2");
+    expect(report.metrics["parentEnvPathEntryCount"]).toBe("2");
+  });
+
+  it("resolves the PATH key case-insensitively and splits on the semicolon on win32", () => {
+    // A Windows parent block spells it `Path`. Environment keys are
+    // case-insensitive there, so a case-sensitive lookup would report the
+    // variable absent on the one platform this release exists to fix.
+    const report = buildProbeReport(
+      probeInput({
+        rawPlatform: "win32",
+        normalizedPlatform: "win32",
+        parentEnv: { Path: "C:\\a;C:\\b;C:\\c" },
+      }),
+    );
+
+    expect(report.metrics["parentEnvPathEntryCount"]).toBe("3");
+  });
+
+  it("chooses the separator from the platform, not by guessing from the content", () => {
+    // A semicolon inside a POSIX PATH is one entry containing a semicolon, not
+    // two entries. Sniffing the content would invent a second one.
+    const report = buildProbeReport(
+      probeInput({ parentEnv: { PATH: "/usr/bin;/bin" } }),
+    );
+
+    expect(report.metrics["parentEnvPathEntryCount"]).toBe("1");
+  });
+
+  it("distinguishes an absent PATH variable from an environment it never probed", () => {
+    const report = buildProbeReport(probeInput({ parentEnv: { HOME: "/x" } }));
+    const row = capabilityNamed(report, "parentEnv");
+
+    expect(row.ok).toBe(true);
+    expect(row.detail).toContain("absent");
+    expect(report.metrics["parentEnvKeyCount"]).toBe("1");
+    expect(report.metrics["parentEnvPathEntryCount"]).toBe("absent");
+  });
+
+  it("reports the key count but not the PATH entry count when the platform is unknown", () => {
+    // The separator is a function of the platform. With no platform there is no
+    // separator, and a split would produce a confidently wrong integer.
+    const report = buildProbeReport(
+      probeInput({
+        rawPlatform: undefined,
+        normalizedPlatform: undefined,
+        parentEnv: { PATH: "/usr/bin:/bin" },
+      }),
+    );
+
+    expect(report.metrics["parentEnvKeyCount"]).toBe("1");
+    expect(report.metrics["parentEnvPathEntryCount"]).toBe("unavailable");
+  });
+
+  it("drops empty and whitespace-only PATH segments", () => {
+    expect(
+      buildProbeReport(probeInput({ parentEnv: { PATH: "/usr/bin::/bin" } }))
+        .metrics["parentEnvPathEntryCount"],
+    ).toBe("2");
+
+    expect(
+      buildProbeReport(
+        probeInput({ parentEnv: { PATH: "  /usr/bin :  : /bin " } }),
+      ).metrics["parentEnvPathEntryCount"],
+    ).toBe("2");
+
+    expect(
+      buildProbeReport(probeInput({ parentEnv: { PATH: "" } })).metrics[
+        "parentEnvPathEntryCount"
+      ],
+    ).toBe("0");
+  });
+
+  it("never emits an environment key name or value", () => {
+    const report = buildProbeReport(
+      probeInput({
+        parentEnv: {
+          DRIFT_FIXTURE_SENTINEL_KEY: "sentinel-value-9f3a",
+          PATH: "/usr/bin:/bin",
+        },
+      }),
+    );
+    const row = capabilityNamed(report, "parentEnv");
+
+    expect(row.detail).not.toContain("DRIFT_FIXTURE_SENTINEL_KEY");
+    expect(row.detail).not.toContain("sentinel-value-9f3a");
+    expect(row.detail).not.toContain("/usr/bin");
+    expect(Object.values(report.metrics).join(" ")).not.toContain(
+      "sentinel-value-9f3a",
+    );
+  });
+});
 
 describe("formatProbeReportFields", () => {
   it("flattens capabilities under a runtime prefix and passes version and metrics through", () => {
