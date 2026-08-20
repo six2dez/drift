@@ -2294,9 +2294,23 @@ async function startMcpServer(sdk: BackendSDK): Promise<Result<McpServerInfo>> {
   // return a path that already ends in a separator, while Node has stripped
   // trailing separators since v2.0.0. path.join normalises it; a template
   // literal would produce C:\...\Temp\/drift-mcp-x.
-  mcpTempDir = path.join(getTempRoot(probe.value), `drift-mcp-${genShortToken()}`);
+  //
+  // The path is captured in a `const` and the closure below uses THAT, never
+  // the module-level `let`. `mcpTempDir` is mutable module state, the ladder
+  // awaits for up to 1,500 ms between attempts, and Caido services other RPC
+  // handlers during that window: a concurrent stopMcpServer -> cleanupMcpRuntime
+  // sets it to undefined, and attempt N+1 would then call `mkdir(undefined)`.
+  // That throws a TypeError whose message carries no transient code, so the
+  // ladder aborts and the user is shown a "Write error: TypeError ..." line
+  // that is actively misleading about what failed. The `!` non-null assertion
+  // this replaces hid the possibility from the type checker.
+  const tempDir = path.join(
+    getTempRoot(probe.value),
+    `drift-mcp-${genShortToken()}`,
+  );
+  mcpTempDir = tempDir;
 
-  const mcpScriptLocal = path.join(mcpTempDir, "mcp-server.mjs");
+  const mcpScriptLocal = path.join(tempDir, "mcp-server.mjs");
 
   // D-07: the probe WRAPS THE REAL FIRST WRITE, so RUN-04's retry ladder and
   // RUN-05's assertion are one mechanism. There is NO separate canary file: a
@@ -2312,7 +2326,7 @@ async function startMcpServer(sdk: BackendSDK): Promise<Result<McpServerInfo>> {
   // change while risking a POSIX regression (T-04-30).
   const written = await withFsRetry(
     async () => {
-      await mkdir(mcpTempDir!, { recursive: true, mode: 0o700 });
+      await mkdir(tempDir, { recursive: true, mode: 0o700 });
       await writeFile(mcpScriptLocal, await readFile(mcpScript, "utf-8"));
     },
     {
