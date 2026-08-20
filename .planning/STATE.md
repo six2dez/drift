@@ -4,16 +4,16 @@ milestone: v1.0
 current_phase: 05
 current_phase_name: Kill Shell Wrappers
 status: executing
-stopped_at: Completed 05-01-PLAN.md
-last_updated: "2026-08-20T12:42:33.155Z"
+stopped_at: Completed 05-02-PLAN.md
+last_updated: "2026-08-20T12:56:50.518Z"
 last_activity: 2026-08-20
 last_activity_desc: Phase 05 execution started
-state_head: 1cc9a08b663c4392543392c5a7dda86aa93c432c
+state_head: 23892decc734b074d399cec7c7c49a1fef2bd5e4
 progress:
   total_phases: 10
   completed_phases: 3
   total_plans: 28
-  completed_plans: 23
+  completed_plans: 24
 milestone_name: milestone
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-06-26)
 ## Current Position
 
 Phase: 05 (Kill Shell Wrappers) — EXECUTING
-Plan: 2 of 6
+Plan: 3 of 6
 Status: Ready to execute
 Last activity: 2026-08-20 — Phase 05 execution started
 
@@ -62,6 +62,7 @@ Progress: [███░░░░░░░] 30% (3 of 10 milestone phases)
 | Plan | Duration | Tasks | Files |
 |------|----------|-------|-------|
 | Phase 05 P01 | 9 min | 3 tasks | 3 files |
+| Phase 05 P02 | 8 min | 3 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -149,6 +150,10 @@ Recent decisions affecting current work:
 - [Phase 04]: [04-11]: The RUN-05 legibility approval is recorded as a HUMAN READ dated 2026-08-20, never as a machine-verified result. It is the one criterion in the phase no gate can reach, which is the whole reason bucket N exists; recording it as a result would erase the distinction that bucket draws.
 - [Phase 04]: [04-11]: A continuation agent asked to record a message verbatim RE-RENDERS it rather than transcribing the prior agent's paste. Doing so here caught a vacuous secret-scan pattern in the inherited step-3 result — the profile-value grep was written with a shell-quoted double backslash and could never have matched anything. A zero from an unproven scanner is not evidence; prove the scanner fires on a seeded positive first.
 - [Phase 04]: [04-11]: SC-4's supporting enumeration was wrong in three Phase 4 artifacts and is corrected: MetaSDK (@caido/sdk-backend@0.55.3, src/typing.d.ts:164-196) declares SIX members — id, path, assetsPath, db, version, updateAvailable — not three. version() is the PLUGIN version, which driftVersion already reports, so the substantive claim stands: there is no CAIDO version anywhere in the SDK surface and D-08's block is a substitute, not an omission.
+- [Phase 05]: [05-02]: Reducing the root build script to a bare caido-dev build was gated on a BEFORE/AFTER zip parity measurement taken on this checkout (entry names, per-entry byte lengths, and SHA-256 of every extracted file), not on the research measurement — release.yml signs those bytes, so an unmeasured packaging change is a supply-chain change. Tier 0: parity held on the first measurement.
+- [Phase 05]: [05-02]: The windows-latest leg is BLOCKING from day one (no continue-on-error, no job-level if:) and is a sibling job rather than a matrix entry on verify, because the ubuntu leg runs four Node versions and this one runs a single Node 20.
+- [Phase 05]: [05-02]: The D-10 secret gate moved into ci.yml WITHOUT the probe copy test -f pre-check, so a deleted or renamed scan target routes into the third arm through grep status 2 — which is what makes the Phase 9 deletion of windows-llrt-probe.yml fail loudly instead of silently narrowing the scan. Demonstrated at all three statuses (1 clean / 0 seeded / 2 missing), never assumed.
+- [Phase 05]: [05-02]: No CI result is claimed by this plan. It authors the leg and proves everything provable locally on macOS; plan 05-06 runs it and records the run URL, per-step conclusions and the log line proving the gate mechanism. CI-01 and CI-03 stay Pending (requirements ready-ids returned 0/3 — all three are also declared by 05-06).
 
 ### Pending Todos
 
@@ -188,8 +193,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-20T12:42:33.104Z
-Stopped at: Completed 05-01-PLAN.md
+Last session: 2026-08-20T12:55:44.128Z
+Stopped at: Completed 05-02-PLAN.md
 Resume file: None
 
 **Live on the public remote: nothing of ours.** Plan 03-04 tore down all three `scratch/*` branches (`ci-proof-windows-probe`, `ci-proof-windows-probe-negative`, `ci-proof-windows-gate-negative`) locally and remotely. Asserted with a `test -z` discrimination over the captured glob (`scratch-glob-empty=0`) plus the full unfiltered listing, which now shows only `main` at `2d8cf16` and the pre-existing, unrelated `fix/security-hotfixes` at `0cd81f3`. `origin/main` was never pushed by this phase and is still `2d8cf16`; local `main` is 23 commits ahead and deliberately unpushed. **Re-verified 2026-08-13 (plan 03-05):** the remote still lists only `main` `2d8cf16` and the pre-existing `fix/security-hotfixes` `0cd81f3`, and all eight Phase 3 run records (4 probe + 4 `CI` control) still resolve with their recorded conclusions — which is what makes the URLs in `03-FINDINGS.md` valid citations after the branches were deleted. The probe **artifacts** do not survive: they expire 2026-09-12, which is why D-11 required the committed findings document.
