@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 0
+open_count: 1
 waived_count: 0
 fixed_count: 7
-total_count: 7
-last_updated: 2026-08-21T11:31:37.409Z
+total_count: 8
+last_updated: 2026-08-21T11:55:43.210Z
 ---
 
 # Broken Windows Ledger
@@ -22,6 +22,7 @@ last_updated: 2026-08-21T11:31:37.409Z
 | 5 | 05 | unrun-verify | packages/backend/src/index.ts |  | 05-05's entire change set is unproven by any executing test: index.ts is not importable under vitest. The static gates recorded in 05-05-SUMMARY are the whole evidence base (V-21 ceiling). Owned by 05-06's human code review. | fixed |  | 2026-08-20T13:41:48.292Z | 2026-08-20T18:09:46.155Z |
 | 6 | 06 | deviation | packages/backend/src/command-resolution.test.ts | 90 | windows-latest CI leg fails two node-candidate assertions until 06-02 T-06-06 lands: getNodeExecutableCandidates now spells paths through joinPath's temporary POSIX-arm pass-through while the test expectation is host-flavoured path.join. POSIX green; Windows-only, test-expectation mismatch, no runtime break. | fixed |  | 2026-08-21T10:57:32.676Z | 2026-08-21T11:15:49.095Z |
 | 7 | 06 | unmet-truth | packages/backend/src/platform.test.ts | 518 | joinPath CMP-01 POSIX byte-identity uses the HOST path module as its oracle, so its 25 assertions are red on the blocking windows-latest leg: joinPath({platform:'linux'}) spells with '/' while path.join on win32 spells with '\\'. MEASURED with a path->path.win32 alias shim (25 failures, all I/O-free and therefore faithful). Plan 06-02 was forbidden from editing the CMP-01 blocks, so this is left open. Fix is one token: use path.posix.join as the oracle, which is byte-identical on POSIX and correct on win32. | fixed |  | 2026-08-21T11:15:49.193Z | 2026-08-21T11:31:37.409Z |
+| 8 | 06 | unrun-verify | packages/backend/src/index.ts |  | WIN32_PATH_SEARCH_TIMEOUT_MS = 5000 is a headroom estimate, not a measurement; closes on the Phase 9/10 real-machine report | open |  | 2026-08-21T11:55:43.210Z |  |
 
 ````json
 [
@@ -108,10 +109,21 @@ last_updated: 2026-08-21T11:31:37.409Z
     "reason": "",
     "recorded_at": "2026-08-21T11:15:49.193Z",
     "resolved_at": "2026-08-21T11:31:37.409Z"
+  },
+  {
+    "id": 8,
+    "kind": "unrun-verify",
+    "phase": "06",
+    "file": "packages/backend/src/index.ts",
+    "line": null,
+    "description": "WIN32_PATH_SEARCH_TIMEOUT_MS = 5000 is a headroom estimate, not a measurement; closes on the Phase 9/10 real-machine report",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-08-21T11:55:43.210Z",
+    "resolved_at": null
   }
 ]
 ````
-
 ## Resolution notes
 
 ### Entry 7 — closed by plan 06-03 (commit `9effeec`)
