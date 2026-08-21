@@ -161,8 +161,49 @@ function err<T>(error: string): Result<T> {
   return { kind: "Error", error };
 }
 
-const NODE_EXECUTABLE_ERROR =
-  "Drift could not locate a Node.js executable to launch the MCP server. Restart Caido from an environment where Node.js is available.";
+// The Node-not-found message: three sentence parts and one platform-armed
+// renderer, where a single constant used to sit.
+//
+// Why it is centralised AND armed, in the sibling constant's style below: this
+// is the EXACT message the original Windows reporter would have read when Drift
+// failed to start its MCP server. Today's second sentence tells the user to
+// restart Caido "from an environment where Node.js is available" — shell-shaped
+// framing that does not map to how a Windows user launches this application. A
+// phase whose entire subject is Node resolution on Windows, shipping a
+// shell-shaped Node error to the platform it is fixing, would put the wrong sign
+// on the fix. macOS and Linux see the string they see today, both sentences
+// unchanged (CMP-01).
+//
+// Listing `lastNodeSearchCandidates` — the roughly fifteen paths the resolver
+// actually probed — in this banner was CONSIDERED and REJECTED (D-16). It is far
+// too much text for an error banner, and it carries the user's home-directory
+// paths; surfacing it is the diagnostics work in UX-04 / Phase 10, which reads
+// that variable through getDiagnostics instead. Recorded here so the option is
+// visibly rejected rather than silently forgotten.
+//
+// The Windows arm stops at the install ROUTE. Fuller install and prerequisite
+// guidance is UX-03 / Phase 10 and is deliberately not pulled forward.
+const NODE_NOT_FOUND_SENTENCE =
+  "Drift could not locate a Node.js executable to launch the MCP server.";
+const NODE_REMEDY_POSIX =
+  "Restart Caido from an environment where Node.js is available.";
+// The winget package identifier is [VERIFIED: microsoft/winget-pkgs], whose
+// manifests/o/OpenJS/NodeJS/ directory carries an LTS entry alongside the
+// per-version ones.
+const NODE_REMEDY_WIN32 =
+  "Install the Node.js LTS build from nodejs.org, or run `winget install OpenJS.NodeJS.LTS`, then restart Caido.";
+function getNodeExecutableError(platform: Platform | undefined): string {
+  if (platform === "win32") {
+    return `${NODE_NOT_FOUND_SENTENCE} ${NODE_REMEDY_WIN32}`;
+  }
+  if (platform === undefined) {
+    // Union-when-unknown, the same rule the absolute-path check, the
+    // home-directory reader, the home-directory extractor and the provider
+    // install hint all apply: pre-probe, name both routes rather than guess one.
+    return `${NODE_NOT_FOUND_SENTENCE} On macOS or Linux: ${NODE_REMEDY_POSIX} On Windows: ${NODE_REMEDY_WIN32}`;
+  }
+  return `${NODE_NOT_FOUND_SENTENCE} ${NODE_REMEDY_POSIX}`;
+}
 // The one no-token sentence, previously spelled out at four call sites. It is a
 // user-facing string that requireMcpServerSpec now produces, so the sites that
 // used to compose it read it from here instead of drifting apart.
@@ -2703,7 +2744,8 @@ async function requireNodeExecutable(): Promise<Result<string>> {
   // it through the shared cache TIGHTENS an existing cache into a bounded one —
   // it does not add caching where there was none.
   const nodeExecutable = await getCachedNodeExecutable();
-  if (nodeExecutable === undefined) return err(NODE_EXECUTABLE_ERROR);
+  if (nodeExecutable === undefined)
+    return err(getNodeExecutableError(host?.platform));
   return ok(nodeExecutable);
 }
 
@@ -3017,7 +3059,8 @@ async function startMcpServer(sdk: BackendSDK): Promise<Result<McpServerInfo>> {
 
   // The explicit requireNodeExecutable() call that used to sit here is gone:
   // requireMcpServerSpec resolves Node itself and returns the same
-  // NODE_EXECUTABLE_ERROR through the same cleanup-and-err shape below.
+  // getNodeExecutableError() message through the same cleanup-and-err shape
+  // below.
   if ((await writeMcpContextFile()) === undefined) {
     const message = "Failed to create MCP context file.";
     await cleanupMcpRuntime(sdk, "error", message);
@@ -3241,9 +3284,10 @@ async function sendCliMessage(
           // lifetime and the same finalize() cleanup.
           //
           // requireMcpServerSpec already produces both user-facing failures this
-          // branch used to compose by hand (the no-token sentence and
-          // NODE_EXECUTABLE_ERROR), so its error is routed through the existing
-          // setSessionState + err shape rather than being restated.
+          // branch used to compose by hand (the no-token sentence and the
+          // Node-not-found message getNodeExecutableError() builds), so its
+          // error is routed through the existing setSessionState + err shape
+          // rather than being restated.
           const spec = await requireMcpServerSpec({
             toolPolicy,
             activityFilePath: runtimeFiles?.activityFilePath,
