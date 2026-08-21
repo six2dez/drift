@@ -114,6 +114,7 @@ describe("command resolution helpers", () => {
       pathResolution: "/opt/homebrew/bin/claude",
       homeDirs: [homeDir],
       roots: {},
+      nvmWindowsInstalled: false,
     });
 
     // Platform-injected expectations, for the reason spelled out in the version
@@ -318,6 +319,7 @@ describe("command resolution helpers", () => {
       pathResolution: "/opt/homebrew/bin/node",
       homeDirs: [homeDir],
       roots: {},
+      nvmWindowsInstalled: false,
       absoluteProviderCommands: [path.join(providerDir, "claude")],
     });
 
@@ -330,6 +332,12 @@ describe("command resolution helpers", () => {
 
 // The six named roots as a real Windows environment would supply them. Shared by
 // every win32 block below so a root spelling cannot drift between assertions.
+//
+// `programData` is still POPULATED here even though CR-02 dropped its only row,
+// and that is the point: a root that is present and still emits nothing is a
+// stronger assertion than an absent root, because it distinguishes "the row was
+// removed" from "the fixture stopped supplying the variable". The dedicated
+// no-ProgramData-row test below is written against this fixture.
 const WIN32_ROOTS = {
   userProfile: "C:\\Users\\six",
   appData: "C:\\Users\\six\\AppData\\Roaming",
@@ -353,6 +361,7 @@ describe("buildCommandCandidatePaths (win32 named roots)", () => {
         pathResolution: undefined,
         homeDirs: [],
         roots: { appData: "C:\\Users\\six\\AppData\\Roaming" },
+        nvmWindowsInstalled: true,
         versionCandidatesByHomeDir: {},
       }),
     ).toEqual([
@@ -360,8 +369,10 @@ describe("buildCommandCandidatePaths (win32 named roots)", () => {
       "C:\\Users\\six\\AppData\\Roaming\\npm\\claude.cmd",
       "C:\\Users\\six\\AppData\\Roaming\\npm\\claude.bat",
       "C:\\Users\\six\\AppData\\Roaming\\npm\\claude",
-      // The one row that depends on no environment variable at all: the
-      // nvm-windows installer's own symlink default (catalogue row P-06).
+      // The one row that depends on no NAMED ROOT at all: the nvm-windows
+      // installer's own symlink default (catalogue row P-06). It depends
+      // instead on nvmWindowsInstalled, which is why this case sets it — see
+      // the CR-02 block below for the false arm.
       "C:\\nvm4w\\nodejs\\claude.exe",
       "C:\\nvm4w\\nodejs\\claude.cmd",
       "C:\\nvm4w\\nodejs\\claude.bat",
@@ -382,6 +393,7 @@ describe("buildCommandCandidatePaths (win32 named roots)", () => {
         pathResolution: undefined,
         homeDirs: [],
         roots: WIN32_ROOTS,
+        nvmWindowsInstalled: true,
         versionCandidatesByHomeDir: {},
       }),
     ).toEqual([
@@ -420,12 +432,12 @@ describe("buildCommandCandidatePaths (win32 named roots)", () => {
       "C:\\Users\\six\\scoop\\shims\\claude.cmd",
       "C:\\Users\\six\\scoop\\shims\\claude.bat",
       "C:\\Users\\six\\scoop\\shims\\claude",
-      // P-18 scoop, machine-wide.
-      "C:\\ProgramData\\scoop\\shims\\claude.exe",
-      "C:\\ProgramData\\scoop\\shims\\claude.cmd",
-      "C:\\ProgramData\\scoop\\shims\\claude.bat",
-      "C:\\ProgramData\\scoop\\shims\\claude",
-      // P-06 nvm-windows symlink default.
+      // P-18 scoop machine-wide (%ProgramData%\scoop\shims) is DELIBERATELY
+      // ABSENT — dropped by CR-02 as non-administrator-writable. WIN32_ROOTS
+      // still supplies programData, so this whole-array toEqual is what fails
+      // if the row is ever re-added.
+      // P-06 nvm-windows symlink default, emitted because nvmWindowsInstalled
+      // is true above.
       "C:\\nvm4w\\nodejs\\claude.exe",
       "C:\\nvm4w\\nodejs\\claude.cmd",
       "C:\\nvm4w\\nodejs\\claude.bat",
@@ -433,7 +445,10 @@ describe("buildCommandCandidatePaths (win32 named roots)", () => {
     ]);
   });
 
-  it("emits 9 locations x 4 ladder spellings when every root is populated", () => {
+  it("emits 8 locations x 4 ladder spellings when every root is populated", () => {
+    // Was 9 x 4 = 36 before CR-02 dropped the machine-wide scoop row. The
+    // change is deliberate, not an assertion weakened to make a test pass: one
+    // whole location left the catalogue.
     expect(
       buildCommandCandidatePaths({
         platform: "win32",
@@ -441,19 +456,20 @@ describe("buildCommandCandidatePaths (win32 named roots)", () => {
         pathResolution: undefined,
         homeDirs: [],
         roots: WIN32_ROOTS,
+        nvmWindowsInstalled: true,
         versionCandidatesByHomeDir: {},
       }),
-    ).toHaveLength(36);
+    ).toHaveLength(32);
   });
 
   it("emits only the rootless nvm-windows symlink row when no named root is set", () => {
     // The 06-01 shape of this test asserted an empty array. That was correct
     // when %APPDATA%\npm was the only row: every row then depended on an env
     // variable. The sourced catalogue adds exactly one row that depends on NO
-    // variable — the nvm-windows installer's own symlink default — so the
-    // no-roots answer is that row's ladder and nothing else. Every OTHER row
-    // still vanishes with its root, which is the T-06-T02 mitigation and is what
-    // the surrounding assertions pin.
+    // NAMED ROOT — the nvm-windows installer's own symlink default — so with
+    // nvm-windows installed the no-roots answer is that row's ladder and
+    // nothing else. Every OTHER row still vanishes with its root, which is the
+    // T-06-T02 mitigation and is what the surrounding assertions pin.
     expect(
       buildCommandCandidatePaths({
         platform: "win32",
@@ -461,6 +477,7 @@ describe("buildCommandCandidatePaths (win32 named roots)", () => {
         pathResolution: undefined,
         homeDirs: [],
         roots: {},
+        nvmWindowsInstalled: true,
         versionCandidatesByHomeDir: {},
       }),
     ).toEqual([
@@ -479,6 +496,7 @@ describe("buildCommandCandidatePaths (win32 named roots)", () => {
         pathResolution: undefined,
         homeDirs: [],
         roots: WIN32_ROOTS,
+        nvmWindowsInstalled: true,
         versionCandidatesByHomeDir: {},
       }),
     ).toEqual([
@@ -489,9 +507,106 @@ describe("buildCommandCandidatePaths (win32 named roots)", () => {
       "C:\\Users\\six\\.pnpm\\claude.CMD",
       "C:\\Users\\six\\.bun\\bin\\claude.CMD",
       "C:\\Users\\six\\scoop\\shims\\claude.CMD",
-      "C:\\ProgramData\\scoop\\shims\\claude.CMD",
       "C:\\nvm4w\\nodejs\\claude.CMD",
     ]);
+  });
+});
+
+// CR-02 — the two non-administrator-writable roots, asserted as ABSENT rather
+// than merely not mentioned.
+//
+// Both rows are directories a non-administrator can create on default Windows
+// ACLs (Authenticated Users hold create-subdirectory on C:\ProgramData;
+// BUILTIN\Users hold create-folder on C:\), and a binary resolved from either
+// is spawned with CAIDO_TOKEN in its environment. The catalogue's other rows
+// are all in the user's own trust domain or admin-only. These tests are the
+// regression fence: re-adding either row turns one of them red.
+describe("buildCommandCandidatePaths (CR-02 non-admin-writable roots)", () => {
+  it("emits no %ProgramData% row even when the root IS supplied", () => {
+    const candidates = buildCommandCandidatePaths({
+      platform: "win32",
+      command: "claude",
+      pathResolution: undefined,
+      homeDirs: [],
+      roots: WIN32_ROOTS,
+      nvmWindowsInstalled: true,
+      versionCandidatesByHomeDir: {},
+    });
+
+    // Not `not.toContain` of one spelling: the whole root is gone, so no
+    // candidate may mention it under ANY suffix a later row might invent.
+    expect(
+      candidates.filter((candidate) => candidate.includes("ProgramData")),
+    ).toEqual([]);
+    // The per-USER scoop row is untouched — it lives under USERPROFILE, which
+    // is the user's own trust domain. Dropping it too would have been a real
+    // coverage loss for no security gain.
+    expect(candidates).toContain("C:\\Users\\six\\scoop\\shims\\claude.exe");
+  });
+
+  it("omits the rootless nvm4w literal entirely when nvm-windows is not installed", () => {
+    const candidates = buildCommandCandidatePaths({
+      platform: "win32",
+      command: "claude",
+      pathResolution: undefined,
+      homeDirs: [],
+      roots: WIN32_ROOTS,
+      nvmWindowsInstalled: false,
+      versionCandidatesByHomeDir: {},
+    });
+
+    expect(
+      candidates.filter((candidate) => candidate.includes("nvm4w")),
+    ).toEqual([]);
+    // Every other row is unaffected: the gate is on the one drive-qualified
+    // literal, not on the Windows arm as a whole.
+    expect(candidates).toContain(
+      "C:\\Users\\six\\AppData\\Roaming\\npm\\claude.exe",
+    );
+  });
+
+  it("emits NOTHING on win32 when no root is set and nvm-windows is absent", () => {
+    // The T-06-T02 invariant restored to its original, strongest form: with no
+    // environment to build from, the win32 arm emits no candidate at all —
+    // never a path with an empty prefix, and now never a drive-qualified
+    // literal either.
+    expect(
+      buildCommandCandidatePaths({
+        platform: "win32",
+        command: "claude",
+        pathResolution: undefined,
+        homeDirs: [],
+        roots: {},
+        nvmWindowsInstalled: false,
+        versionCandidatesByHomeDir: {},
+      }),
+    ).toEqual([]);
+  });
+
+  it("omits the nvm4w literal for node too, on both of its emission sites", () => {
+    // The node builder emits the literal TWICE — once ahead of the shared
+    // table for node specifically, once through the table itself. A gate on
+    // only one site would leave the row reachable through the other, so this
+    // asserts the union is empty rather than counting occurrences.
+    const candidates = buildNodeCandidatePaths({
+      platform: "win32",
+      execPath: undefined,
+      pathResolution: undefined,
+      homeDirs: [],
+      roots: WIN32_ROOTS,
+      nvmWindowsInstalled: false,
+      providerAdjacentDirs: [],
+      versionCandidatesByHomeDir: {},
+    });
+
+    expect(
+      candidates.filter((candidate) => candidate.includes("nvm4w")),
+    ).toEqual([]);
+    expect(
+      candidates.filter((candidate) => candidate.includes("ProgramData")),
+    ).toEqual([]);
+    // The measured P-02 row is still there — this gate costs no real coverage.
+    expect(candidates).toContain("C:\\Program Files\\nodejs\\node.exe");
   });
 });
 
@@ -506,6 +621,7 @@ describe("buildCommandCandidatePaths (win32 version-manager walk)", () => {
     pathResolution: undefined,
     homeDirs: [],
     roots: WIN32_ROOTS,
+    nvmWindowsInstalled: true,
     versionCandidatesByHomeDir: {},
   };
 
@@ -570,6 +686,7 @@ describe("buildCommandCandidatePaths (win32 version-manager walk)", () => {
       pathResolution: undefined,
       homeDirs: ["/home/six"],
       roots: {},
+      nvmWindowsInstalled: false,
       versionCandidatesByHomeDir: {
         "/home/six": [
           "/home/six/.fnm/node-versions/v20.5.0/installation/bin/claude",
@@ -630,6 +747,7 @@ describe("buildCommandCandidatePaths (win32 version-manager walk)", () => {
       pathResolution: undefined,
       homeDirs: ["/home/six"],
       roots: {},
+      nvmWindowsInstalled: false,
       versionCandidatesByHomeDir: { "/home/six": posixVersions },
     });
 
@@ -649,15 +767,19 @@ describe("buildCommandCandidatePaths (win32 version-manager walk)", () => {
       },
     });
 
-    const scoopGlobal = candidates.indexOf(
-      "C:\\ProgramData\\scoop\\shims\\claude.exe",
+    // The LAST fixed location, which is now per-user scoop: the machine-wide
+    // scoop row that used to anchor this assertion was dropped by CR-02. The
+    // ordering claim is unchanged — fixed locations, then version rows, then
+    // the rootless literal — only the anchor moved.
+    const scoopUser = candidates.indexOf(
+      "C:\\Users\\six\\scoop\\shims\\claude.exe",
     );
     const nvmVersion = candidates.indexOf(
       "C:\\Users\\six\\AppData\\Local\\nvm\\v22.1.0\\claude.exe",
     );
     const literal = candidates.indexOf("C:\\nvm4w\\nodejs\\claude.exe");
-    expect(scoopGlobal).toBeGreaterThanOrEqual(0);
-    expect(nvmVersion).toBeGreaterThan(scoopGlobal);
+    expect(scoopUser).toBeGreaterThanOrEqual(0);
+    expect(nvmVersion).toBeGreaterThan(scoopUser);
     expect(literal).toBeGreaterThan(nvmVersion);
   });
 });
@@ -699,6 +821,11 @@ const cmp01PosixInput = {
   // list twice is pushUniqueCandidate's dedup asserted in passing.
   pathResolution: "/opt/homebrew/bin/claude",
   homeDirs: ["/home/six"],
+  // The ordinary POSIX answer: no nvm-windows environment on a Linux or macOS
+  // host. The CR-02 gate's own CMP-01 case — the same input with the gate ON,
+  // which a WSLENV-forwarding host can genuinely produce — is asserted at the
+  // end of this block.
+  nvmWindowsInstalled: false,
   versionCandidatesByHomeDir: {
     "/home/six": ["/home/six/.nvm/versions/node/v22.1.0/bin/claude"],
   },
@@ -764,6 +891,25 @@ describe("buildCommandCandidatePaths CMP-01 POSIX order", () => {
       }),
     ).toEqual(CMP_01_POSIX_CANDIDATES);
   });
+
+  it("is byte-identical on POSIX even with the CR-02 gate switched ON", () => {
+    // Not hypothetical: a WSL2 host with WSLENV forwarding can export
+    // NVM_HOME/NVM_SYMLINK into a Linux process, so isNvmWindowsInstalled can
+    // legitimately answer true on a POSIX platform. The gate must therefore be
+    // a NARROWING of the win32 arm and never a widening of the POSIX one — on
+    // linux/darwin the win32 arm is not entered at all, and pre-probe the
+    // rootless literal stays behind the literal "win32" test it always had.
+    for (const platform of ["linux", "darwin", undefined] as const) {
+      expect(
+        buildCommandCandidatePaths({
+          ...cmp01PosixInput,
+          platform,
+          nvmWindowsInstalled: true,
+          roots: {},
+        }),
+      ).toEqual(CMP_01_POSIX_CANDIDATES);
+    }
+  });
 });
 
 // ── buildNodeCandidatePaths ────────────────────────────────────────────────
@@ -784,6 +930,7 @@ describe("buildNodeCandidatePaths (win32)", () => {
           programFiles: "C:\\Program Files",
           programFilesX86: "C:\\Program Files (x86)",
         },
+        nvmWindowsInstalled: true,
         providerAdjacentDirs: ["C:\\Users\\six\\.local\\bin"],
         versionCandidatesByHomeDir: {},
       }),
@@ -824,6 +971,7 @@ describe("buildNodeCandidatePaths (win32)", () => {
       pathResolution: undefined,
       homeDirs: [],
       roots: WIN32_ROOTS,
+      nvmWindowsInstalled: true,
       providerAdjacentDirs: [],
       versionCandidatesByHomeDir: {},
       windowsVersionDirs: {
@@ -852,6 +1000,7 @@ describe("buildNodeCandidatePaths (win32)", () => {
       pathResolution: undefined,
       homeDirs: [],
       roots: {},
+      nvmWindowsInstalled: false,
       providerAdjacentDirs: ["C:\\Users\\six\\.local\\bin"],
       versionCandidatesByHomeDir: {},
     }).filter((candidate) => candidate.startsWith("C:\\Users\\six\\.local\\bin"));
@@ -863,6 +1012,7 @@ describe("buildNodeCandidatePaths (win32)", () => {
       pathResolution: undefined,
       homeDirs: [],
       roots: {},
+      nvmWindowsInstalled: false,
       providerAdjacentDirs: ["/opt/providers/bin"],
       versionCandidatesByHomeDir: {},
     }).filter((candidate) => candidate.startsWith("/opt/providers/bin"));
@@ -881,6 +1031,7 @@ describe("buildNodeCandidatePaths (win32)", () => {
         localAppData: "C:\\Users\\six\\AppData\\Local",
         programData: "C:\\ProgramData",
       },
+      nvmWindowsInstalled: true,
       providerAdjacentDirs: [],
       versionCandidatesByHomeDir: {},
     });
@@ -916,6 +1067,7 @@ describe("buildNodeCandidatePaths CMP-01 POSIX order", () => {
     pathResolution: "/opt/homebrew/bin/node",
     homeDirs: ["/home/six"],
     roots: {},
+    nvmWindowsInstalled: false,
     providerAdjacentDirs: ["/opt/providers/bin"],
     versionCandidatesByHomeDir: {
       "/home/six": ["/home/six/.nvm/versions/node/v22.1.0/bin/node"],

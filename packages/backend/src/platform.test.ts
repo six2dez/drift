@@ -9,6 +9,7 @@ import {
   getWhichCommand,
   getWindowsNamedRoots,
   isAbsolutePath,
+  isNvmWindowsInstalled,
   joinPath,
   normalizePlatform,
   rankPathSearchHits,
@@ -695,6 +696,63 @@ describe("getWindowsNamedRoots", () => {
   it("treats a whitespace-only value as absent rather than as an empty prefix", () => {
     const roots = getWindowsNamedRoots({ env: { APPDATA: "   ", USERPROFILE: "" } });
     expect(Object.keys(roots)).toEqual([]);
+  });
+});
+
+// CR-02. The gate on the one drive-qualified literal in the candidate
+// catalogue, C:\nvm4w\nodejs. C:\ grants BUILTIN\Users create-folder rights,
+// so that directory is creatable by a non-administrator on a machine where
+// nvm-windows was never installed — and a binary resolved from it is spawned
+// with CAIDO_TOKEN in its environment. The signal this function reads is the
+// nvm-windows installer's own environment contract (nvm.iss writes NVM_HOME and
+// NVM_SYMLINK), so a real nvm-windows user keeps the coverage and a bare
+// machine loses the row.
+//
+// Pure and env-INJECTED, like every other helper in this file: the answer is
+// assertable from literal inputs on the Linux runner, and the candidate builders
+// it feeds never read process.env themselves (D-10 / SC-5).
+describe("isNvmWindowsInstalled", () => {
+  it("answers false for an empty environment", () => {
+    expect(isNvmWindowsInstalled({ env: {} })).toBe(false);
+  });
+
+  it("answers true when NVM_HOME is set", () => {
+    expect(
+      isNvmWindowsInstalled({ env: { NVM_HOME: "C:\\Users\\six\\AppData\\Local\\nvm" } }),
+    ).toBe(true);
+  });
+
+  it("answers true when only NVM_SYMLINK is set", () => {
+    expect(
+      isNvmWindowsInstalled({ env: { NVM_SYMLINK: "C:\\nvm4w\\nodejs" } }),
+    ).toBe(true);
+  });
+
+  it("accepts the lowercase spelling of either name", () => {
+    expect(isNvmWindowsInstalled({ env: { nvm_home: "C:\\nvm" } })).toBe(true);
+    expect(isNvmWindowsInstalled({ env: { nvm_symlink: "C:\\nvm4w\\nodejs" } })).toBe(
+      true,
+    );
+  });
+
+  it("treats an empty or whitespace-only value as ABSENT", () => {
+    // The same present-but-empty rule getWindowsNamedRoots applies. A declared
+    // but unset variable must not switch a non-admin-writable row back on.
+    expect(isNvmWindowsInstalled({ env: { NVM_HOME: "", NVM_SYMLINK: "   " } })).toBe(
+      false,
+    );
+  });
+
+  it("ignores unrelated variables, including a same-prefix decoy", () => {
+    expect(
+      isNvmWindowsInstalled({
+        env: {
+          USERPROFILE: "C:\\Users\\six",
+          NVM_DIR: "/home/six/.nvm",
+          NVM_HOME_DIR: "C:\\nope",
+        },
+      }),
+    ).toBe(false);
   });
 });
 

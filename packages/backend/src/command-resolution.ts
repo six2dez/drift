@@ -435,6 +435,7 @@ function buildWindowsInstallLocationCandidates(input: {
   roots: WindowsNamedRoots;
   windowsVersionDirs: WindowsVersionDirs | undefined;
   emitRootlessLiteral: boolean;
+  nvmWindowsInstalled: boolean;
 }): string[] {
   const candidates: string[] = [];
   // Both the separator and the extension ladder are pinned to the literal
@@ -502,6 +503,38 @@ function buildWindowsInstallLocationCandidates(input: {
   //   * user-profile .volta on win32 — the POSIX analogy, unsourced for
   //     Windows. Volta's Windows home is under local application data, which
   //     is the row actually emitted below.
+  //   * machine-wide scoop at %ProgramData%\scoop\shims (P-18) — SOURCED, and
+  //     dropped anyway. See the SECURITY note below: D-12's bar is cite-or-drop,
+  //     and this is the row that proved SOURCED is not the same as SAFE.
+  //
+  // SECURITY — the trust domain of a candidate root, and the two rows it costs
+  // (06-REVIEW.md CR-02, resolved as human item 4 of 06-VERIFICATION.md):
+  //
+  // Every row in this table is a directory Drift will spawn a binary from, and
+  // that binary is spawned with CAIDO_URL and CAIDO_TOKEN in its environment
+  // (buildSpawnEnv in index.ts for a provider CLI, the server spec's `env` for
+  // node). So the row's trust domain is a property of the row, alongside its
+  // citation. Every row kept here is under USERPROFILE/APPDATA/LOCALAPPDATA —
+  // the user's OWN domain, where an attacker who can write already owns the
+  // session — or under %ProgramFiles%, which is administrator-only.
+  //
+  // Two rows were NOT, and both are creatable by a non-administrator on default
+  // Windows ACLs:
+  //   * %ProgramData%\scoop\shims — C:\ProgramData carries a default ACE
+  //     granting Authenticated Users create-subdirectory. With scoop not
+  //     installed machine-wide the directory does not exist, so ANY local
+  //     account can create it and drop gemini.exe there. DROPPED entirely.
+  //   * C:\nvm4w\nodejs — C:\ root grants BUILTIN\Users create-folder, so the
+  //     directory is likewise creatable when nvm-windows is not installed. Now
+  //     GATED on nvm-windows' own NVM_HOME/NVM_SYMLINK environment contract
+  //     (isNvmWindowsInstalled, threaded in as `nvmWindowsInstalled`), which a
+  //     real nvm-windows user has set and a bare machine does not.
+  //
+  // Ordering the rows last was rejected rather than overlooked: the ladder emits
+  // .exe first so a planted binary wins its own directory, and a fallback row
+  // only ever WINS when the CLI is genuinely absent — which is exactly the case
+  // a planted binary exploits. Ordering moves the exposure, it does not remove
+  // it. CWE-426/427, against PROJECT.md's stated token-handling constraint.
 
   // P-01. npm's own documentation states the default global prefix on Windows
   // is the roaming application-data npm directory, and that on Windows
@@ -545,11 +578,11 @@ function buildWindowsInstallLocationCandidates(input: {
   // ("$env:USERPROFILE\scoop" then "$SCOOP_DIR\shims").
   emitLocation(input.roots.userProfile, ["scoop", "shims"]);
 
-  // P-18. scoop, machine-wide, from the same script
-  // ("$env:ProgramData\scoop"). ProgramData is not one of D-09's three user
-  // variables, so it gets its own row for exactly the reason the program-files
-  // row in the node builder does.
-  emitLocation(input.roots.programData, ["scoop", "shims"]);
+  // P-18. scoop, machine-wide ("$env:ProgramData\scoop", same install.ps1).
+  // SOURCED AND DROPPED — see the SECURITY non-claim at the end of the
+  // dropped-rows list above. Left as a comment rather than deleted so the row's
+  // absence reads as a decision.
+  // emitLocation(input.roots.programData, ["scoop", "shims"]);
 
   // ── Version-manager rows ──
   //
@@ -619,7 +652,15 @@ function buildWindowsInstallLocationCandidates(input: {
   // a real Windows host the RUN-05 probe has resolved by the time a launch
   // resolves a command, and a broken-PATH fallback is the last thing a
   // pre-probe status check needs.
-  if (input.emitRootlessLiteral) {
+  //
+  // `nvmWindowsInstalled` is the SECOND, orthogonal gate added by CR-02, and the
+  // two are ANDed rather than merged into one flag because they answer different
+  // questions and can fail independently: emitRootlessLiteral asks "would this
+  // row break CMP-01 byte-identity on a Linux host?", nvmWindowsInstalled asks
+  // "is this directory the installer's, or is it a directory any local account
+  // could have created?". Both must be true. See the SECURITY non-claim beside
+  // the table above, and isNvmWindowsInstalled in platform.ts for the signal.
+  if (input.emitRootlessLiteral && input.nvmWindowsInstalled) {
     emitLocation(NVM_WINDOWS_SYMLINK_DIR, []);
   }
   return candidates;
@@ -652,6 +693,13 @@ export function buildCommandCandidatePaths(input: {
   pathResolution?: string;
   homeDirs: string[];
   roots: WindowsNamedRoots;
+  // Required, not optional-with-a-default: an omitted gate is a COMPILE error
+  // for every PRODUCTION caller, the way an omitted arm of
+  // PROVIDER_INSTALL_COMMANDS is. A default would let a future caller silently
+  // re-enable a non-admin-writable row. (Stated precisely because test files are
+  // excluded from the backend tsconfig, so the compiler does not police THEM —
+  // the CR-02 regression tests below are what police the test side.)
+  nvmWindowsInstalled: boolean;
   versionCandidatesByHomeDir: Record<string, string[]>;
   windowsVersionDirs?: WindowsVersionDirs;
 }): string[] {
@@ -736,6 +784,7 @@ export function buildCommandCandidatePaths(input: {
       roots: input.roots,
       windowsVersionDirs: input.windowsVersionDirs,
       emitRootlessLiteral: input.platform === "win32",
+      nvmWindowsInstalled: input.nvmWindowsInstalled,
     })) {
       pushUniqueCandidate(candidates, candidate, input.platform);
     }
@@ -800,6 +849,11 @@ export async function getCommandExecutableCandidates(input: {
   pathResolution?: string;
   homeDirs: string[];
   roots: WindowsNamedRoots;
+  // Threaded straight through to the pure builder. It is computed by the CALLER
+  // from readParentEnv(), never read from process.env here: this function is the
+  // I/O boundary, and the builder behind it must stay assertable from literal
+  // inputs on the Linux runner (D-10 / SC-5).
+  nvmWindowsInstalled: boolean;
 }): Promise<string[]> {
   const versionCandidatesByHomeDir: Record<string, string[]> = {};
   for (const homeDir of [...new Set(input.homeDirs)]) {
@@ -837,6 +891,9 @@ export function buildNodeCandidatePaths(input: {
   pathResolution?: string;
   homeDirs: string[];
   roots: WindowsNamedRoots;
+  // Required for the same reason as its sibling above: an omitted gate is a
+  // compile error, never a silent default.
+  nvmWindowsInstalled: boolean;
   providerAdjacentDirs: string[];
   versionCandidatesByHomeDir: Record<string, string[]>;
   windowsVersionDirs?: WindowsVersionDirs;
@@ -964,9 +1021,11 @@ export function buildNodeCandidatePaths(input: {
     emitLocation(input.roots.programFilesX86, ["nodejs"]);
 
     // Absent-root behaviour, stated because it is a REAL case rather than a
-    // hypothetical: ProgramFiles, ProgramFiles(x86) and ProgramData are ordinary
-    // inherited variables, they are NOT among libuv's eleven back-filled names,
-    // and Phase 3's P3-VARS measured only USERPROFILE, APPDATA and LOCALAPPDATA.
+    // hypothetical: ProgramFiles and ProgramFiles(x86) are ordinary inherited
+    // variables, they are NOT among libuv's eleven back-filled names, and
+    // Phase 3's P3-VARS measured only USERPROFILE, APPDATA and LOCALAPPDATA.
+    // (ProgramData was in this list until CR-02 dropped its only row; the
+    // reason is recorded beside the dropped-rows table above.)
     // An absent variable skips its row entirely — never a candidate with an
     // empty prefix, which would be a relative path resolving against the process
     // working directory.
@@ -975,13 +1034,23 @@ export function buildNodeCandidatePaths(input: {
     // for node specifically because the installer puts it on PATH and it points
     // at a real node.exe. The shared table emits it again at its end, where
     // pushUniqueCandidate drops the duplicate.
-    emitLocation(NVM_WINDOWS_SYMLINK_DIR, []);
+    //
+    // Gated on nvm-windows' own NVM_HOME/NVM_SYMLINK contract (CR-02): C:\ is
+    // non-administrator-writable, and a planted C:\nvm4w\nodejs\node.exe that
+    // answers --version with exit 0 would become the MCP server's INTERPRETER
+    // and receive the parent-merged CAIDO_TOKEN. Both emission sites carry the
+    // gate — this one and the shared table's — because either alone would leave
+    // the row reachable through the other.
+    if (input.nvmWindowsInstalled) {
+      emitLocation(NVM_WINDOWS_SYMLINK_DIR, []);
+    }
 
     for (const candidate of buildWindowsInstallLocationCandidates({
       command: "node",
       roots: input.roots,
       windowsVersionDirs: input.windowsVersionDirs,
       emitRootlessLiteral: true,
+      nvmWindowsInstalled: input.nvmWindowsInstalled,
     })) {
       pushUniqueCandidate(candidates, candidate, input.platform);
     }
@@ -997,6 +1066,9 @@ export async function getNodeExecutableCandidates(input: {
   pathResolution?: string;
   homeDirs: string[];
   roots: WindowsNamedRoots;
+  // Same threading as getCommandExecutableCandidates: computed by the caller
+  // from readParentEnv(), never read from process.env inside the builder.
+  nvmWindowsInstalled: boolean;
   absoluteProviderCommands: string[];
 }): Promise<string[]> {
   const versionCandidatesByHomeDir: Record<string, string[]> = {};

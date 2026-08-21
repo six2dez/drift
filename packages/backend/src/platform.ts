@@ -533,9 +533,62 @@ export function getWindowsNamedRoots(input: {
   if (programFiles !== undefined) roots.programFiles = programFiles;
   const programFilesX86 = read(["ProgramFiles(x86)", "PROGRAMFILES(X86)"]);
   if (programFilesX86 !== undefined) roots.programFilesX86 = programFilesX86;
+  // NON-CLAIM, recorded here rather than deleted, because a later reader will
+  // otherwise see an unconsumed root and "finish the job" by adding a row for
+  // it. As of the CR-02 fix this root has NO consumer: the one row that used it,
+  // machine-wide scoop at %ProgramData%\scoop\shims, was DROPPED for security
+  // (C:\ProgramData grants Authenticated Users create-subdirectory by default,
+  // so any local account can plant a binary there, and a resolved binary is
+  // spawned with CAIDO_TOKEN in its environment). The full reasoning lives
+  // beside the dropped-rows list in command-resolution.ts.
+  //
+  // The variable READ is not the hazard and is kept: reading an environment
+  // value emits no candidate. Emitting a candidate under it is the hazard, and
+  // that is what was removed. Do not add a %ProgramData% row back without a
+  // trust-domain argument that answers the one above.
   const programData = read(["ProgramData", "PROGRAMDATA"]);
   if (programData !== undefined) roots.programData = programData;
   return roots;
+}
+
+// Is nvm-windows actually INSTALLED on this machine?
+//
+// The signal is the installer's own environment contract: coreybutler/nvm-windows
+// `nvm.iss` writes NVM_HOME (the install root) and NVM_SYMLINK (the symlink
+// directory it then appends to PATH). Neither name exists on a machine that
+// never ran that installer.
+//
+// This is a PRESENCE test, never a value read: the answer it gates is the
+// drive-qualified literal C:\nvm4w\nodejs, which is the installer's own default
+// and is spelled at the catalogue row. Returning the NVM_SYMLINK value instead
+// would be a different and larger change - a user-settable environment variable
+// deciding which directory Drift spawns from - and is deliberately not made
+// here.
+//
+// Why the gate exists at all (CR-02): C:\ grants BUILTIN\Users create-folder
+// rights, so C:\nvm4w\nodejs is creatable by a non-administrator on a machine
+// where nvm-windows was never installed - and a binary resolved from it is
+// spawned with CAIDO_TOKEN in its environment. Gating on these two names keeps
+// the coverage for real nvm-windows users (who have them set) while removing
+// the row from every machine that does not.
+//
+// `env` is an INPUT, exactly like getWindowsNamedRoots' - never a `process.env`
+// read - so the answer stays assertable from literal inputs on the Linux runner
+// and the candidate builders it feeds stay I/O-free (D-10 / SC-5).
+export function isNvmWindowsInstalled(input: {
+  env: Record<string, string | undefined>;
+}): boolean {
+  // Both spellings of each name, native first, for the same reason
+  // getWindowsNamedRoots reads both: Windows' own process.env is
+  // case-INsensitive while the plain object lookup on the Linux test runner is
+  // not. Empty and whitespace-only values count as ABSENT — the same
+  // present-but-empty rule the roots reader applies, so an unset-but-declared
+  // variable cannot switch the row on.
+  for (const name of ["NVM_HOME", "NVM_SYMLINK", "nvm_home", "nvm_symlink"]) {
+    const value = input.env[name]?.trim();
+    if (value !== undefined && value !== "") return true;
+  }
+  return false;
 }
 
 // The environment block for a spawned child: the parent block first, drift's own

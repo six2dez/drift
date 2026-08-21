@@ -97,6 +97,7 @@ import {
   rankPathSearchHits,
   getWindowsNamedRoots,
   isAbsolutePath,
+  isNvmWindowsInstalled,
   normalizePlatform,
   type Platform,
 } from "./platform";
@@ -1727,6 +1728,10 @@ async function resolveCommand(
         pathResolution,
         homeDirs: getKnownHomeDirs(),
         roots: getWindowsNamedRoots({ env: readParentEnv() }),
+        // CR-02's gate on the one drive-qualified literal in the catalogue.
+        // Read HERE, from the same readParentEnv() the roots come from, so the
+        // pure builder behind this call stays free of any environment read.
+        nvmWindowsInstalled: isNvmWindowsInstalled({ env: readParentEnv() }),
       });
 
       for (const candidate of candidates) {
@@ -2691,6 +2696,9 @@ async function getNodeExecutable(): Promise<string | undefined> {
     pathResolution: await resolveCommand("node"),
     homeDirs: getKnownHomeDirs(),
     roots: getWindowsNamedRoots({ env: readParentEnv() }),
+    // CR-02's gate. Same source as `roots` and the same rule: the environment
+    // is read at this I/O boundary, never inside the pure builder.
+    nvmWindowsInstalled: isNvmWindowsInstalled({ env: readParentEnv() }),
     // The DEFENSIVE reading of `providers[*].command`, chosen so this module and
     // buildProviderCommandSignature (resolution-cache.ts) stop holding opposite
     // beliefs about the same field: that function already declares the command
