@@ -92,6 +92,7 @@ import {
   buildSpawnEnv,
   getSweepRoots,
   getTempRoot,
+  getWhichCommand,
   getWindowsNamedRoots,
   isAbsolutePath,
   normalizePlatform,
@@ -171,6 +172,34 @@ const CLAUDE_STREAM_RECOVERY_IDLE_MS = 8000;
 const CLAUDE_POST_TOOL_QUIESCENCE_MS = 15000;
 const CLAUDE_POST_TOOL_ERROR_QUIESCENCE_MS = 3000;
 const DEBUG_CHUNK_PREVIEW_CHARS = 200;
+// The PATH-search spawn's time budget, one named constant per platform. The
+// POSIX number is the literal that site has always used, extracted UNCHANGED —
+// a rename, not a behaviour change. It is named rather than left inline so the
+// platform selection reads two named constants and STATES the asymmetry; a
+// selection with one bare literal on one side hides it.
+const POSIX_PATH_SEARCH_TIMEOUT_MS = 1000;
+// This is a headroom estimate, not a measurement, and nothing later may cite it
+// as evidence. No latency figure for the Windows PATH-search tool under
+// real-time antivirus scanning exists for this project — not in this repository
+// and not in any first-party source found — and the maintainer has no Windows
+// machine to produce one (PROJECT.md § Constraints).
+//
+// What the number IS bounded by, so it is framed by values this codebase
+// already accepts rather than invented: below by POSIX_PATH_SEARCH_TIMEOUT_MS
+// at the same site, and above by the 10 s ceiling the MCP self-test spawn's
+// timeout clamps to, which is the longest spawn budget this codebase sanctions.
+// A third bound is the one actually worth naming: RESOLUTION_NEGATIVE_TTL_MS is
+// 30 s, so a timeout longer than that would let a single cold miss cost more
+// than its own cache lifetime. 5000 sits well inside all three.
+//
+// Why any headroom at all — the MECHANISM: on Windows a COLD spawn pays process
+// creation with the real-time scanner in front of the child's first byte. Why
+// it matters — the SYMPTOM: a silent timeout here is indistinguishable from
+// "not installed", so a user whose CLI is on PATH is told it is not, which is
+// the exact complaint this milestone exists to fix.
+//
+// Revised on the Phase 9/10 real-machine report, not here.
+const WIN32_PATH_SEARCH_TIMEOUT_MS = 5000;
 
 // ── State ───────────────────────────────────────────────────────────
 
@@ -1500,8 +1529,40 @@ async function resolveCommand(
     clock: () => Date.now(),
     bypass: options?.bypassCache,
     resolve: async () => {
+      // D-02 wired. The search binary is no longer a hardcoded POSIX name:
+      // getWhichCommand returns the binary AND the argument builder for this
+      // machine's platform, and on win32 it derives an absolute path under the
+      // machine's own system root rather than trusting a bare name that any
+      // writable PATH entry could satisfy (T-06-T22).
+      //
+      // `platform` is the RUN-05 probe value and is `undefined` before the probe
+      // runs — the same threading the absolute-path fast path above already
+      // uses. The helper takes its POSIX arm on `undefined`, and that is NOT the
+      // pre-probe POSIX default D-08 rejected: only ONE binary can be spawned,
+      // so no union answer exists here, and skipping the search pre-probe would
+      // drop resolution for a PATH-only binary on macOS and Linux — a CMP-01
+      // regression, not a Windows-only cost. The `error` handler below is what
+      // makes the POSIX arm safe on Windows: the POSIX binary cannot be spawned
+      // there, and the handler turns that into a fall-through to the candidate
+      // walk instead of a throw.
+      //
+      // `env` comes from readParentEnv(), which already carries the defensive
+      // `globalThis` cast and the try/catch — and whose own comment forbids
+      // rendering a value. This site consumes those values and logs none of
+      // them (T-06-T20 / 05-D-11).
+      const searchCommand = getWhichCommand({
+        platform: host?.platform,
+        env: readParentEnv(),
+      });
       const pathResolution = await new Promise<string | undefined>((resolve) => {
-        const child = spawn("which", [command]);
+        // UX-04 / Phase 10 owns what this line adds on Windows: a spawn from a
+        // GUI-hosted process pops a console window for the child's lifetime,
+        // and resolveCommand is a hot path, so this one flashes often. It is
+        // deliberately NOT fixed here — and it is not a flag to flip. The
+        // per-spawn suppression Windows offers is not declared in this runtime's
+        // spawn options surface at all, so removing the flash is real work
+        // rather than one word. Grep UX-04 to find every site that phase owns.
+        const child = spawn(searchCommand.command, searchCommand.args(command));
         // PERF-04 site 7 — the accumulator every earlier inventory in this phase
         // missed, because `grep -n "stdout += "` is structurally blind to a
         // variable named `out`. Bounded rather than EXCLUDED: the tempting
@@ -1518,12 +1579,18 @@ async function resolveCommand(
           retention: "head",
         });
         let settled = false;
+        // Selected on the literal "win32"; every other value, `undefined`
+        // included, keeps the number this site has always used (CMP-01).
+        const searchTimeoutMs =
+          host?.platform === "win32"
+            ? WIN32_PATH_SEARCH_TIMEOUT_MS
+            : POSIX_PATH_SEARCH_TIMEOUT_MS;
         const timeout = setTimeout(() => {
           if (settled) return;
           settled = true;
           try { child.kill("SIGKILL"); } catch { /* ignore */ }
           resolve(undefined);
-        }, 1000);
+        }, searchTimeoutMs);
         child.stdout?.on("data", (d: Buffer) => { out = appendBounded(out, d.toString()); });
         child.on("close", (code) => {
           if (settled) return;
