@@ -7,10 +7,12 @@ import {
   buildNodeCandidatePaths,
   collectVersionManagerCommandCandidates,
   extractHomeDir,
+  foldCandidateKey,
   formatProviderUnavailableMessage,
   getCommandExecutableCandidates,
   getNodeExecutableCandidates,
   getProviderInstallHint,
+  pushUniqueCandidate,
 } from "./command-resolution";
 
 describe("command resolution helpers", () => {
@@ -805,5 +807,72 @@ describe("buildNodeCandidatePaths CMP-01 POSIX order", () => {
     expect(
       buildNodeCandidatePaths({ ...posixInput, platform: undefined }),
     ).toEqual(NODE_CMP_01_POSIX);
+  });
+});
+
+// ── D-07: the pure win32 dedup fold ────────────────────────────────────────
+//
+// 04-D-04 expected this phase to wire runtime-probe.ts's normalizePathForCompare
+// here. D-07 formally DECLINES; these tests are the evidence that the pure key
+// is sufficient for the ONLY comparison this phase makes. The asymmetry between
+// the two arms is the point: folding on win32 is safe because the filesystem is
+// case-insensitive there, and folding anywhere else could DROP a real candidate.
+describe("foldCandidateKey (D-07)", () => {
+  it("collapses case and separator spelling into one key on win32", () => {
+    expect(
+      foldCandidateKey("C:\\Program Files\\nodejs\\node.exe", "win32"),
+    ).toBe(foldCandidateKey("c:/program files/nodejs/node.exe", "win32"));
+  });
+
+  it("does not fold on a POSIX platform, where case names another file", () => {
+    expect(foldCandidateKey("/Users/Six/bin/node", "linux")).not.toBe(
+      foldCandidateKey("/users/six/bin/node", "linux"),
+    );
+    expect(foldCandidateKey("/Users/Six/bin/node", "linux")).toBe(
+      "/Users/Six/bin/node",
+    );
+  });
+
+  it("does not fold before the platform is known", () => {
+    expect(foldCandidateKey("/Users/Six/bin/node", undefined)).toBe(
+      "/Users/Six/bin/node",
+    );
+    expect(foldCandidateKey("C:\\Users\\Six", undefined)).toBe(
+      "C:\\Users\\Six",
+    );
+  });
+});
+
+describe("pushUniqueCandidate dedup key (D-07)", () => {
+  it("keeps the FIRST win32 spelling and drops the second", () => {
+    const candidates: string[] = [];
+    pushUniqueCandidate(
+      candidates,
+      "C:\\Program Files\\nodejs\\node.exe",
+      "win32",
+    );
+    pushUniqueCandidate(candidates, "c:/program files/nodejs/node.exe", "win32");
+    // ONE entry, and it is the original spelling of the first push — the fold is
+    // a comparison key and never an emitted value.
+    expect(candidates).toEqual(["C:\\Program Files\\nodejs\\node.exe"]);
+  });
+
+  it("keeps BOTH POSIX paths that differ only in case (CMP-01 guard)", () => {
+    const candidates: string[] = [];
+    pushUniqueCandidate(candidates, "/Users/Six/bin/node", "linux");
+    pushUniqueCandidate(candidates, "/users/six/bin/node", "linux");
+    expect(candidates).toEqual(["/Users/Six/bin/node", "/users/six/bin/node"]);
+  });
+
+  it("still trims and still skips empty values on every platform", () => {
+    for (const platform of ["win32", "linux", "darwin", undefined] as const) {
+      const candidates: string[] = [];
+      pushUniqueCandidate(candidates, undefined, platform);
+      pushUniqueCandidate(candidates, "", platform);
+      pushUniqueCandidate(candidates, "   ", platform);
+      expect(candidates).toEqual([]);
+      pushUniqueCandidate(candidates, "  /usr/bin/node  ", platform);
+      expect(candidates).toEqual(["/usr/bin/node"]);
+    }
   });
 });
