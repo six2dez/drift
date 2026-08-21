@@ -8,6 +8,15 @@ import {
   type WindowsNamedRoots,
 } from "./platform";
 
+// Catalogue row P-06. The nvm-windows installer's own symlink default, verified
+// from coreybutler/nvm-windows `nvm.iss`, which seeds the symlink page with this
+// exact string and then appends %NVM_SYMLINK% to PATH. This is the only
+// drive-qualified literal in the module; every other Windows location is built
+// from a named environment root so it cannot be wrong about where the user's
+// profile lives. See the row that emits it for why it is kept despite being on
+// PATH already.
+const NVM_WINDOWS_SYMLINK_DIR = "C:\\nvm4w\\nodejs";
+
 // Actionable install / resolution hint per provider. These surface inside the
 // chat error banner and in Settings → CLI Providers so a user who hits
 // "CLI not found" does not have to guess which package to install.
@@ -237,21 +246,122 @@ export function buildCommandCandidatePaths(input: {
     const win32 = (segments: string[]): string =>
       joinPath({ platform: "win32", segments });
 
-    // Catalogue row P-01. npm's own documentation states the default global
-    // prefix on Windows is the roaming application-data npm directory, and that
-    // on Windows executables are placed DIRECTLY into the prefix where Unix
-    // links them into {prefix}/bin — so a `bin` segment here would be wrong.
-    // Source: docs.npmjs.com/cli/v11/configuring-npm/folders.
-    //
-    // D-11 is location-major: all four spellings of this one location are
-    // emitted before any later location. An absent root emits nothing at all
+    // Emit one candidate per ladder spelling for ONE location, then move on —
+    // that is D-11's location-major ordering, and it is what the whole-array
+    // assertion in the test file pins. An absent root emits nothing at all
     // (T-06-T02) — never a candidate with an empty prefix, which would resolve
-    // against the process working directory.
-    const appData = input.roots.appData;
-    if (appData !== undefined) {
+    // against the process working directory, a directory the user never chose.
+    const emitLocation = (
+      root: string | undefined,
+      segments: string[],
+    ): void => {
+      if (root === undefined) return;
       for (const name of windowsNames) {
-        pushUniqueCandidate(candidates, win32([appData, "npm", name]));
+        pushUniqueCandidate(candidates, win32([root, ...segments, name]));
       }
+    };
+
+    // ── The sourced Windows install-location table (D-09 / D-11 / D-12) ──
+    //
+    // D-12 is cite-or-drop: every row below names the installer script, package
+    // source or first-party document it came from. A row that could not be
+    // sourced is NOT here — it is recorded as a non-claim at the bottom of this
+    // comment instead, so a later reader finds the reason beside the table
+    // rather than having to re-derive it.
+    //
+    // THREE ROWS CORRECT THE ROADMAP, and the corrections win. D-09's own text
+    // calls its inline sketch "roughly (the exact set is D-12's deliverable)",
+    // so this is D-12 working as designed rather than a silent divergence:
+    //   * nvm-windows lives under LOCAL application data, not roaming. Verified
+    //     from coreybutler/nvm-windows `nvm.iss` (DefaultDirName={localappdata}\nvm,
+    //     then NVM_HOME written to {app}).
+    //   * nvm-windows' symlink default is C:\nvm4w\nodejs, not %ProgramFiles%\nodejs.
+    //     Verified from the same `nvm.iss`; the installer's README warns that
+    //     pointing it at a physical directory FAILS.
+    //   * fnm's modern base is under ROAMING application data, not local.
+    //     Verified from Schniz/fnm `src/directories.rs` plus etcetera 0.8.0's own
+    //     doctest mapping APPDATA to data_dir(). (The fnm rows themselves land in
+    //     the version walk below.)
+    //
+    // DROPPED under D-12, recorded here as explicit non-claims:
+    //   * roaming-appdata nvm — no source found for any nvm-windows release
+    //     defaulting there; the installer's own script defaults under local
+    //     application data (see the correction above).
+    //   * Program Files\Volta — sourced, but it holds the volta.exe binary
+    //     itself, not a Node or provider CLI, so it resolves nothing this
+    //     module looks for.
+    //   * asdf on native Windows — no native build exists; asdf's own FAQ scopes
+    //     Windows support to WSL2. The POSIX ~/.asdf/shims row above is
+    //     deliberately untouched.
+    //   * user-profile .volta on win32 — the POSIX analogy, unsourced for
+    //     Windows. Volta's Windows home is under local application data, which
+    //     is the row actually emitted below.
+
+    // P-01. npm's own documentation states the default global prefix on Windows
+    // is the roaming application-data npm directory, and that on Windows
+    // executables are placed DIRECTLY into the prefix where Unix links them into
+    // {prefix}/bin — so a `bin` segment here would be wrong.
+    // Source: docs.npmjs.com/cli/v11/configuring-npm/folders.
+    emitLocation(input.roots.appData, ["npm"]);
+
+    // P-19. The Claude Code native installer's Windows location. Its uninstall
+    // instructions name this path verbatim ($env:USERPROFILE\.local\bin\claude.exe),
+    // which also confirms the extension is .exe — the ladder hits its first rung
+    // here. Source: code.claude.com/docs/en/setup, § Uninstall → Native → Windows.
+    emitLocation(input.roots.userProfile, [".local", "bin"]);
+
+    // P-11 / P-12. Volta's shim directory. Home verified from volta-cli/volta
+    // `crates/volta-core/src/layout/windows.rs` (data_local_dir() + "Volta");
+    // shim directory from `crates/volta-layout/src/v4.rs` ("bin": shim_dir).
+    // Volta's Windows shims carry the .cmd spelling — the same v4.rs appends
+    // ".cmd" to the tool name under cfg(windows). Phase 3 measured a DIRECT
+    // spawn of that spelling throwing synchronously
+    // (.planning/phases/03-ci-spike-prove-llrt-basics-on-windows/03-FINDINGS.md
+    // § P1-CMD), so this phase RESOLVES the shim and claims nothing more:
+    // making it launchable is PRV-02 in Phase 7.
+    emitLocation(input.roots.localAppData, ["Volta", "bin"]);
+
+    // P-16. pnpm's Windows data directory, verified from @pnpm/config
+    // `lib/dirs.js` getDataDir — whose per-platform table also confirms the two
+    // POSIX pnpm rows already above (Library/pnpm on darwin, .local/share/pnpm
+    // elsewhere) are correct.
+    emitLocation(input.roots.localAppData, ["pnpm"]);
+
+    // P-16, the same function's fallback arm when LOCALAPPDATA is unset.
+    emitLocation(input.roots.userProfile, [".pnpm"]);
+
+    // P-15. Bun. Same shape as the POSIX ~/.bun/bin row above.
+    // Source: bun.com/docs/installation (its Windows PATH fix references
+    // "$env:USERPROFILE\.bun\bin").
+    emitLocation(input.roots.userProfile, [".bun", "bin"]);
+
+    // P-17. scoop, per-user. Verified from ScoopInstaller/Install `install.ps1`
+    // ("$env:USERPROFILE\scoop" then "$SCOOP_DIR\shims").
+    emitLocation(input.roots.userProfile, ["scoop", "shims"]);
+
+    // P-18. scoop, machine-wide, from the same script
+    // ("$env:ProgramData\scoop"). ProgramData is not one of D-09's three user
+    // variables, so it gets its own row for exactly the reason the program-files
+    // row in the node builder does.
+    emitLocation(input.roots.programData, ["scoop", "shims"]);
+
+    // P-06 — the ONE deliberate drive-qualified literal in this module, and it
+    // is the nvm-windows installer's own default rather than a guess: `nvm.iss`
+    // seeds the symlink page with C:\nvm4w\nodejs and appends %NVM_SYMLINK% to
+    // PATH. Because the installer puts it on PATH, the PATH search normally
+    // answers first — this row is the broken-PATH fallback.
+    //
+    // It is gated on the LITERAL "win32" rather than on the union arm above,
+    // and that is not an oversight. Every other row here vanishes when its root
+    // is absent, which is exactly why the union arm is CMP-01-safe on POSIX: no
+    // Windows root variable is set there, so no win32 row can fire. This row
+    // depends on no variable, so in the pre-probe `undefined` arm it would fire
+    // on a Linux host and break the byte-identity the three CMP-01 tests pin. On
+    // a real Windows host the RUN-05 probe has resolved by the time a launch
+    // resolves a command, and a broken-PATH fallback is the last thing a
+    // pre-probe status check needs.
+    if (input.platform === "win32") {
+      emitLocation(NVM_WINDOWS_SYMLINK_DIR, []);
     }
   }
 
