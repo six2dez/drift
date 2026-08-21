@@ -35,7 +35,7 @@ Install `dist/drift.zip` in Caido via Plugins > Install from file.
 
 ### CLI Providers
 
-In Settings, set the command path for each CLI tool. Drift first tries the configured command via Caido's inherited `PATH`, then probes common install locations (Homebrew, `~/.local/bin`, Volta, asdf, nvm, fnm). Use a full path (for example `/Users/you/.local/bin/claude`) to pin a specific binary explicitly.
+In Settings, set the command path for each CLI tool. Drift first tries the configured command via Caido's inherited `PATH`, then probes common install locations (Homebrew, `~/.local/bin`, Volta, asdf, nvm, fnm). On Windows it probes the Windows equivalents instead — the roaming application-data npm prefix, the user profile's local binary directory, and the usual version-manager and package-manager locations; the full catalogue lives in the source beside its citations rather than being duplicated here. Use a full path (for example `/Users/you/.local/bin/claude`) to pin a specific binary explicitly.
 
 | Provider | Resume | MCP | Status |
 |----------|--------|-----|--------|
