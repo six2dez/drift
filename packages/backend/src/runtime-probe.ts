@@ -632,10 +632,20 @@ export function formatProbeFailure(
 
 // ── D-04: the path-canonicalisation ladder ─────────────────────────────────
 //
-// !! THIS EXPORT HAS NO PHASE 4 CALLER BY DESIGN. CONTEXT.md D-04 makes Phase 6
-// !! its FIRST caller. DO NOT DELETE IT TO SATISFY `--max-warnings 0`.
+// !! THIS EXPORT HAS NO PRODUCTION CALLER BY DESIGN. 04-CONTEXT.md D-04 named
+// !! Phase 6 as its FIRST caller; Phase 6 inspected the case, found it does not
+// !! arise, and 06-CONTEXT.md D-07 formally DECLINES to become that caller. The
+// !! export is therefore still uncalled, ON PURPOSE.
+// !! DO NOT DELETE IT TO SATISFY `--max-warnings 0`.
 // If a lint rule ever flags it as unused, 04-VALIDATION.md § Lint note mandates
 // an explicit eslint-disable whose comment cites D-04 — never a deletion.
+//
+// The export is BOOKKEEPING, not API: it exists so `noUnusedLocals` (tsconfig)
+// and `@typescript-eslint/no-unused-vars` (eslint --max-warnings 0) cannot force
+// the deletion the preservation rule forbids. It is not dead weight either — it
+// is an unwired capability with a recorded reason, which is a different thing
+// from an accident. Delete it the moment a real caller appears, rather than
+// keeping it indefinitely.
 //
 // It is IMPURE by design, which is why D-04 puts it OUTSIDE platform.ts (SC-1
 // holds that module I/O-free). Its rungs are INJECTED, which is what makes the
@@ -645,14 +655,22 @@ export function formatProbeFailure(
 // Why the ladder exists at all: Phase 3 measured os.tmpdir() returning the 8.3
 // short form `C:\Users\RUNNER~1\AppData\Local\Temp` while USERPROFILE returned
 // the long form `C:\Users\runneradmin` — both valid, both on disk, and NOT
-// string-comparable (03-FINDINGS.md § P0-TMP). Phase 6 compares exactly those
-// two paths, which is where the mismatch bites.
+// string-comparable (03-FINDINGS.md § P0-TMP). That measurement was taken on a
+// real host and does not decay; what changed is WHO needs it. Phase 6 never
+// compares a tmpdir-derived path against a USERPROFILE-derived one. The only
+// path comparison Phase 6 performs is between CANDIDATE strings inside
+// command-resolution.ts's candidate accumulator, where a missed deduplication
+// costs one extra existence check and never a wrong answer — so a pure
+// lowercased, separator-folded key is sufficient there, and asynchronous
+// canonicalisation on that pre-probe path would be strictly worse. The
+// short-versus-long-form mismatch is still real; it is still waiting for the
+// first caller that actually meets it.
 //
 // Which rung actually fires under Caido: the bottom one. There is no `realpath`
 // or `realpathSync` symbol anywhere in caido/dependency-llrt@main's fs module
 // (04-RESEARCH.md § LLRT Surface Risk), so rungs 1 and 2 are both absent and the
 // ladder lands on path.resolve. That is precisely why the return value REPORTS
-// the rung reached: a Phase 6 caller must never silently believe it holds a
+// the rung reached: any FUTURE caller must never silently believe it holds a
 // canonical path when it holds a path.resolve (T-04-12).
 //
 // The function never throws. Every rung is guarded, including the bottom one.
