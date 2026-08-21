@@ -4,11 +4,11 @@ milestone: v1.0
 current_phase: 2
 current_phase_name: POSIX Correctness & Hardening
 status: planning
-stopped_at: Phase 6 complete, ready to plan Phase 2
-last_updated: "2026-08-21T13:32:09.156Z"
+stopped_at: Phase 7 context gathered
+last_updated: "2026-08-21T14:48:51.840Z"
 last_activity: 2026-08-21
 last_activity_desc: Phase 6 complete, transitioned to Phase 2
-state_head: c54cff0379b4866058af042d20108f2382db1a4f
+state_head: 30e297c26b6e1ac9ae5ae5a39f1ef5bb2ec0e536
 progress:
   total_phases: 13
   completed_phases: 5
@@ -221,9 +221,9 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-21T09:00:42.164Z
-Stopped at: Phase 6 complete, ready to plan Phase 2
-Resume file: .planning/phases/06-windows-command-resolution/06-CONTEXT.md
+Last session: 2026-08-21T14:48:51.695Z
+Stopped at: Phase 7 context gathered
+Resume file: .planning/phases/07-provider-spawn-registration/07-CONTEXT.md
 
 **Live on the public remote: nothing of ours.** Plan 03-04 tore down all three `scratch/*` branches (`ci-proof-windows-probe`, `ci-proof-windows-probe-negative`, `ci-proof-windows-gate-negative`) locally and remotely. Asserted with a `test -z` discrimination over the captured glob (`scratch-glob-empty=0`) plus the full unfiltered listing, which now shows only `main` at `2d8cf16` and the pre-existing, unrelated `fix/security-hotfixes` at `0cd81f3`. `origin/main` was never pushed by this phase and is still `2d8cf16`; local `main` is 23 commits ahead and deliberately unpushed. **Re-verified 2026-08-13 (plan 03-05):** the remote still lists only `main` `2d8cf16` and the pre-existing `fix/security-hotfixes` `0cd81f3`, and all eight Phase 3 run records (4 probe + 4 `CI` control) still resolve with their recorded conclusions — which is what makes the URLs in `03-FINDINGS.md` valid citations after the branches were deleted. The probe **artifacts** do not survive: they expire 2026-09-12, which is why D-11 required the committed findings document.
 
