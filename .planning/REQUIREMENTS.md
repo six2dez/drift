@@ -52,9 +52,9 @@ Requirements for the hardening + native-Windows milestone. Each maps to exactly 
 
 ### Resolution (RES)
 
-- [ ] **RES-01**: On Windows, Drift locates `node.exe` via `where` plus Windows install locations (`%APPDATA%\npm`, `%USERPROFILE%\.local\bin`, Volta/Bun/pnpm/scoop/nvm-windows, `%ProgramFiles%\nodejs`)
-- [ ] **RES-02**: On Windows, Drift resolves provider CLI binaries to an absolute path with explicit extension (`.exe`/`.cmd`), preferring `.exe`, parsing `where` CRLF output
-- [ ] **RES-03**: Home-dir detection recognizes `C:\Users\<name>` and uses `USERPROFILE`/`APPDATA`/`LOCALAPPDATA`
+- [x] **RES-01**: On Windows, Drift locates `node.exe` via `where` plus Windows install locations (`%APPDATA%\npm`, `%USERPROFILE%\.local\bin`, Volta/Bun/pnpm/scoop/nvm-windows, `%ProgramFiles%\nodejs`)
+- [x] **RES-02**: On Windows, Drift resolves provider CLI binaries to an absolute path with explicit extension (`.exe`/`.cmd`), preferring `.exe`, parsing `where` CRLF output
+- [x] **RES-03**: Home-dir detection recognizes `C:\Users\<name>` and uses `USERPROFILE`/`APPDATA`/`LOCALAPPDATA`
 
 ### Providers (PRV)
 
@@ -78,7 +78,7 @@ Requirements for the hardening + native-Windows milestone. Each maps to exactly 
 ### UX / Polish (UX)
 
 - [ ] **UX-01**: The provider binary-path picker accepts `.exe`/`.cmd` paths on Windows
-- [ ] **UX-02**: "CLI / Node not found" guidance shows correct Windows install commands per provider (including the Copilot `@github/copilot` correction, replacing the deprecated `gh copilot` extension hint)
+- [x] **UX-02**: "CLI / Node not found" guidance shows correct Windows install commands per provider (including the Copilot `@github/copilot` correction, replacing the deprecated `gh copilot` extension hint)
 - [ ] **UX-03**: Windows install + prerequisites docs (Node ≥ 18, Claude native installer, PowerShell execution-policy note, Codex npm win32 optional-dep caveat)
 - [ ] **UX-04**: Windows-aware diagnostics (resolved binary, spawn strategy used, `mcp add` skip reason) and `windowsHide: true` on all spawns
 
@@ -86,6 +86,21 @@ Requirements for the hardening + native-Windows milestone. Each maps to exactly 
 
 - [x] **CMP-01**: All existing macOS/Linux behavior is preserved — POSIX launch path unchanged behind `platform` guards; existing snapshot/unit tests stay green
 - [x] **CMP-02**: The `os.tmpdir()` substitution does not break the macOS/Linux orphan-sweep (macOS tmpdir is `/var/folders/...`, not `/tmp`)
+
+### Plugin Bridge (PBR) — added 2026-08-21
+
+<!-- Phases 11-13. Reaches the user's *installed plugins*, a surface no Caido agent tool
+     (official skill or community MCP) currently touches. See .planning/research/PLUGIN-BRIDGE.md
+     for the measured evidence behind PBR-01 and PBR-02. -->
+
+- [ ] **PBR-01**: Drift can enumerate the installed plugin packages and, for each backend plugin, the RPC functions it registers — with arity and parameter names where they can be resolved. Source cascade: npm spec package (`@caido-community/<manifestId>`, 3 of 75 plugins) → extraction from the installed bundle → names-only
+- [ ] **PBR-02**: The extractor matches the *receiver*, so `sdk.api.register` (RPC-callable) is never confused with `sdk.commands.register` (frontend command-palette entries). In the 2026-08-21 sample, 14 plugins registered only commands and a name-only grep would have offered them as callable
+- [ ] **PBR-03**: The plugins root is derived as `path.dirname(sdk.meta.path())` and reaches the MCP process through the existing spawn `env` block — no hardcoded path, no platform branch, no re-derivation inside the MCP process (which has no `sdk`)
+- [ ] **PBR-04**: A `plugin_call` tool invokes a backend function via `callFunction({ name, arguments })`, dropping the Caido-injected `sdk` first parameter from every extracted signature before it is offered as a tool argument
+- [ ] **PBR-05**: Invocation is gated by the existing tool-safety machinery — discovery is free, invocation is opt-in per plugin, and mutating-looking actions require confirmation. The sample contains `deleteSession`, `deleteNote`, `clearScans`, `stopAgent`
+- [ ] **PBR-06**: A `plugin_events` tool subscribes to backend plugin events (`subscribeEvent` / `createdPluginEvent`) and surfaces them into the chat turn
+- [ ] **PBR-07**: The bridge is validated end-to-end against the three spec-backed plugins (Scanner, QuickSSRF, Autorize) **and** at least two plugins with no spec package
+- [ ] **PBR-08**: Discovery degrades honestly — a function whose signature cannot be resolved is reported as unknown-arity, never guessed. `plugin_call` must not present an invented schema as a validated one
 
 ## v2 Requirements
 
@@ -110,7 +125,7 @@ Explicitly excluded for this milestone. Documented to prevent scope creep.
 | Keeping any bash / `.sh` wrapper indirection | It is the root cause of the Windows failure |
 | `shell:true` with dynamic args | Command-injection / CVE-2024-27980 re-exposure; banned |
 | Bundling or auto-installing Node or the CLIs | The user provides their own CLI + Node; out of scope and a trust/size concern |
-| New MCP feature work beyond the correctness gaps | `list_workflows` (COR-02) ships because `run_workflow` is unusable without it; `search_response_bodies`, sitemap access, and the chat/UX features from the 2026-08-12 review are parked in the ROADMAP backlog (999.x) |
+| New MCP feature work beyond the correctness gaps | `list_workflows` (COR-02) ships because `run_workflow` is unusable without it; `search_response_bodies`, sitemap access, and the chat/UX features from the 2026-08-12 review are parked in the ROADMAP backlog (999.x) **Amended 2026-08-21:** the Plugin Bridge (PBR, Phases 11-13) is a deliberate, scoped exception — it is the one MCP surface neither the official Caido skill nor any community MCP implements. |
 | The event-driven `sendCliMessage` refactor | Collides head-on with Phases 5 and 8; parked as backlog 999.1 until the port lands |
 
 ## Traceability
@@ -146,10 +161,10 @@ Which phases cover which requirements. Every v1 requirement maps to exactly one 
 | HLT-01 | Phase 5 | Complete |
 | HLT-02 | Phase 5 | Complete |
 | CMP-01 | Phase 5 | Complete |
-| RES-01 | Phase 6 | Pending |
-| RES-02 | Phase 6 | Pending |
-| RES-03 | Phase 6 | Pending |
-| UX-02 | Phase 6 | Pending |
+| RES-01 | Phase 6 | Complete |
+| RES-02 | Phase 6 | Complete |
+| RES-03 | Phase 6 | Complete |
+| UX-02 | Phase 6 | Complete |
 | PRV-01 | Phase 7 | Pending |
 | PRV-02 | Phase 7 | Pending |
 | PRV-03 | Phase 7 | Pending |
@@ -162,6 +177,14 @@ Which phases cover which requirements. Every v1 requirement maps to exactly one 
 | CI-03 | Phase 5 | Complete |
 | UX-03 | Phase 10 | Pending |
 | UX-04 | Phase 10 | Pending |
+| PBR-01 | Phase 11 | Pending |
+| PBR-02 | Phase 11 | Pending |
+| PBR-03 | Phase 11 | Pending |
+| PBR-08 | Phase 11 | Pending |
+| PBR-04 | Phase 12 | Pending |
+| PBR-05 | Phase 12 | Pending |
+| PBR-06 | Phase 13 | Pending |
+| PBR-07 | Phase 13 | Pending |
 
 **Coverage:**
 
@@ -333,4 +356,4 @@ an executing test (V-21); and every Windows result was measured on **Node, not o
 
 ---
 *Requirements defined: 2026-06-26*
-*Last updated: 2026-08-20 — Phase 5 closed: RUN-01, RUN-02, RUN-04, HLT-01, HLT-02, CMP-01, CI-01 and CI-03 marked Complete by plan 05-06, each with the evidence basis and residual non-claims recorded in the section above. Earlier the same day: Phase 4 closed (RUN-03, RUN-05, CMP-02, PERF-02, PERF-03, PERF-04) with RUN-04 re-targeted to Phase 5, and CI-01/CI-03 pulled forward from Phase 9 into Phase 5 by plan 05-02*
+*Last updated: 2026-08-21 — Plugin Bridge (PBR-01…PBR-08) added for Phases 11-13, grounded in .planning/research/PLUGIN-BRIDGE.md. 2026-08-20 — Phase 5 closed: RUN-01, RUN-02, RUN-04, HLT-01, HLT-02, CMP-01, CI-01 and CI-03 marked Complete by plan 05-06, each with the evidence basis and residual non-claims recorded in the section above. Earlier the same day: Phase 4 closed (RUN-03, RUN-05, CMP-02, PERF-02, PERF-03, PERF-04) with RUN-04 re-targeted to Phase 5, and CI-01/CI-03 pulled forward from Phase 9 into Phase 5 by plan 05-02*

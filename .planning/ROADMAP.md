@@ -30,7 +30,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 3: CI Spike — Prove LLRT Basics on Windows** - Prove the 7 LLRT runtime primitives on `windows-latest` before writing any port code (completed 2026-08-14)
 - [x] **Phase 4: Platform Foundation** - Pure `platform.ts`, `os.tmpdir()` everywhere, AV-retry, fail-loud runtime probe, bounded buffers (completed 2026-08-20)
 - [x] **Phase 5: Kill Shell Wrappers** - Direct `node` spawn + `env` injection; the headline bug fix; health check green on Windows (completed 2026-08-20)
-- [ ] **Phase 6: Windows Command Resolution** - `where`/`PATHEXT`/install-location discovery of `node.exe` and provider CLIs
+- [x] **Phase 6: Windows Command Resolution** - `where`/`PATHEXT`/install-location discovery of `node.exe` and provider CLIs (completed 2026-08-21)
 - [ ] **Phase 7: Provider Spawn & Registration** - Claude end-to-end (MVP) + safe `.cmd` spawning + Gemini/Codex/Copilot registration and approval channel
 - [ ] **Phase 8: Process Lifecycle** - Process-tree death on Windows *and* POSIX so cancel/timeout leaves no token-bearing orphan
 - [ ] **Phase 9: CI Hardening** - Required `windows-latest` job green for the right reasons (`.gitattributes`, `\r?\n`-safe snapshots)
@@ -249,28 +249,28 @@ Plans:
 Plans:
 **Wave 1**
 
-- [ ] 06-01-PLAN.md — Substrate: `joinPath`, `getWindowsNamedRoots`, the pure/impure candidate-builder split (D-05/D-10), wired end to end by a tracer, plus both CMP-01 byte-identity proofs *(wave 1)*
+- [x] 06-01-PLAN.md — Substrate: `joinPath`, `getWindowsNamedRoots`, the pure/impure candidate-builder split (D-05/D-10), wired end to end by a tracer, plus both CMP-01 byte-identity proofs *(wave 1)*
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 06-02-PLAN.md — The sourced Windows install-location catalogue, the bounded version-manager walks, and the node-specific rows (D-09/D-11/D-12) *(wave 2)*
-- [ ] 06-03-PLAN.md — `rankPathSearchHits`, `getWhichCommand` by absolute path, `getHomeDirCandidates` union (D-01/D-02/D-08) *(wave 2)*
+- [x] 06-02-PLAN.md — The sourced Windows install-location catalogue, the bounded version-manager walks, and the node-specific rows (D-09/D-11/D-12) *(wave 2)*
+- [x] 06-03-PLAN.md — `rankPathSearchHits`, `getWhichCommand` by absolute path, `getHomeDirCandidates` union (D-01/D-02/D-08) *(wave 2)*
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 06-04-PLAN.md — Windows home-dir recognition, the win32 dedup fold, and the recorded non-claims (D-06/D-07) *(wave 3)*
+- [x] 06-04-PLAN.md — Windows home-dir recognition, the win32 dedup fold, and the recorded non-claims (D-06/D-07) *(wave 3)*
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
-- [ ] 06-05-PLAN.md — Wire the PATH search at the `resolveCommand` seam: binary, multi-line parse, ranking, platform-aware timeout (D-01–D-04, D-08) *(wave 4)*
+- [x] 06-05-PLAN.md — Wire the PATH search at the `resolveCommand` seam: binary, multi-line parse, ranking, platform-aware timeout (D-01–D-04, D-08) *(wave 4)*
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
-- [ ] 06-06-PLAN.md — The shared install-command table, the platform-armed hint renderer, the Copilot correction, the Node error's Windows arm (D-13–D-16) *(wave 5)*
+- [x] 06-06-PLAN.md — The shared install-command table, the platform-armed hint renderer, the Copilot correction, the Node error's Windows arm (D-13–D-16) *(wave 5)*
 
 **Wave 6** *(blocked on Wave 5 completion)*
 
-- [ ] 06-07-PLAN.md — The help panel renders from the shared table, readme prose accuracy, and the phase evidence gate (D-15) *(wave 6)*
+- [x] 06-07-PLAN.md — The help panel renders from the shared table, readme prose accuracy, and the phase evidence gate (D-15) *(wave 6)*
 
 **Research flag**: NO for Windows install paths (build-time note: re-verify the Volta/fnm/nvm-windows candidate list against current installer docs). **Done — 06-RESEARCH.md § *Windows Install-Location Catalogue* verified every row against the installer's own source and CORRECTED three of SC-1's paths: nvm-windows lives under `%LOCALAPPDATA%\nvm` (not `%APPDATA%`), its symlink is `C:\nvm4w\nodejs` (not `%ProgramFiles%\nodejs`, which survives as the Node MSI row), and fnm's modern base is `%APPDATA%\fnm` (not `%LOCALAPPDATA%`). Those corrections supersede the SC-1 list above, per D-09's own deferral to D-12's deliverable.**
 
@@ -427,7 +427,7 @@ Parallelism opportunities: Phase 2 may run alongside Phase 3 (both depend only o
 | 3. CI Spike — Prove LLRT Basics on Windows | 5/5 | Complete    | 2026-08-14 |
 | 4. Platform Foundation | 11/11 | Complete    | 2026-08-20 |
 | 5. Kill Shell Wrappers | 6/6 | Complete   | 2026-08-20 |
-| 6. Windows Command Resolution | 0/2 | Not started | - |
+| 6. Windows Command Resolution | 7/7 | Complete    | 2026-08-21 |
 | 7. Provider Spawn & Registration | 0/3 | Not started | - |
 | 8. Process Lifecycle | 0/1 | Not started | - |
 | 9. CI Hardening | 0/1 | Not started | - |

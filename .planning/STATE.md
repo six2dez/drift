@@ -1,19 +1,19 @@
 ---
 gsd_state_version: 1.0
 milestone: v1.0
-current_phase: 06
-current_phase_name: Windows Command Resolution
-status: executing
-stopped_at: Phase 6 context gathered
-last_updated: "2026-08-21T10:43:05.729Z"
+current_phase: 2
+current_phase_name: POSIX Correctness & Hardening
+status: planning
+stopped_at: Phase 6 complete, ready to plan Phase 2
+last_updated: "2026-08-21T13:32:09.156Z"
 last_activity: 2026-08-21
-last_activity_desc: Phase 06 execution started
-state_head: 7afc64a9be5e92ca62f2b9aca888250371a61728
+last_activity_desc: Phase 6 complete, transitioned to Phase 2
+state_head: c54cff0379b4866058af042d20108f2382db1a4f
 progress:
   total_phases: 13
-  completed_phases: 4
+  completed_phases: 5
   total_plans: 35
-  completed_plans: 28
+  completed_plans: 35
 milestone_name: milestone
 ---
 
@@ -28,10 +28,10 @@ See: .planning/PROJECT.md (updated 2026-06-26)
 
 ## Current Position
 
-Phase: 06 (Windows Command Resolution) — EXECUTING
-Plan: 1 of 7
-Status: Executing Phase 06
-Last activity: 2026-08-21 — Phase 06 execution started
+Phase: 2 — POSIX Correctness & Hardening
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-08-21 — Phase 6 complete, transitioned to Phase 2
 
 Progress: [███░░░░░░░] 30% (3 of 10 milestone phases)
 
@@ -39,7 +39,7 @@ Progress: [███░░░░░░░] 30% (3 of 10 milestone phases)
 
 **Velocity:**
 
-- Total plans completed: 22 (plus 1 quick task) — measured from `*-SUMMARY.md` on disk (Phase 1: 6, Phase 3: 5, Phase 4: 11), not hand-incremented
+- Total plans completed: 18 (plus 1 quick task) — measured from `*-SUMMARY.md` on disk (Phase 1: 6, Phase 3: 5, Phase 4: 11), not hand-incremented
 - Average duration: ~10 min
 - Total execution time: ~3.7 hours
 
@@ -50,6 +50,7 @@ Progress: [███░░░░░░░] 30% (3 of 10 milestone phases)
 | 01 | 6 | - | - |
 | 03 | 5 | - | - |
 | 04 | 11 of 11 | ~2h | ~11 min |
+| 6 | 7 | - | - |
 
 **Recent Trend:**
 
@@ -221,7 +222,7 @@ Items acknowledged and carried forward from previous milestone close:
 ## Session Continuity
 
 Last session: 2026-08-21T09:00:42.164Z
-Stopped at: Phase 6 context gathered
+Stopped at: Phase 6 complete, ready to plan Phase 2
 Resume file: .planning/phases/06-windows-command-resolution/06-CONTEXT.md
 
 **Live on the public remote: nothing of ours.** Plan 03-04 tore down all three `scratch/*` branches (`ci-proof-windows-probe`, `ci-proof-windows-probe-negative`, `ci-proof-windows-gate-negative`) locally and remotely. Asserted with a `test -z` discrimination over the captured glob (`scratch-glob-empty=0`) plus the full unfiltered listing, which now shows only `main` at `2d8cf16` and the pre-existing, unrelated `fix/security-hotfixes` at `0cd81f3`. `origin/main` was never pushed by this phase and is still `2d8cf16`; local `main` is 23 commits ahead and deliberately unpushed. **Re-verified 2026-08-13 (plan 03-05):** the remote still lists only `main` `2d8cf16` and the pre-existing `fix/security-hotfixes` `0cd81f3`, and all eight Phase 3 run records (4 probe + 4 `CI` control) still resolve with their recorded conclusions — which is what makes the URLs in `03-FINDINGS.md` valid citations after the branches were deleted. The probe **artifacts** do not survive: they expire 2026-09-12, which is why D-11 required the committed findings document.
