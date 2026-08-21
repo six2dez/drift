@@ -266,3 +266,17 @@ None — no external service configuration required.
 ---
 *Phase: 06-windows-command-resolution*
 *Completed: 2026-08-21*
+
+## Self-Check: PASSED
+
+- `packages/backend/src/index.ts` and `06-05-SUMMARY.md` both present on disk.
+- All three task commits present in `git log` (`12870df`, `12ff3ae`, `83013a3`), plus the
+  metadata commit `d3f191c`.
+- `git diff --name-only HEAD~4 HEAD` touches only `packages/backend/src/index.ts`,
+  `06-05-SUMMARY.md` and `.planning/WINDOWS.md`. `STATE.md` and `ROADMAP.md` are untouched and
+  unstaged, as are the concurrent session's `.planning/` edits.
+- `git diff --diff-filter=D HEAD~4 HEAD` is empty — nothing was deleted.
+- Stub scan over all added lines: 0 matches for TODO / FIXME / placeholder / "coming soon".
+- Every acceptance criterion in all three tasks was run; all three `awk`-scoped gates had their
+  extracted range printed and eyeballed before the result was read.
+- `pnpm exec vitest run` 402 passed (31 files); `pnpm -r typecheck` and `pnpm lint` both exit 0.
