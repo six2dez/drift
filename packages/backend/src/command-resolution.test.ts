@@ -42,11 +42,19 @@ describe("command resolution helpers", () => {
       platform: "linux",
     });
 
+    // The DIRECTORIES above are created with the host-flavoured path.join,
+    // which is correct: they are real directories on the real filesystem. The
+    // EXPECTATIONS are written with the injected platform's separator, because
+    // since plan 06-01 the helper spells its output through joinPath for the
+    // TARGET platform ("linux" here) rather than through the host's `path`.
+    // Comparing a platform-injected result against a host-flavoured join is what
+    // took the `windows-latest` leg red (WINDOWS.md entry 6); the two forms are
+    // byte-identical on a POSIX host and only these agree on a Windows one.
     expect(candidates).toContain(
-      path.join(homeDir, ".nvm", "versions", "node", "v22.1.0", "bin", "claude"),
+      `${homeDir}/.nvm/versions/node/v22.1.0/bin/claude`,
     );
     expect(candidates).toContain(
-      path.join(homeDir, ".fnm", "node-versions", "v20.5.0", "installation", "bin", "claude"),
+      `${homeDir}/.fnm/node-versions/v20.5.0/installation/bin/claude`,
     );
   });
 
@@ -63,13 +71,15 @@ describe("command resolution helpers", () => {
       roots: {},
     });
 
+    // Platform-injected expectations, for the reason spelled out in the version
+    // manager test above.
     expect(candidates[0]).toBe("/opt/homebrew/bin/claude");
-    expect(candidates).toContain(path.join(homeDir, ".local", "bin", "claude"));
-    expect(candidates).toContain(path.join(homeDir, ".volta", "bin", "claude"));
-    expect(candidates).toContain(path.join(homeDir, ".asdf", "shims", "claude"));
-    expect(candidates).toContain(path.join(homeDir, "Library", "pnpm", "claude"));
+    expect(candidates).toContain(`${homeDir}/.local/bin/claude`);
+    expect(candidates).toContain(`${homeDir}/.volta/bin/claude`);
+    expect(candidates).toContain(`${homeDir}/.asdf/shims/claude`);
+    expect(candidates).toContain(`${homeDir}/Library/pnpm/claude`);
     expect(candidates).toContain(
-      path.join(homeDir, ".nvm", "versions", "node", "v18.0.0", "bin", "claude"),
+      `${homeDir}/.nvm/versions/node/v18.0.0/bin/claude`,
     );
   });
 
@@ -113,20 +123,33 @@ describe("command resolution helpers", () => {
     // POSIX, so it failed the first real windows-latest run (CI run
     // 32376894371, 2026-08-20) for the test's reasons, not the code's:
     //   expected [ '/usr/local/bin/node', …(6) ] to include '/Users/six2dez/.local/bin/node'
+    //
+    // UPDATE (plan 06-02, T-06-06) — the comment above is preserved verbatim
+    // because its argument still holds for the INPUT: `providerDir` is a host
+    // path and the sibling directory is still derived with the host-flavoured
+    // `path.dirname`. What changed is the JOIN. The sibling is now spelled by
+    // the platform-injected `joinPath` for the platform passed in below, so the
+    // two expectations are written with the injected platform's separator
+    // instead of the host's. Before this task they were host-flavoured joins
+    // against a POSIX-spelled result, which is why the `windows-latest` leg was
+    // red between plans 06-01 and 06-02 (WINDOWS.md entry 6). Both forms below
+    // are byte-identical on a POSIX host and now also correct on a Windows one.
     const providerDir = await mkdtemp(path.join(os.tmpdir(), "drift-provider-"));
     tempDirs.push(providerDir);
 
     const candidates = await getNodeExecutableCandidates({
+      platform: "linux",
       execPath: "/usr/local/bin/node",
       pathResolution: "/opt/homebrew/bin/node",
       homeDirs: [homeDir],
+      roots: {},
       absoluteProviderCommands: [path.join(providerDir, "claude")],
     });
 
     expect(candidates).toContain("/usr/local/bin/node");
     expect(candidates).toContain("/opt/homebrew/bin/node");
-    expect(candidates).toContain(path.join(providerDir, "node"));
-    expect(candidates).toContain(path.join(homeDir, ".volta", "bin", "node"));
+    expect(candidates).toContain(`${providerDir}/node`);
+    expect(candidates).toContain(`${homeDir}/.volta/bin/node`);
   });
 });
 

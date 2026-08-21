@@ -2500,9 +2500,16 @@ async function getNodeExecutable(): Promise<string | undefined> {
     process?: { execPath?: string; env?: Record<string, string | undefined> };
   };
   const candidates = await getNodeExecutableCandidates({
+    // The same threading plan 06-01 established at resolveCommand: the RUN-05
+    // probe platform decides the path SPELLING, and the Windows install roots
+    // are read by name from the parent environment rather than guessed from a
+    // drive letter. `roots` comes from readParentEnv() so no environment value
+    // is ever logged on the way (05-D-11 / T-06-T09).
+    platform: host?.platform,
     execPath: processRef.process?.execPath,
     pathResolution: await resolveCommand("node"),
     homeDirs: getKnownHomeDirs(),
+    roots: getWindowsNamedRoots({ env: readParentEnv() }),
     // The DEFENSIVE reading of `providers[*].command`, chosen so this module and
     // buildProviderCommandSignature (resolution-cache.ts) stop holding opposite
     // beliefs about the same field: that function already declares the command

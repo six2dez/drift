@@ -224,6 +224,206 @@ export async function collectVersionManagerCommandCandidates(input: {
   return candidates;
 }
 
+// The sourced Windows install-location table, extracted so BOTH builders share
+// exactly one copy of it. A provider CLI and `node` live in the same places on
+// Windows; only the node-ONLY rows (the MSI directory, the Volta node image)
+// differ, and those stay in the node builder.
+//
+// Pure and synchronous: the version directory NAMES arrive already discovered.
+//
+// `emitRootlessLiteral` is a parameter rather than a platform test because the
+// two callers answer it differently for the same reason — see the row itself.
+function buildWindowsInstallLocationCandidates(input: {
+  command: string;
+  roots: WindowsNamedRoots;
+  windowsVersionDirs: WindowsVersionDirs | undefined;
+  emitRootlessLiteral: boolean;
+}): string[] {
+  const candidates: string[] = [];
+  // Both the separator and the extension ladder are pinned to the literal
+  // "win32" even when the host platform is unknown: they are properties of the
+  // Windows ROW, not of the host. A row spelled with the runner's separator
+  // would make every assertion below a test of the runner.
+  const windowsNames = getExecutableNames({
+    command: input.command,
+    platform: "win32",
+  });
+  const win32 = (segments: string[]): string =>
+    joinPath({ platform: "win32", segments });
+
+  // Emit one candidate per ladder spelling for ONE location, then move on —
+  // that is D-11's location-major ordering, and it is what the whole-array
+  // assertion in the test file pins. An absent root emits nothing at all
+  // (T-06-T02) — never a candidate with an empty prefix, which would resolve
+  // against the process working directory, a directory the user never chose.
+  const emitLocation = (
+    root: string | undefined,
+    segments: string[],
+  ): void => {
+    if (root === undefined) return;
+    for (const name of windowsNames) {
+      pushUniqueCandidate(candidates, win32([root, ...segments, name]));
+    }
+  };
+
+  // ── The sourced Windows install-location table (D-09 / D-11 / D-12) ──
+  //
+  // D-12 is cite-or-drop: every row below names the installer script, package
+  // source or first-party document it came from. A row that could not be
+  // sourced is NOT here — it is recorded as a non-claim at the bottom of this
+  // comment instead, so a later reader finds the reason beside the table
+  // rather than having to re-derive it.
+  //
+  // THREE ROWS CORRECT THE ROADMAP, and the corrections win. D-09's own text
+  // calls its inline sketch "roughly (the exact set is D-12's deliverable)",
+  // so this is D-12 working as designed rather than a silent divergence:
+  //   * nvm-windows lives under LOCAL application data, not roaming. Verified
+  //     from coreybutler/nvm-windows `nvm.iss` (DefaultDirName={localappdata}\nvm,
+  //     then NVM_HOME written to {app}).
+  //   * nvm-windows' symlink default is C:\nvm4w\nodejs, not %ProgramFiles%\nodejs.
+  //     Verified from the same `nvm.iss`; the installer's README warns that
+  //     pointing it at a physical directory FAILS.
+  //   * fnm's modern base is under ROAMING application data, not local.
+  //     Verified from Schniz/fnm `src/directories.rs` plus etcetera 0.8.0's own
+  //     doctest mapping APPDATA to data_dir(). (The fnm rows themselves land in
+  //     the version walk below.)
+  //
+  // DROPPED under D-12, recorded here as explicit non-claims:
+  //   * roaming-appdata nvm — no source found for any nvm-windows release
+  //     defaulting there; the installer's own script defaults under local
+  //     application data (see the correction above).
+  //   * Program Files\Volta — sourced, but it holds the volta.exe binary
+  //     itself, not a Node or provider CLI, so it resolves nothing this
+  //     module looks for.
+  //   * asdf on native Windows — no native build exists; asdf's own FAQ scopes
+  //     Windows support to WSL2. The POSIX ~/.asdf/shims row above is
+  //     deliberately untouched.
+  //   * user-profile .volta on win32 — the POSIX analogy, unsourced for
+  //     Windows. Volta's Windows home is under local application data, which
+  //     is the row actually emitted below.
+
+  // P-01. npm's own documentation states the default global prefix on Windows
+  // is the roaming application-data npm directory, and that on Windows
+  // executables are placed DIRECTLY into the prefix where Unix links them into
+  // {prefix}/bin — so a `bin` segment here would be wrong.
+  // Source: docs.npmjs.com/cli/v11/configuring-npm/folders.
+  emitLocation(input.roots.appData, ["npm"]);
+
+  // P-19. The Claude Code native installer's Windows location. Its uninstall
+  // instructions name this path verbatim ($env:USERPROFILE\.local\bin\claude.exe),
+  // which also confirms the extension is .exe — the ladder hits its first rung
+  // here. Source: code.claude.com/docs/en/setup, § Uninstall → Native → Windows.
+  emitLocation(input.roots.userProfile, [".local", "bin"]);
+
+  // P-11 / P-12. Volta's shim directory. Home verified from volta-cli/volta
+  // `crates/volta-core/src/layout/windows.rs` (data_local_dir() + "Volta");
+  // shim directory from `crates/volta-layout/src/v4.rs` ("bin": shim_dir).
+  // Volta's Windows shims carry the .cmd spelling — the same v4.rs appends
+  // ".cmd" to the tool name under cfg(windows). Phase 3 measured a DIRECT
+  // spawn of that spelling throwing synchronously
+  // (.planning/phases/03-ci-spike-prove-llrt-basics-on-windows/03-FINDINGS.md
+  // § P1-CMD), so this phase RESOLVES the shim and claims nothing more:
+  // making it launchable is PRV-02 in Phase 7.
+  emitLocation(input.roots.localAppData, ["Volta", "bin"]);
+
+  // P-16. pnpm's Windows data directory, verified from @pnpm/config
+  // `lib/dirs.js` getDataDir — whose per-platform table also confirms the two
+  // POSIX pnpm rows already above (Library/pnpm on darwin, .local/share/pnpm
+  // elsewhere) are correct.
+  emitLocation(input.roots.localAppData, ["pnpm"]);
+
+  // P-16, the same function's fallback arm when LOCALAPPDATA is unset.
+  emitLocation(input.roots.userProfile, [".pnpm"]);
+
+  // P-15. Bun. Same shape as the POSIX ~/.bun/bin row above.
+  // Source: bun.com/docs/installation (its Windows PATH fix references
+  // "$env:USERPROFILE\.bun\bin").
+  emitLocation(input.roots.userProfile, [".bun", "bin"]);
+
+  // P-17. scoop, per-user. Verified from ScoopInstaller/Install `install.ps1`
+  // ("$env:USERPROFILE\scoop" then "$SCOOP_DIR\shims").
+  emitLocation(input.roots.userProfile, ["scoop", "shims"]);
+
+  // P-18. scoop, machine-wide, from the same script
+  // ("$env:ProgramData\scoop"). ProgramData is not one of D-09's three user
+  // variables, so it gets its own row for exactly the reason the program-files
+  // row in the node builder does.
+  emitLocation(input.roots.programData, ["scoop", "shims"]);
+
+  // ── Version-manager rows ──
+  //
+  // The directory NAMES arrive already discovered from the thin impure caller;
+  // only the spelling happens here. Each list is bounded to the newest
+  // WIN32_VERSION_WALK_LIMIT entries — see that constant for why the number is
+  // a cost bound rather than a measurement, and why POSIX stays unbounded.
+  const versionDirs = input.windowsVersionDirs ?? EMPTY_WINDOWS_VERSION_DIRS;
+  const newest = (entries: string[]): string[] =>
+    entries.slice(0, WIN32_VERSION_WALK_LIMIT);
+
+  // P-04 / P-05. nvm-windows keeps node.exe DIRECTLY in the version directory:
+  // there is no `bin` segment, unlike the POSIX ~/.nvm row above. The entry
+  // name already carries its `v` prefix because that is how the installer
+  // names the directory — verified from coreybutler/nvm-windows `nvm.go`,
+  // filepath.Join(env.root, "v"+version).
+  for (const version of newest(versionDirs.nvmWindows)) {
+    emitLocation(input.roots.localAppData, ["nvm", version]);
+  }
+
+  // P-08 / P-10. fnm's modern base is under ROAMING application data — this
+  // CORRECTS the roadmap, and the source is fnm's own directory strategy
+  // (Schniz/fnm `src/directories.rs` calling etcetera's data_dir(), which on
+  // Windows is APPDATA).
+  //
+  // NO `bin` SEGMENT ON WINDOWS. fnm appends `bin` only on non-Windows —
+  // `src/commands/exec.rs` guards it with cfg(not(windows)) — while the
+  // version path itself is installations_dir/<v>/installation
+  // (`src/config.rs`, `src/version.rs`). The POSIX fnm row above keeps its
+  // `bin` segment and must not be "tidied up" to match this one; the two
+  // layouts genuinely differ, and the test file pins both halves.
+  for (const version of newest(versionDirs.fnmModern)) {
+    emitLocation(input.roots.appData, [
+      "fnm",
+      "node-versions",
+      version,
+      "installation",
+    ]);
+  }
+
+  // P-09. fnm's legacy base, which fnm itself still probes — a user upgraded
+  // from an older fnm has this layout. Same missing `bin` segment.
+  for (const version of newest(versionDirs.fnmLegacy)) {
+    emitLocation(input.roots.userProfile, [
+      ".fnm",
+      "node-versions",
+      version,
+      "installation",
+    ]);
+  }
+
+  // Volta node images (P-13) are node-only and belong to the node builder, not
+  // here: a provider CLI never lives under tools\image\node.
+
+  // P-06 — the ONE deliberate drive-qualified literal in this module, and it
+  // is the nvm-windows installer's own default rather than a guess: `nvm.iss`
+  // seeds the symlink page with C:\nvm4w\nodejs and appends %NVM_SYMLINK% to
+  // PATH. Because the installer puts it on PATH, the PATH search normally
+  // answers first — this row is the broken-PATH fallback.
+  //
+  // It is gated on the LITERAL "win32" rather than on the union arm above,
+  // and that is not an oversight. Every other row here vanishes when its root
+  // is absent, which is exactly why the union arm is CMP-01-safe on POSIX: no
+  // Windows root variable is set there, so no win32 row can fire. This row
+  // depends on no variable, so in the pre-probe `undefined` arm it would fire
+  // on a Linux host and break the byte-identity the three CMP-01 tests pin. On
+  // a real Windows host the RUN-05 probe has resolved by the time a launch
+  // resolves a command, and a broken-PATH fallback is the last thing a
+  // pre-probe status check needs.
+  if (input.emitRootlessLiteral) {
+    emitLocation(NVM_WINDOWS_SYMLINK_DIR, []);
+  }
+  return candidates;
+}
+
 // PURE. Zero I/O, synchronous, and the SC-5 seam (D-10): the Windows list is
 // byte-for-byte assertable from literal inputs on the Linux runner, where
 // C:\Users\x\AppData\Roaming\npm cannot exist.
@@ -281,186 +481,18 @@ export function buildCommandCandidatePaths(input: {
   }
 
   if (input.platform === "win32" || input.platform === undefined) {
-    // Both the separator and the extension ladder are pinned to the literal
-    // "win32" even when the host platform is unknown: they are properties of the
-    // Windows ROW, not of the host. A row spelled with the runner's separator
-    // would make every assertion below a test of the runner.
-    const windowsNames = getExecutableNames({
+    // The whole win32 table lives in the shared helper above. The rootless
+    // nvm-windows literal is emitted only when the platform is KNOWN to be
+    // win32: every other row vanishes with its absent root, which is precisely
+    // why this union arm stays CMP-01-safe on POSIX, and a rootless row would
+    // be the one thing able to fire on a Linux host in the pre-probe state.
+    for (const candidate of buildWindowsInstallLocationCandidates({
       command: input.command,
-      platform: "win32",
-    });
-    const win32 = (segments: string[]): string =>
-      joinPath({ platform: "win32", segments });
-
-    // Emit one candidate per ladder spelling for ONE location, then move on —
-    // that is D-11's location-major ordering, and it is what the whole-array
-    // assertion in the test file pins. An absent root emits nothing at all
-    // (T-06-T02) — never a candidate with an empty prefix, which would resolve
-    // against the process working directory, a directory the user never chose.
-    const emitLocation = (
-      root: string | undefined,
-      segments: string[],
-    ): void => {
-      if (root === undefined) return;
-      for (const name of windowsNames) {
-        pushUniqueCandidate(candidates, win32([root, ...segments, name]));
-      }
-    };
-
-    // ── The sourced Windows install-location table (D-09 / D-11 / D-12) ──
-    //
-    // D-12 is cite-or-drop: every row below names the installer script, package
-    // source or first-party document it came from. A row that could not be
-    // sourced is NOT here — it is recorded as a non-claim at the bottom of this
-    // comment instead, so a later reader finds the reason beside the table
-    // rather than having to re-derive it.
-    //
-    // THREE ROWS CORRECT THE ROADMAP, and the corrections win. D-09's own text
-    // calls its inline sketch "roughly (the exact set is D-12's deliverable)",
-    // so this is D-12 working as designed rather than a silent divergence:
-    //   * nvm-windows lives under LOCAL application data, not roaming. Verified
-    //     from coreybutler/nvm-windows `nvm.iss` (DefaultDirName={localappdata}\nvm,
-    //     then NVM_HOME written to {app}).
-    //   * nvm-windows' symlink default is C:\nvm4w\nodejs, not %ProgramFiles%\nodejs.
-    //     Verified from the same `nvm.iss`; the installer's README warns that
-    //     pointing it at a physical directory FAILS.
-    //   * fnm's modern base is under ROAMING application data, not local.
-    //     Verified from Schniz/fnm `src/directories.rs` plus etcetera 0.8.0's own
-    //     doctest mapping APPDATA to data_dir(). (The fnm rows themselves land in
-    //     the version walk below.)
-    //
-    // DROPPED under D-12, recorded here as explicit non-claims:
-    //   * roaming-appdata nvm — no source found for any nvm-windows release
-    //     defaulting there; the installer's own script defaults under local
-    //     application data (see the correction above).
-    //   * Program Files\Volta — sourced, but it holds the volta.exe binary
-    //     itself, not a Node or provider CLI, so it resolves nothing this
-    //     module looks for.
-    //   * asdf on native Windows — no native build exists; asdf's own FAQ scopes
-    //     Windows support to WSL2. The POSIX ~/.asdf/shims row above is
-    //     deliberately untouched.
-    //   * user-profile .volta on win32 — the POSIX analogy, unsourced for
-    //     Windows. Volta's Windows home is under local application data, which
-    //     is the row actually emitted below.
-
-    // P-01. npm's own documentation states the default global prefix on Windows
-    // is the roaming application-data npm directory, and that on Windows
-    // executables are placed DIRECTLY into the prefix where Unix links them into
-    // {prefix}/bin — so a `bin` segment here would be wrong.
-    // Source: docs.npmjs.com/cli/v11/configuring-npm/folders.
-    emitLocation(input.roots.appData, ["npm"]);
-
-    // P-19. The Claude Code native installer's Windows location. Its uninstall
-    // instructions name this path verbatim ($env:USERPROFILE\.local\bin\claude.exe),
-    // which also confirms the extension is .exe — the ladder hits its first rung
-    // here. Source: code.claude.com/docs/en/setup, § Uninstall → Native → Windows.
-    emitLocation(input.roots.userProfile, [".local", "bin"]);
-
-    // P-11 / P-12. Volta's shim directory. Home verified from volta-cli/volta
-    // `crates/volta-core/src/layout/windows.rs` (data_local_dir() + "Volta");
-    // shim directory from `crates/volta-layout/src/v4.rs` ("bin": shim_dir).
-    // Volta's Windows shims carry the .cmd spelling — the same v4.rs appends
-    // ".cmd" to the tool name under cfg(windows). Phase 3 measured a DIRECT
-    // spawn of that spelling throwing synchronously
-    // (.planning/phases/03-ci-spike-prove-llrt-basics-on-windows/03-FINDINGS.md
-    // § P1-CMD), so this phase RESOLVES the shim and claims nothing more:
-    // making it launchable is PRV-02 in Phase 7.
-    emitLocation(input.roots.localAppData, ["Volta", "bin"]);
-
-    // P-16. pnpm's Windows data directory, verified from @pnpm/config
-    // `lib/dirs.js` getDataDir — whose per-platform table also confirms the two
-    // POSIX pnpm rows already above (Library/pnpm on darwin, .local/share/pnpm
-    // elsewhere) are correct.
-    emitLocation(input.roots.localAppData, ["pnpm"]);
-
-    // P-16, the same function's fallback arm when LOCALAPPDATA is unset.
-    emitLocation(input.roots.userProfile, [".pnpm"]);
-
-    // P-15. Bun. Same shape as the POSIX ~/.bun/bin row above.
-    // Source: bun.com/docs/installation (its Windows PATH fix references
-    // "$env:USERPROFILE\.bun\bin").
-    emitLocation(input.roots.userProfile, [".bun", "bin"]);
-
-    // P-17. scoop, per-user. Verified from ScoopInstaller/Install `install.ps1`
-    // ("$env:USERPROFILE\scoop" then "$SCOOP_DIR\shims").
-    emitLocation(input.roots.userProfile, ["scoop", "shims"]);
-
-    // P-18. scoop, machine-wide, from the same script
-    // ("$env:ProgramData\scoop"). ProgramData is not one of D-09's three user
-    // variables, so it gets its own row for exactly the reason the program-files
-    // row in the node builder does.
-    emitLocation(input.roots.programData, ["scoop", "shims"]);
-
-    // ── Version-manager rows ──
-    //
-    // The directory NAMES arrive already discovered from the thin impure caller;
-    // only the spelling happens here. Each list is bounded to the newest
-    // WIN32_VERSION_WALK_LIMIT entries — see that constant for why the number is
-    // a cost bound rather than a measurement, and why POSIX stays unbounded.
-    const versionDirs = input.windowsVersionDirs ?? EMPTY_WINDOWS_VERSION_DIRS;
-    const newest = (entries: string[]): string[] =>
-      entries.slice(0, WIN32_VERSION_WALK_LIMIT);
-
-    // P-04 / P-05. nvm-windows keeps node.exe DIRECTLY in the version directory:
-    // there is no `bin` segment, unlike the POSIX ~/.nvm row above. The entry
-    // name already carries its `v` prefix because that is how the installer
-    // names the directory — verified from coreybutler/nvm-windows `nvm.go`,
-    // filepath.Join(env.root, "v"+version).
-    for (const version of newest(versionDirs.nvmWindows)) {
-      emitLocation(input.roots.localAppData, ["nvm", version]);
-    }
-
-    // P-08 / P-10. fnm's modern base is under ROAMING application data — this
-    // CORRECTS the roadmap, and the source is fnm's own directory strategy
-    // (Schniz/fnm `src/directories.rs` calling etcetera's data_dir(), which on
-    // Windows is APPDATA).
-    //
-    // NO `bin` SEGMENT ON WINDOWS. fnm appends `bin` only on non-Windows —
-    // `src/commands/exec.rs` guards it with cfg(not(windows)) — while the
-    // version path itself is installations_dir/<v>/installation
-    // (`src/config.rs`, `src/version.rs`). The POSIX fnm row above keeps its
-    // `bin` segment and must not be "tidied up" to match this one; the two
-    // layouts genuinely differ, and the test file pins both halves.
-    for (const version of newest(versionDirs.fnmModern)) {
-      emitLocation(input.roots.appData, [
-        "fnm",
-        "node-versions",
-        version,
-        "installation",
-      ]);
-    }
-
-    // P-09. fnm's legacy base, which fnm itself still probes — a user upgraded
-    // from an older fnm has this layout. Same missing `bin` segment.
-    for (const version of newest(versionDirs.fnmLegacy)) {
-      emitLocation(input.roots.userProfile, [
-        ".fnm",
-        "node-versions",
-        version,
-        "installation",
-      ]);
-    }
-
-    // Volta node images (P-13) are node-only and belong to the node builder, not
-    // here: a provider CLI never lives under tools\image\node.
-
-    // P-06 — the ONE deliberate drive-qualified literal in this module, and it
-    // is the nvm-windows installer's own default rather than a guess: `nvm.iss`
-    // seeds the symlink page with C:\nvm4w\nodejs and appends %NVM_SYMLINK% to
-    // PATH. Because the installer puts it on PATH, the PATH search normally
-    // answers first — this row is the broken-PATH fallback.
-    //
-    // It is gated on the LITERAL "win32" rather than on the union arm above,
-    // and that is not an oversight. Every other row here vanishes when its root
-    // is absent, which is exactly why the union arm is CMP-01-safe on POSIX: no
-    // Windows root variable is set there, so no win32 row can fire. This row
-    // depends on no variable, so in the pre-probe `undefined` arm it would fire
-    // on a Linux host and break the byte-identity the three CMP-01 tests pin. On
-    // a real Windows host the RUN-05 probe has resolved by the time a launch
-    // resolves a command, and a broken-PATH fallback is the last thing a
-    // pre-probe status check needs.
-    if (input.platform === "win32") {
-      emitLocation(NVM_WINDOWS_SYMLINK_DIR, []);
+      roots: input.roots,
+      windowsVersionDirs: input.windowsVersionDirs,
+      emitRootlessLiteral: input.platform === "win32",
+    })) {
+      pushUniqueCandidate(candidates, candidate);
     }
   }
 
@@ -545,61 +577,204 @@ export async function getCommandExecutableCandidates(input: {
   });
 }
 
-export async function getNodeExecutableCandidates(input: {
-  // No `platform` field yet: this signature gains one in plan 06-02's T-06-06.
-  // Until it does, every joinPath in the body below takes a temporary POSIX-arm
-  // pass-through — see the comment beside them.
+// PURE. The node counterpart of buildCommandCandidatePaths, and pure for the same
+// SC-5 reason: the win32 node list has to be assertable from literal inputs on
+// the Linux runner, where C:\Program Files\nodejs cannot exist.
+//
+// Node gets its own builder rather than a `command: "node"` call into the one
+// above because its POSIX list genuinely differs — an exec path and a
+// provider-adjacent sibling at the front, no /bin row, no .npm-global row, and a
+// different home-directory order. That list is pre-Phase-6 behaviour and the
+// CMP-01 block for this function pins it byte-for-byte.
+export function buildNodeCandidatePaths(input: {
+  platform: Platform | undefined;
   execPath?: string;
   pathResolution?: string;
   homeDirs: string[];
-  absoluteProviderCommands: string[];
-}): Promise<string[]> {
+  roots: WindowsNamedRoots;
+  providerAdjacentDirs: string[];
+  versionCandidatesByHomeDir: Record<string, string[]>;
+  windowsVersionDirs?: WindowsVersionDirs;
+}): string[] {
   const candidates: string[] = [];
 
   pushUniqueCandidate(candidates, input.execPath);
   pushUniqueCandidate(candidates, input.pathResolution);
 
-  for (const commandPath of input.absoluteProviderCommands) {
-    // `path.dirname` is the ONE deliberate module-path exception in this file and
-    // it survives the D-05 sweep: D-05 names every join and does not name
-    // `dirname`, and this call is host-flavoured BY DESIGN — on a real Windows
-    // host the command is "C:\...\claude.cmd" and only a win32-flavoured dirname
-    // finds its directory. Plan 06-02's T-06-06 relocates this derivation and
-    // writes the exception down beside it. Do not "finish the sweep" here.
-    pushUniqueCandidate(
-      candidates,
-      joinPath({
-        platform: undefined,
-        segments: [path.dirname(commandPath), "node"],
-      }),
-    );
+  // Q4, second half. The DIRECTORIES arrive already derived by the thin impure
+  // caller, which is what lets this row be spelled for the target platform and
+  // asserted on Linux. On win32 the sibling gains the full extension ladder: a
+  // bare `node` beside a `claude.cmd` is not a Windows executable name.
+  //
+  // On POSIX — and in the pre-probe `undefined` arm — the ladder has exactly one
+  // rung, so the emitted string is byte-identical to the pre-Phase-6 one.
+  const siblingNames =
+    input.platform === "win32"
+      ? getExecutableNames({ command: "node", platform: "win32" })
+      : ["node"];
+  for (const providerDir of input.providerAdjacentDirs) {
+    for (const name of siblingNames) {
+      pushUniqueCandidate(
+        candidates,
+        joinPath({ platform: input.platform, segments: [providerDir, name] }),
+      );
+    }
   }
 
-  pushUniqueCandidate(candidates, "/opt/homebrew/bin/node");
-  pushUniqueCandidate(candidates, "/usr/local/bin/node");
-  pushUniqueCandidate(candidates, "/usr/bin/node");
+  if (input.platform !== "win32") {
+    const posix = (segments: string[]): string =>
+      joinPath({ platform: input.platform, segments });
 
-  // Every `platform: undefined` below is a TEMPORARY POSIX-arm pass-through, not
-  // a platform that was defaulted on purpose. This function does not hold a
-  // platform yet — its public signature gains one in plan 06-02's T-06-06, which
-  // substitutes the real RUN-05 probe value at each of these sites. It is
-  // CMP-01-safe in the meantime because joinPath's POSIX arm IS the pre-sweep
-  // spelling, so the emitted strings are byte-identical to today's on POSIX.
-  const posix = (segments: string[]): string =>
-    joinPath({ platform: undefined, segments });
+    pushUniqueCandidate(candidates, "/opt/homebrew/bin/node");
+    pushUniqueCandidate(candidates, "/usr/local/bin/node");
+    pushUniqueCandidate(candidates, "/usr/bin/node");
 
-  for (const homeDir of [...new Set(input.homeDirs)]) {
-    pushUniqueCandidate(candidates, posix([homeDir, ".volta", "bin", "node"]));
-    pushUniqueCandidate(candidates, posix([homeDir, ".asdf", "shims", "node"]));
-    pushUniqueCandidate(candidates, posix([homeDir, ".local", "bin", "node"]));
-    for (const candidate of await collectVersionManagerCommandCandidates({
-      homeDir,
+    for (const homeDir of [...new Set(input.homeDirs)]) {
+      pushUniqueCandidate(candidates, posix([homeDir, ".volta", "bin", "node"]));
+      pushUniqueCandidate(candidates, posix([homeDir, ".asdf", "shims", "node"]));
+      pushUniqueCandidate(candidates, posix([homeDir, ".local", "bin", "node"]));
+      for (const candidate of input.versionCandidatesByHomeDir[homeDir] ?? []) {
+        pushUniqueCandidate(candidates, candidate);
+      }
+    }
+  }
+
+  if (input.platform === "win32") {
+    const windowsNames = getExecutableNames({
       command: "node",
-      platform: undefined,
+      platform: "win32",
+    });
+    const emitLocation = (
+      root: string | undefined,
+      segments: string[],
+    ): void => {
+      if (root === undefined) return;
+      for (const name of windowsNames) {
+        pushUniqueCandidate(
+          candidates,
+          joinPath({ platform: "win32", segments: [root, ...segments, name] }),
+        );
+      }
+    };
+
+    // ── The node-ONLY Windows rows ──
+    //
+    // P-13, the Volta node IMAGE, and it is emitted BEFORE the Volta shim row
+    // that arrives with the shared table below. Research § Pitfall 3: Volta's
+    // Windows shims carry the .cmd spelling, and Phase 3 measured a direct spawn
+    // of that spelling throwing synchronously
+    // (.planning/phases/03-ci-spike-prove-llrt-basics-on-windows/03-FINDINGS.md
+    // § P1-CMD), so reaching the real node.exe first is a genuine reduction in
+    // Phase 7's cmd.exe surface rather than a cosmetic reordering. This row is
+    // NOT in the roadmap; it was added on the strength of Volta's own layout
+    // crate (volta-cli/volta `crates/volta-layout/src/v4.rs`, the image dir
+    // tree, with the node image bin dir having no `bin` segment under
+    // cfg(windows)). It does not make Phase 6 responsible for SPAWNING anything:
+    // PRV-02 still owns the shim case, this row merely makes it rarer.
+    const versionDirs = input.windowsVersionDirs ?? EMPTY_WINDOWS_VERSION_DIRS;
+    for (const version of versionDirs.voltaNodeImages.slice(
+      0,
+      WIN32_VERSION_WALK_LIMIT,
+    )) {
+      emitLocation(input.roots.localAppData, [
+        "Volta",
+        "tools",
+        "image",
+        "node",
+        version,
+      ]);
+    }
+
+    // P-02, the Node MSI directory. Microsoft's Node-on-Windows page names it,
+    // but the STRONGER evidence is Phase 3's own P1-WHERE measurement, which
+    // returned this exact directory as its second line on a real windows-latest
+    // host — see
+    // .planning/phases/03-ci-spike-prove-llrt-basics-on-windows/03-FINDINGS.md
+    // § P1-WHERE. (Cite the findings file, never the CI artifact behind it.)
+    emitLocation(input.roots.programFiles, ["nodejs"]);
+
+    // P-03. ASSUMPTION under D-12, tagged as such because no first-party
+    // statement ties a current Node installer to the x86 tree. It is kept anyway
+    // for WOW64 bitness: on 64-bit Windows a 32-bit process sees the
+    // program-files variable pointing at the x86 tree while a 64-bit process
+    // does not, so reading BOTH variables is the arm that survives whichever
+    // bitness Caido's backend host turns out to be. The cost is one stat, which
+    // PERF-03's resolution cache absorbs.
+    emitLocation(input.roots.programFilesX86, ["nodejs"]);
+
+    // Absent-root behaviour, stated because it is a REAL case rather than a
+    // hypothetical: ProgramFiles, ProgramFiles(x86) and ProgramData are ordinary
+    // inherited variables, they are NOT among libuv's eleven back-filled names,
+    // and Phase 3's P3-VARS measured only USERPROFILE, APPDATA and LOCALAPPDATA.
+    // An absent variable skips its row entirely — never a candidate with an
+    // empty prefix, which would be a relative path resolving against the process
+    // working directory.
+
+    // P-06, the rootless nvm-windows symlink default, ahead of the shared table
+    // for node specifically because the installer puts it on PATH and it points
+    // at a real node.exe. The shared table emits it again at its end, where
+    // pushUniqueCandidate drops the duplicate.
+    emitLocation(NVM_WINDOWS_SYMLINK_DIR, []);
+
+    for (const candidate of buildWindowsInstallLocationCandidates({
+      command: "node",
+      roots: input.roots,
+      windowsVersionDirs: input.windowsVersionDirs,
+      emitRootlessLiteral: true,
     })) {
       pushUniqueCandidate(candidates, candidate);
     }
   }
 
   return candidates;
+}
+
+// The thin impure caller for node (D-10), mirroring getCommandExecutableCandidates.
+export async function getNodeExecutableCandidates(input: {
+  platform: Platform | undefined;
+  execPath?: string;
+  pathResolution?: string;
+  homeDirs: string[];
+  roots: WindowsNamedRoots;
+  absoluteProviderCommands: string[];
+}): Promise<string[]> {
+  const versionCandidatesByHomeDir: Record<string, string[]> = {};
+  for (const homeDir of [...new Set(input.homeDirs)]) {
+    versionCandidatesByHomeDir[homeDir] = await collectVersionManagerCommandCandidates({
+      homeDir,
+      command: "node",
+      platform: input.platform,
+    });
+  }
+
+  // Q4, first half. `path.dirname` is the ONE deliberate module-path exception
+  // in this file and it survives the D-05 sweep intact:
+  //
+  //   * D-05's sweep names every JOIN and does not name `dirname`.
+  //   * This call is host-flavoured BY DESIGN. On a real Windows host the module
+  //     is win32-flavoured, the provider command is "C:\...\claude.cmd", and only
+  //     a win32-flavoured dirname finds its directory. The comment in
+  //     command-resolution.test.ts records the real windows-latest CI red that
+  //     taught this.
+  //   * It was moved OUT of the pure builder specifically so the builder's win32
+  //     sibling row stays assertable from LITERAL directories on the Linux
+  //     runner — leaving the derivation inside would have made that row a test of
+  //     the runner, which is the exact hazard D-05 exists to kill.
+  //
+  // Do not "finish the sweep" here. This one is deliberate.
+  const providerAdjacentDirs = input.absoluteProviderCommands.map((commandPath) =>
+    path.dirname(commandPath),
+  );
+
+  const windowsVersionDirs = await listWindowsVersionDirs({
+    platform: input.platform,
+    roots: input.roots,
+  });
+
+  return buildNodeCandidatePaths({
+    ...input,
+    providerAdjacentDirs,
+    versionCandidatesByHomeDir,
+    windowsVersionDirs,
+  });
 }
