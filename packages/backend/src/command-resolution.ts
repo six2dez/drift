@@ -104,10 +104,58 @@ async function pathExists(candidatePath: string): Promise<boolean> {
   }
 }
 
-export function pushUniqueCandidate(candidates: string[], candidate: string | undefined): void {
+// ── D-07: the pure candidate-dedup key, and the ladder it declines ─────────
+//
+// Windows filesystems are case-INSENSITIVE (and case-preserving), so
+// "C:\\Program Files\\nodejs\\node.exe" and "c:/program files/nodejs/node.exe"
+// name one file. Folding case and separator into a comparison KEY collapses the
+// two, while the ORIGINAL spelling is what stays in the array and what is later
+// stat-ed and spawned. The key is never an emitted value.
+//
+// WHAT WAS REJECTED, and why — this is the half a later reader cannot
+// reconstruct from the code alone. 04-D-04 expected Phase 6 to become the first
+// caller of runtime-probe.ts's canonicalisation ladder. That was DECLINED here:
+//   * it would put asynchronous filesystem I/O on a pre-probe hot path, reached
+//     from a provider status check at plugin load;
+//   * it would lean on a rung the constrained runtime is not known to have
+//     (no realpath symbol is declared in the LLRT fs surface at all);
+//   * it would be unexercisable on the Linux runner this project actually has;
+//   * and it would buy a saving the resolution cache mostly absorbs.
+// The case 04-D-04 anticipated is real — an 8.3 SHORT-FORM profile directory
+// compared against its long form, which no pure string rule can collapse. It
+// does not arise here: this phase never compares a temp-directory-derived path
+// against an environment-derived one. The ONLY comparison it makes is between
+// candidate strings inside this accumulator, where a missed deduplication costs
+// one extra existence check and never a wrong answer. The ladder therefore
+// stays exported and uncalled, with its own preservation note beside it.
+//
+// WHY THE FOLD IS win32-ONLY, never applied on `undefined`. The failure modes
+// are not symmetric. A missed dedup costs one stat; an over-eager fold DROPS a
+// real candidate. macOS is case-insensitive by default and Linux is not, so
+// folding on an unknown platform could collapse two genuinely distinct POSIX
+// paths — and a POSIX path differing only in case names a different file. This
+// is the deliberate opposite of D-08's union-when-unknown rule, where the cheap
+// failure is an extra candidate rather than a missing one.
+export function foldCandidateKey(
+  value: string,
+  platform: Platform | undefined,
+): string {
+  if (platform !== "win32") return value;
+  return value.toLowerCase().split("\\").join("/");
+}
+
+export function pushUniqueCandidate(
+  candidates: string[],
+  candidate: string | undefined,
+  platform: Platform | undefined,
+): void {
   const normalized = candidate?.trim();
   if (normalized === undefined || normalized === "") return;
-  if (!candidates.includes(normalized)) candidates.push(normalized);
+  const key = foldCandidateKey(normalized, platform);
+  for (const existing of candidates) {
+    if (foldCandidateKey(existing, platform) === key) return;
+  }
+  candidates.push(normalized);
 }
 
 // Collapse "." and ".." against a POSIX "/" separator, with no dependence on
@@ -288,7 +336,11 @@ export async function collectVersionManagerCommandCandidates(input: {
       platform: input.platform,
     });
     for (const version of versions) {
-      pushUniqueCandidate(candidates, join([nvmDir, version, "bin", input.command]));
+      pushUniqueCandidate(
+        candidates,
+        join([nvmDir, version, "bin", input.command]),
+        input.platform,
+      );
     }
   }
 
@@ -302,6 +354,7 @@ export async function collectVersionManagerCommandCandidates(input: {
       pushUniqueCandidate(
         candidates,
         join([fnmDir, version, "installation", "bin", input.command]),
+        input.platform,
       );
     }
   }
@@ -347,7 +400,11 @@ function buildWindowsInstallLocationCandidates(input: {
   ): void => {
     if (root === undefined) return;
     for (const name of windowsNames) {
-      pushUniqueCandidate(candidates, win32([root, ...segments, name]));
+      pushUniqueCandidate(
+        candidates,
+        win32([root, ...segments, name]),
+        "win32",
+      );
     }
   };
 
@@ -540,27 +597,71 @@ export function buildCommandCandidatePaths(input: {
   windowsVersionDirs?: WindowsVersionDirs;
 }): string[] {
   const candidates: string[] = [];
-  pushUniqueCandidate(candidates, input.pathResolution);
+  pushUniqueCandidate(candidates, input.pathResolution, input.platform);
 
   if (input.platform !== "win32") {
     const posix = (segments: string[]): string =>
       joinPath({ platform: input.platform, segments });
 
-    pushUniqueCandidate(candidates, posix(["/opt/homebrew/bin", input.command]));
-    pushUniqueCandidate(candidates, posix(["/usr/local/bin", input.command]));
-    pushUniqueCandidate(candidates, posix(["/usr/bin", input.command]));
-    pushUniqueCandidate(candidates, posix(["/bin", input.command]));
+    pushUniqueCandidate(
+      candidates,
+      posix(["/opt/homebrew/bin", input.command]),
+      input.platform,
+    );
+    pushUniqueCandidate(
+      candidates,
+      posix(["/usr/local/bin", input.command]),
+      input.platform,
+    );
+    pushUniqueCandidate(
+      candidates,
+      posix(["/usr/bin", input.command]),
+      input.platform,
+    );
+    pushUniqueCandidate(
+      candidates,
+      posix(["/bin", input.command]),
+      input.platform,
+    );
 
     for (const homeDir of [...new Set(input.homeDirs)]) {
-      pushUniqueCandidate(candidates, posix([homeDir, ".local", "bin", input.command]));
-      pushUniqueCandidate(candidates, posix([homeDir, ".volta", "bin", input.command]));
-      pushUniqueCandidate(candidates, posix([homeDir, ".asdf", "shims", input.command]));
-      pushUniqueCandidate(candidates, posix([homeDir, ".npm-global", "bin", input.command]));
-      pushUniqueCandidate(candidates, posix([homeDir, ".bun", "bin", input.command]));
-      pushUniqueCandidate(candidates, posix([homeDir, "Library", "pnpm", input.command]));
-      pushUniqueCandidate(candidates, posix([homeDir, ".local", "share", "pnpm", input.command]));
+      pushUniqueCandidate(
+        candidates,
+        posix([homeDir, ".local", "bin", input.command]),
+        input.platform,
+      );
+      pushUniqueCandidate(
+        candidates,
+        posix([homeDir, ".volta", "bin", input.command]),
+        input.platform,
+      );
+      pushUniqueCandidate(
+        candidates,
+        posix([homeDir, ".asdf", "shims", input.command]),
+        input.platform,
+      );
+      pushUniqueCandidate(
+        candidates,
+        posix([homeDir, ".npm-global", "bin", input.command]),
+        input.platform,
+      );
+      pushUniqueCandidate(
+        candidates,
+        posix([homeDir, ".bun", "bin", input.command]),
+        input.platform,
+      );
+      pushUniqueCandidate(
+        candidates,
+        posix([homeDir, "Library", "pnpm", input.command]),
+        input.platform,
+      );
+      pushUniqueCandidate(
+        candidates,
+        posix([homeDir, ".local", "share", "pnpm", input.command]),
+        input.platform,
+      );
       for (const candidate of input.versionCandidatesByHomeDir[homeDir] ?? []) {
-        pushUniqueCandidate(candidates, candidate);
+        pushUniqueCandidate(candidates, candidate, input.platform);
       }
     }
   }
@@ -577,7 +678,7 @@ export function buildCommandCandidatePaths(input: {
       windowsVersionDirs: input.windowsVersionDirs,
       emitRootlessLiteral: input.platform === "win32",
     })) {
-      pushUniqueCandidate(candidates, candidate);
+      pushUniqueCandidate(candidates, candidate, input.platform);
     }
   }
 
@@ -683,8 +784,8 @@ export function buildNodeCandidatePaths(input: {
 }): string[] {
   const candidates: string[] = [];
 
-  pushUniqueCandidate(candidates, input.execPath);
-  pushUniqueCandidate(candidates, input.pathResolution);
+  pushUniqueCandidate(candidates, input.execPath, input.platform);
+  pushUniqueCandidate(candidates, input.pathResolution, input.platform);
 
   // Q4, second half. The DIRECTORIES arrive already derived by the thin impure
   // caller, which is what lets this row be spelled for the target platform and
@@ -701,7 +802,9 @@ export function buildNodeCandidatePaths(input: {
     for (const name of siblingNames) {
       pushUniqueCandidate(
         candidates,
-        joinPath({ platform: input.platform, segments: [providerDir, name] }),
+        joinPath({ platform: input.platform,
+        segments: [providerDir, name] }),
+        input.platform,
       );
     }
   }
@@ -710,16 +813,28 @@ export function buildNodeCandidatePaths(input: {
     const posix = (segments: string[]): string =>
       joinPath({ platform: input.platform, segments });
 
-    pushUniqueCandidate(candidates, "/opt/homebrew/bin/node");
-    pushUniqueCandidate(candidates, "/usr/local/bin/node");
-    pushUniqueCandidate(candidates, "/usr/bin/node");
+    pushUniqueCandidate(candidates, "/opt/homebrew/bin/node", input.platform);
+    pushUniqueCandidate(candidates, "/usr/local/bin/node", input.platform);
+    pushUniqueCandidate(candidates, "/usr/bin/node", input.platform);
 
     for (const homeDir of [...new Set(input.homeDirs)]) {
-      pushUniqueCandidate(candidates, posix([homeDir, ".volta", "bin", "node"]));
-      pushUniqueCandidate(candidates, posix([homeDir, ".asdf", "shims", "node"]));
-      pushUniqueCandidate(candidates, posix([homeDir, ".local", "bin", "node"]));
+      pushUniqueCandidate(
+        candidates,
+        posix([homeDir, ".volta", "bin", "node"]),
+        input.platform,
+      );
+      pushUniqueCandidate(
+        candidates,
+        posix([homeDir, ".asdf", "shims", "node"]),
+        input.platform,
+      );
+      pushUniqueCandidate(
+        candidates,
+        posix([homeDir, ".local", "bin", "node"]),
+        input.platform,
+      );
       for (const candidate of input.versionCandidatesByHomeDir[homeDir] ?? []) {
-        pushUniqueCandidate(candidates, candidate);
+        pushUniqueCandidate(candidates, candidate, input.platform);
       }
     }
   }
@@ -737,7 +852,9 @@ export function buildNodeCandidatePaths(input: {
       for (const name of windowsNames) {
         pushUniqueCandidate(
           candidates,
-          joinPath({ platform: "win32", segments: [root, ...segments, name] }),
+          joinPath({ platform: "win32",
+          segments: [root, ...segments, name] }),
+          input.platform,
         );
       }
     };
@@ -807,7 +924,7 @@ export function buildNodeCandidatePaths(input: {
       windowsVersionDirs: input.windowsVersionDirs,
       emitRootlessLiteral: true,
     })) {
-      pushUniqueCandidate(candidates, candidate);
+      pushUniqueCandidate(candidates, candidate, input.platform);
     }
   }
 
