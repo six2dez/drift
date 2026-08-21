@@ -11,6 +11,7 @@ import {
   isAbsolutePath,
   joinPath,
   normalizePlatform,
+  rankPathSearchHits,
 } from "./platform";
 
 // Every Windows branch below is exercised with `platform` passed as a literal,
@@ -209,6 +210,120 @@ describe("getExecutableNames", () => {
       [],
     );
     expect(getExecutableNames({ command: "", platform: "linux" })).toEqual([]);
+  });
+});
+
+describe("rankPathSearchHits", () => {
+  // The PATH-search tool prints every PATH x PATHEXT hit, one full path per
+  // line, and its order ACROSS extensions is undocumented — so the ".exe"
+  // preference SC-2 asks for has to be RANKED here rather than read off the
+  // first line, which would make it an accident of the machine's PATH.
+  it("ranks the .exe hit ahead of the .cmd hit ahead of the .bat hit on win32", () => {
+    expect(
+      rankPathSearchHits({
+        platform: "win32",
+        lines: ["C:\\a\\claude.cmd", "C:\\b\\claude.exe", "C:\\c\\claude.bat"],
+      }),
+    ).toEqual(["C:\\b\\claude.exe", "C:\\a\\claude.cmd", "C:\\c\\claude.bat"]);
+  });
+
+  it("keeps the search tool's own emission order as the tie-break within one extension", () => {
+    expect(
+      rankPathSearchHits({
+        platform: "win32",
+        lines: ["C:\\first\\claude.exe", "C:\\second\\claude.exe"],
+      }),
+    ).toEqual(["C:\\first\\claude.exe", "C:\\second\\claude.exe"]);
+  });
+
+  it("produces no candidate for the no-match informational sentence", () => {
+    // 06-RESEARCH § Pitfall 1 requires this assertion by name: the stream that
+    // sentence is written to is undocumented, so it can land in the same buffer
+    // the paths do. The extension-termination filter is the second of two
+    // independent guards; the first is the exit-code gate at the call site.
+    expect(
+      rankPathSearchHits({
+        platform: "win32",
+        lines: ["INFO: Could not find files for the given pattern(s)."],
+      }),
+    ).toEqual([]);
+  });
+
+  it("discards the partial final line the bounded output buffer leaves above its cap", () => {
+    expect(
+      rankPathSearchHits({
+        platform: "win32",
+        lines: ["C:\\a\\claude.exe", "C:\\b\\clau"],
+      }),
+    ).toEqual(["C:\\a\\claude.exe"]);
+  });
+
+  it("ranks an uppercase extension with its group and returns the original spelling", () => {
+    expect(
+      rankPathSearchHits({
+        platform: "win32",
+        lines: ["C:\\a\\claude.CMD", "C:\\b\\claude.EXE"],
+      }),
+    ).toEqual(["C:\\b\\claude.EXE", "C:\\a\\claude.CMD"]);
+  });
+
+  it("trims carriage returns and surrounding whitespace and drops empty lines", () => {
+    expect(
+      rankPathSearchHits({
+        platform: "win32",
+        lines: ["C:\\a\\claude.cmd\r", "", "  C:\\b\\claude.exe  \r", "   "],
+      }),
+    ).toEqual(["C:\\b\\claude.exe", "C:\\a\\claude.cmd"]);
+  });
+
+  it("returns nothing for an empty win32 line list", () => {
+    expect(rankPathSearchHits({ platform: "win32", lines: [] })).toEqual([]);
+  });
+
+  it("returns exactly the first line on darwin and linux", () => {
+    expect(
+      rankPathSearchHits({
+        platform: "linux",
+        lines: ["/usr/bin/claude", "/usr/local/bin/claude"],
+      }),
+    ).toEqual(["/usr/bin/claude"]);
+    expect(
+      rankPathSearchHits({
+        platform: "darwin",
+        lines: ["/opt/homebrew/bin/claude", "/usr/bin/claude"],
+      }),
+    ).toEqual(["/opt/homebrew/bin/claude"]);
+  });
+
+  it("returns nothing for an empty or blank POSIX result", () => {
+    expect(rankPathSearchHits({ platform: "linux", lines: [""] })).toEqual([]);
+    expect(rankPathSearchHits({ platform: "linux", lines: [] })).toEqual([]);
+    expect(rankPathSearchHits({ platform: "linux", lines: ["   "] })).toEqual(
+      [],
+    );
+  });
+
+  it("takes the POSIX arm before the platform probe has run", () => {
+    // `platform: undefined` is pre-probe. Unlike getHomeDirCandidates there is
+    // no union answer available here — only one binary can be spawned — so this
+    // arm reproduces today's single-line extraction exactly (CMP-01).
+    expect(
+      rankPathSearchHits({
+        platform: undefined,
+        lines: ["/usr/bin/claude", "/usr/local/bin/claude"],
+      }),
+    ).toEqual(["/usr/bin/claude"]);
+  });
+
+  it("reproduces the single-line extraction it replaces, byte for byte", () => {
+    // CMP-01 for D-01. The extraction in index.ts's PATH-search close handler
+    // is `out.head.split("\n", 1)[0]?.trim() ?? ""`; the POSIX arm must return
+    // that same string and nothing else.
+    const head = "/usr/local/bin/node\n/usr/bin/node\n";
+    const legacy = head.split("\n", 1)[0]?.trim() ?? "";
+    expect(
+      rankPathSearchHits({ platform: "linux", lines: head.split(/\r?\n/) }),
+    ).toEqual([legacy]);
   });
 });
 
