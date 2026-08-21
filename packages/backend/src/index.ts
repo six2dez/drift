@@ -92,6 +92,7 @@ import {
   buildSpawnEnv,
   getSweepRoots,
   getTempRoot,
+  getWindowsNamedRoots,
   isAbsolutePath,
   normalizePlatform,
   type Platform,
@@ -1552,10 +1553,19 @@ async function resolveCommand(
         });
       });
 
+      // `platform` is the RUN-05 probe value and is `undefined` before the
+      // probe runs — the same threading the absolute-path fast path above
+      // already uses, and the pure builder unions both arms on `undefined`.
+      // `roots` comes from readParentEnv() rather than a bare environment read:
+      // that helper already carries the defensive `globalThis` cast and the
+      // try/catch, and its own comment forbids rendering a value. This call site
+      // consumes those values and logs none of them (T-06-T03 / 05-D-11).
       const candidates = await getCommandExecutableCandidates({
         command,
+        platform: host?.platform,
         pathResolution,
         homeDirs: getKnownHomeDirs(),
+        roots: getWindowsNamedRoots({ env: readParentEnv() }),
       });
 
       for (const candidate of candidates) {

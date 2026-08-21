@@ -80,6 +80,75 @@ export function getTempRoot(input: {
   return root;
 }
 
+// Joins path segments for the TARGET platform, with the separator taken ONLY
+// from the injected `platform` (D-05). Backslash on the literal "win32",
+// forward slash otherwise — `undefined` included, since POSIX is the non-win32
+// arm and is what every pre-probe caller wants.
+//
+// Hand-rolled for exactly the reason getTempRoot strips separators by hand: the
+// `path` module is platform-FLAVOURED, so on the Linux CI runner it would spell
+// a Windows candidate as "C:\Users\x/.local/bin/claude". Win32 APIs accept that,
+// so it is not a runtime break — the reason to fix it is EVIDENCE. With a
+// module join the candidate strings differ by HOST rather than by target
+// platform, so a Linux-runner assertion cannot state what a Windows box will
+// produce and SC-5 degrades into a test of the runner.
+//
+// The one-line namespace fix does not exist on the shipping runtime: Caido's
+// LLRT `path` declares NO posix and NO win32 namespace at all — its
+// PlatformPath interface (@caido/quickjs-types@0.25.4, src/llrt/path.d.ts)
+// returns zero matches for either name. Reading the separator from the module's
+// own separator property is forbidden here for the same reason: it reports the
+// HOST's flavour, which is the exact bug this function exists to eliminate.
+//
+// The POSIX output is asserted BYTE-IDENTICAL to the module-based join it
+// replaces — that equality is the CMP-01 proof for the sweep, per D-05 and
+// 06-CONTEXT § Specific Ideas, and it lives in this file's "CMP-01" describe
+// block rather than being left to review.
+//
+// Deliberately does NOT collapse "." or ".." — no POSIX suffix list in
+// command-resolution.ts contains either, and normalising would break the
+// byte-identity proof rather than serve it.
+export function joinPath(input: {
+  platform: Platform | undefined;
+  segments: string[];
+}): string {
+  const separator = input.platform === "win32" ? "\\" : "/";
+
+  // Both spellings are recognised at a seam on BOTH platforms, on the same
+  // grounds as getTempRoot's separator-agnostic strip: the runtime rather than
+  // the OS decides which spelling an inherited value arrives in.
+  const isSeparator = (character: string): boolean =>
+    character === "/" || character === "\\";
+
+  let joined = "";
+  let isFirst = true;
+  for (const segment of input.segments) {
+    const trimmed = segment.trim();
+    if (trimmed === "") continue;
+
+    // The first surviving segment keeps its own leading separator verbatim, so
+    // an absolute POSIX segment stays absolute and a "C:\" root stays rooted.
+    if (isFirst) {
+      joined = trimmed;
+      isFirst = false;
+      continue;
+    }
+
+    let next = trimmed;
+    while (next.length > 0 && isSeparator(next[0] ?? "")) next = next.slice(1);
+    if (next === "") continue;
+
+    let head = joined;
+    while (head.length > 0 && isSeparator(head[head.length - 1] ?? "")) {
+      head = head.slice(0, -1);
+    }
+
+    joined = `${head}${separator}${next}`;
+  }
+
+  return joined;
+}
+
 // Absolute-path recognition that does not depend on which FLAVOUR of `path` the
 // host resolved to.
 //
@@ -239,6 +308,71 @@ export function getHomeDirCandidates(input: {
     candidates.push(value);
   }
   return [...new Set(candidates)];
+}
+
+// The Windows install roots, read by NAME from an injected environment (D-09's
+// input shape).
+//
+// Per 04-D-03 this ships variable NAMES only: the suffix lists built from these
+// roots (npm's prefix, nvm-windows, fnm, Volta, scoop, …) stay in
+// command-resolution.ts, which is where the SHAPE-versus-DATA line puts them.
+//
+// Phase 3's P3-VARS measured USERPROFILE, APPDATA and LOCALAPPDATA all present
+// and non-empty in the parent process on windows-latest (source:
+// .planning/phases/03-ci-spike-prove-llrt-basics-on-windows/03-FINDINGS.md
+// § P3-VARS — the findings file, never the CI artifacts, which expire
+// 2026-09-12). ProgramFiles, ProgramFiles(x86) and ProgramData are NOT among
+// libuv's eleven back-filled required variables and were NOT covered by
+// P3-VARS, so a missing one must degrade to SKIPPING its row — never to a
+// drive-letter literal, which is Pitfall 4.
+//
+// Three of these are spelled mixed-case by Windows itself. Windows' own
+// process.env is case-INsensitive, but the plain object lookup this function
+// does on the Linux test runner is not — so both spellings are read, native
+// first, first non-empty wins. The unit test can then assert the canonical
+// spelling while the real platform works under either.
+//
+// No SystemRoot field: D-02 gives that variable to getWhichCommand, and two
+// readers of one variable is the duplication this file's discipline forbids.
+export type WindowsNamedRoots = {
+  userProfile?: string;
+  appData?: string;
+  localAppData?: string;
+  programFiles?: string;
+  programFilesX86?: string;
+  programData?: string;
+};
+
+export function getWindowsNamedRoots(input: {
+  env: Record<string, string | undefined>;
+}): WindowsNamedRoots {
+  const read = (names: string[]): string | undefined => {
+    for (const name of names) {
+      const value = input.env[name]?.trim();
+      if (value === undefined || value === "") continue;
+      return value;
+    }
+    return undefined;
+  };
+
+  const roots: WindowsNamedRoots = {};
+  // Assigned only when present: an absent root must emit NO candidate at all
+  // (T-06-T02). A present-but-empty prefix would produce a relative path that
+  // resolves against the process working directory — a directory the user never
+  // chose.
+  const userProfile = read(["USERPROFILE"]);
+  if (userProfile !== undefined) roots.userProfile = userProfile;
+  const appData = read(["APPDATA"]);
+  if (appData !== undefined) roots.appData = appData;
+  const localAppData = read(["LOCALAPPDATA"]);
+  if (localAppData !== undefined) roots.localAppData = localAppData;
+  const programFiles = read(["ProgramFiles", "PROGRAMFILES"]);
+  if (programFiles !== undefined) roots.programFiles = programFiles;
+  const programFilesX86 = read(["ProgramFiles(x86)", "PROGRAMFILES(X86)"]);
+  if (programFilesX86 !== undefined) roots.programFilesX86 = programFilesX86;
+  const programData = read(["ProgramData", "PROGRAMDATA"]);
+  if (programData !== undefined) roots.programData = programData;
+  return roots;
 }
 
 // The environment block for a spawned child: the parent block first, drift's own

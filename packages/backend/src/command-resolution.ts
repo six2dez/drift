@@ -1,6 +1,13 @@
 import { readdir, stat } from "fs/promises";
 import path from "path";
 
+import {
+  getExecutableNames,
+  joinPath,
+  type Platform,
+  type WindowsNamedRoots,
+} from "./platform";
+
 // Actionable install / resolution hint per provider. These surface inside the
 // chat error banner and in Settings → CLI Providers so a user who hits
 // "CLI not found" does not have to guess which package to install.
@@ -138,33 +145,112 @@ export async function collectVersionManagerCommandCandidates(
   return candidates;
 }
 
-export async function getCommandExecutableCandidates(input: {
+// PURE. Zero I/O, synchronous, and the SC-5 seam (D-10): the Windows list is
+// byte-for-byte assertable from literal inputs on the Linux runner, where
+// C:\Users\x\AppData\Roaming\npm cannot exist.
+//
+// Injecting a filesystem dependency object instead was REJECTED (D-10): the
+// tests would then assert against a mocked filesystem, so a fake that drifts
+// from real directory-listing semantics weakens the SC-5 evidence silently
+// instead of failing loudly. The real `readdir`/`stat` therefore stay in the
+// thin impure caller below, which feeds this function its findings.
+//
+// Every path here is spelled through joinPath for the TARGET platform (D-05),
+// never through the host-flavoured module join it replaces. The POSIX arm's
+// output is pinned byte-identical to the pre-split list by the CMP-01 block in
+// command-resolution.test.ts.
+//
+// The platform arms are a UNION when the platform is unknown: `undefined` (the
+// pre-probe state, reachable from a provider status check at plugin load) emits
+// the POSIX rows first and the win32 rows after, never interleaved. This is the
+// same union-when-unknown rule isAbsolutePath and D-06/D-08 already follow, and
+// it is CMP-01-safe on POSIX because no Windows root variable is set there, so
+// every win32 row is skipped and the list is byte-identical to today's.
+export function buildCommandCandidatePaths(input: {
+  platform: Platform | undefined;
   command: string;
   pathResolution?: string;
   homeDirs: string[];
-}): Promise<string[]> {
+  roots: WindowsNamedRoots;
+  versionCandidatesByHomeDir: Record<string, string[]>;
+}): string[] {
   const candidates: string[] = [];
   pushUniqueCandidate(candidates, input.pathResolution);
 
-  pushUniqueCandidate(candidates, path.join("/opt/homebrew/bin", input.command));
-  pushUniqueCandidate(candidates, path.join("/usr/local/bin", input.command));
-  pushUniqueCandidate(candidates, path.join("/usr/bin", input.command));
-  pushUniqueCandidate(candidates, path.join("/bin", input.command));
+  if (input.platform !== "win32") {
+    const posix = (segments: string[]): string =>
+      joinPath({ platform: input.platform, segments });
 
-  for (const homeDir of [...new Set(input.homeDirs)]) {
-    pushUniqueCandidate(candidates, path.join(homeDir, ".local", "bin", input.command));
-    pushUniqueCandidate(candidates, path.join(homeDir, ".volta", "bin", input.command));
-    pushUniqueCandidate(candidates, path.join(homeDir, ".asdf", "shims", input.command));
-    pushUniqueCandidate(candidates, path.join(homeDir, ".npm-global", "bin", input.command));
-    pushUniqueCandidate(candidates, path.join(homeDir, ".bun", "bin", input.command));
-    pushUniqueCandidate(candidates, path.join(homeDir, "Library", "pnpm", input.command));
-    pushUniqueCandidate(candidates, path.join(homeDir, ".local", "share", "pnpm", input.command));
-    for (const candidate of await collectVersionManagerCommandCandidates(homeDir, input.command)) {
-      pushUniqueCandidate(candidates, candidate);
+    pushUniqueCandidate(candidates, posix(["/opt/homebrew/bin", input.command]));
+    pushUniqueCandidate(candidates, posix(["/usr/local/bin", input.command]));
+    pushUniqueCandidate(candidates, posix(["/usr/bin", input.command]));
+    pushUniqueCandidate(candidates, posix(["/bin", input.command]));
+
+    for (const homeDir of [...new Set(input.homeDirs)]) {
+      pushUniqueCandidate(candidates, posix([homeDir, ".local", "bin", input.command]));
+      pushUniqueCandidate(candidates, posix([homeDir, ".volta", "bin", input.command]));
+      pushUniqueCandidate(candidates, posix([homeDir, ".asdf", "shims", input.command]));
+      pushUniqueCandidate(candidates, posix([homeDir, ".npm-global", "bin", input.command]));
+      pushUniqueCandidate(candidates, posix([homeDir, ".bun", "bin", input.command]));
+      pushUniqueCandidate(candidates, posix([homeDir, "Library", "pnpm", input.command]));
+      pushUniqueCandidate(candidates, posix([homeDir, ".local", "share", "pnpm", input.command]));
+      for (const candidate of input.versionCandidatesByHomeDir[homeDir] ?? []) {
+        pushUniqueCandidate(candidates, candidate);
+      }
+    }
+  }
+
+  if (input.platform === "win32" || input.platform === undefined) {
+    // Both the separator and the extension ladder are pinned to the literal
+    // "win32" even when the host platform is unknown: they are properties of the
+    // Windows ROW, not of the host. A row spelled with the runner's separator
+    // would make every assertion below a test of the runner.
+    const windowsNames = getExecutableNames({
+      command: input.command,
+      platform: "win32",
+    });
+    const win32 = (segments: string[]): string =>
+      joinPath({ platform: "win32", segments });
+
+    // Catalogue row P-01. npm's own documentation states the default global
+    // prefix on Windows is the roaming application-data npm directory, and that
+    // on Windows executables are placed DIRECTLY into the prefix where Unix
+    // links them into {prefix}/bin — so a `bin` segment here would be wrong.
+    // Source: docs.npmjs.com/cli/v11/configuring-npm/folders.
+    //
+    // D-11 is location-major: all four spellings of this one location are
+    // emitted before any later location. An absent root emits nothing at all
+    // (T-06-T02) — never a candidate with an empty prefix, which would resolve
+    // against the process working directory.
+    const appData = input.roots.appData;
+    if (appData !== undefined) {
+      for (const name of windowsNames) {
+        pushUniqueCandidate(candidates, win32([appData, "npm", name]));
+      }
     }
   }
 
   return candidates;
+}
+
+// The thin impure caller (D-10). Every filesystem call in the command-candidate
+// path lives HERE; the ordered list itself is built by the pure function above.
+export async function getCommandExecutableCandidates(input: {
+  command: string;
+  platform: Platform | undefined;
+  pathResolution?: string;
+  homeDirs: string[];
+  roots: WindowsNamedRoots;
+}): Promise<string[]> {
+  const versionCandidatesByHomeDir: Record<string, string[]> = {};
+  for (const homeDir of [...new Set(input.homeDirs)]) {
+    versionCandidatesByHomeDir[homeDir] = await collectVersionManagerCommandCandidates(
+      homeDir,
+      input.command,
+    );
+  }
+
+  return buildCommandCandidatePaths({ ...input, versionCandidatesByHomeDir });
 }
 
 export async function getNodeExecutableCandidates(input: {
