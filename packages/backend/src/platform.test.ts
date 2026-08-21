@@ -150,24 +150,93 @@ describe("getSweepRoots", () => {
 
 describe("getWhichCommand", () => {
   it("resolves with which on darwin and linux", () => {
-    expect(getWhichCommand({ platform: "darwin" }).command).toBe("which");
-    expect(getWhichCommand({ platform: "linux" }).command).toBe("which");
+    expect(getWhichCommand({ platform: "darwin", env: {} }).command).toBe(
+      "which",
+    );
+    expect(getWhichCommand({ platform: "linux", env: {} }).command).toBe(
+      "which",
+    );
   });
 
   it("resolves with where.exe on win32", () => {
-    expect(getWhichCommand({ platform: "win32" }).command).toBe("where.exe");
+    expect(getWhichCommand({ platform: "win32", env: {} }).command).toBe(
+      "where.exe",
+    );
   });
 
   it("passes the command as a single argument on every platform", () => {
-    expect(getWhichCommand({ platform: "darwin" }).args("node")).toEqual([
+    expect(getWhichCommand({ platform: "darwin", env: {} }).args("node")).toEqual([
       "node",
     ]);
-    expect(getWhichCommand({ platform: "linux" }).args("node")).toEqual([
+    expect(getWhichCommand({ platform: "linux", env: {} }).args("node")).toEqual([
       "node",
     ]);
-    expect(getWhichCommand({ platform: "win32" }).args("node")).toEqual([
+    expect(getWhichCommand({ platform: "win32", env: {} }).args("node")).toEqual([
       "node",
     ]);
+  });
+
+  it("invokes the search binary by absolute path under the machine's own system root", () => {
+    // A NON-C drive on purpose: the root is READ from the environment, never
+    // assumed. Phase 3 measured the C:\Windows spelling on the runner, and
+    // hardcoding that literal was rejected — see the comment on the function.
+    expect(
+      getWhichCommand({ platform: "win32", env: { SystemRoot: "D:\\Windows" } })
+        .command,
+    ).toBe("D:\\Windows\\System32\\where.exe");
+  });
+
+  it("honours the SCREAMING-case spelling, and prefers the native-cased key when both are present", () => {
+    expect(
+      getWhichCommand({ platform: "win32", env: { SYSTEMROOT: "E:\\Windows" } })
+        .command,
+    ).toBe("E:\\Windows\\System32\\where.exe");
+    expect(
+      getWhichCommand({
+        platform: "win32",
+        env: { SystemRoot: "D:\\Windows", SYSTEMROOT: "E:\\Elsewhere" },
+      }).command,
+    ).toBe("D:\\Windows\\System32\\where.exe");
+  });
+
+  it("falls back to the bare binary name when the variable is missing or blank", () => {
+    // The fallback is load-bearing, not padding: the variable's presence rests
+    // on libuv's back-fill list, which is Node's, and Caido's runtime is not
+    // Node. This case is why the arm is not dead code.
+    expect(getWhichCommand({ platform: "win32", env: {} }).command).toBe(
+      "where.exe",
+    );
+    expect(
+      getWhichCommand({ platform: "win32", env: { SystemRoot: "   " } }).command,
+    ).toBe("where.exe");
+    expect(
+      getWhichCommand({ platform: "win32", env: { SystemRoot: undefined } })
+        .command,
+    ).toBe("where.exe");
+  });
+
+  it("does not double the separator for a root that already ends in one", () => {
+    expect(
+      getWhichCommand({
+        platform: "win32",
+        env: { SystemRoot: "D:\\Windows\\" },
+      }).command,
+    ).toBe("D:\\Windows\\System32\\where.exe");
+  });
+
+  it("resolves with which before the platform probe has run", () => {
+    // Pre-probe. Only ONE binary can be spawned, so unlike getHomeDirCandidates
+    // there is no union answer here; the POSIX arm reproduces today's behaviour
+    // on every platform exactly (CMP-01).
+    expect(
+      getWhichCommand({
+        platform: undefined,
+        env: { SystemRoot: "D:\\Windows" },
+      }).command,
+    ).toBe("which");
+    expect(
+      getWhichCommand({ platform: undefined, env: {} }).args("node"),
+    ).toEqual(["node"]);
   });
 });
 
