@@ -91,6 +91,7 @@ import { getPersistenceDbHandle, type PersistenceDbHandle } from "./persistence"
 import {
   buildSpawnEnv,
   getSweepRoots,
+  getHomeDirCandidates,
   getTempRoot,
   getWhichCommand,
   rankPathSearchHits,
@@ -1668,13 +1669,33 @@ async function resolveCommand(
   });
 }
 
+// D-08 wired. The hardcoded POSIX home variable is gone: getHomeDirCandidates
+// reads whichever home variables the machine actually SETS. `platform` is the
+// RUN-05 probe value and is `undefined` here more often than not — this function
+// is reachable from a provider status check at plugin load, before the probe
+// runs — and the helper answers `undefined` with the UNION of both name sets,
+// POSIX first, because the wrong platform's names are simply absent. That union
+// is why the pre-probe path costs a macOS or Linux machine nothing.
+//
+// What this fixes: on Windows the single variable this function used to read is
+// not set, so until now every home-derived candidate built from it was empty
+// there — which is very close to the symptom this milestone exists to fix.
+//
+// What it does NOT claim: this is a resolution-INPUT change only. Widening the
+// home set widens the candidate list that gets existence-checked; nothing here
+// makes a resolved shim launchable, which stays Phase 7's requirement.
+//
+// readParentEnv() rather than a bare process-object read, which is why this
+// function no longer needs a local cast of its own: that helper already carries
+// the same defensive `globalThis` cast, the same optional chaining and a
+// try/catch this never had. The defensive READ is what had to survive, not the
+// particular local. Its comment forbids rendering a value; nothing here does.
 function getKnownHomeDirs(): string[] {
-  const processRef = globalThis as typeof globalThis & {
-    process?: { env?: Record<string, string | undefined> };
-  };
-
   return [
-    processRef.process?.env?.HOME,
+    ...getHomeDirCandidates({
+      platform: host?.platform,
+      env: readParentEnv(),
+    }),
     extractHomeDir(pluginPath),
     ...Object.values(currentSettings.providers).map((provider) => extractHomeDir(provider.command)),
   ].filter((value): value is string => typeof value === "string" && value.trim() !== "");
