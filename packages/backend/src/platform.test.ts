@@ -451,6 +451,58 @@ describe("getHomeDirCandidates", () => {
     ).toEqual(["C:\\Users\\six\\AppData\\Local"]);
     expect(getHomeDirCandidates({ platform: "linux", env: {} })).toEqual([]);
   });
+
+  // Pre-probe (`platform: undefined`) reads BOTH name sets. The whole-array
+  // toEqual shape is deliberate: order is part of the contract, so a membership
+  // assertion would not state it.
+  it("unions both name sets before the platform probe has run", () => {
+    expect(
+      getHomeDirCandidates({
+        platform: undefined,
+        env: {
+          HOME: "/home/six",
+          USERPROFILE: "C:\\Users\\six",
+          APPDATA: "C:\\Users\\six\\AppData\\Roaming",
+          LOCALAPPDATA: "C:\\Users\\six\\AppData\\Local",
+        },
+      }),
+    ).toEqual([
+      "/home/six",
+      "C:\\Users\\six",
+      "C:\\Users\\six\\AppData\\Roaming",
+      "C:\\Users\\six\\AppData\\Local",
+    ]);
+  });
+
+  it("costs a POSIX machine nothing pre-probe", () => {
+    // CMP-01: the Windows names are simply absent on macOS and Linux, so the
+    // union returns exactly what the POSIX-only arm returned.
+    expect(
+      getHomeDirCandidates({ platform: undefined, env: { HOME: "/home/six" } }),
+    ).toEqual(["/home/six"]);
+  });
+
+  it("reads the Windows variables pre-probe rather than returning nothing", () => {
+    // The case a POSIX default would turn into an empty array on Windows —
+    // every provider status check before MCP start would then report all four
+    // CLIs unavailable, which is very close to the symptom this milestone
+    // exists to fix.
+    expect(
+      getHomeDirCandidates({
+        platform: undefined,
+        env: { USERPROFILE: "C:\\Users\\six" },
+      }),
+    ).toEqual(["C:\\Users\\six"]);
+  });
+
+  it("emits a value shared by a POSIX and a Windows name only once pre-probe", () => {
+    expect(
+      getHomeDirCandidates({
+        platform: undefined,
+        env: { HOME: "/home/six", USERPROFILE: "/home/six", APPDATA: "   " },
+      }),
+    ).toEqual(["/home/six"]);
+  });
 });
 
 describe("normalizePlatform", () => {
