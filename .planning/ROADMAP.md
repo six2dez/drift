@@ -289,8 +289,16 @@ Plans:
   6. The provider binary-path picker accepts `.exe`/`.cmd` paths.
   7. Once Gemini and Codex register with `node` + args + `env` (SC-3 above), the shared POSIX wrapper and the functions that render it are **deleted**: `renderExportExecScript`, `shellQuote` and `writeMcpWrapper` no longer exist in `packages/backend/src/index.ts`, `getMcpWrapperPath` goes with them, the **last** `spawnAndWait("chmod", …)` spawn is gone, and `mcp-wrapper.sh` is written by no code path on any platform. Checkable: `grep -c` for each of those four symbols returns 0, the comment-stripped `.sh` count in `index.ts` reaches 0, and the repository-wide count of `DELETED IN PHASE 7 (PRV-03)` notices drops from 3 to 0 (the `DELETED IN PHASE 9` probe-workflow header is Phase 9's and is untouched). `enforceOwnerOnlyDir`'s `fs/promises` namespace `chmod` is explicitly **out of scope** and must remain. *(Added 2026-08-20 by plan 05-05 task 3, per 05-CONTEXT.md **D-01/D-02** — the structural owner for the survivors Phase 5 SC-1 no longer claims. Phase 7 must also `mcp remove` any stale `drift` entry a Phase-≤5 Drift left pointing at a deleted `.sh`.)*
 
-**Plans**: 3 plans (provisional)
-**Research flag**: YES for Gemini — open GitHub issues for Windows MCP reliability are unresolved; plan a real-machine confirmation checkpoint and treat Gemini as best-effort. Codex `${VAR}` expansion in `mcp add` needs CI confirmation (fallback: `DRIFT_TOKEN_FILE`).
+**Plans**: 5 plans
+
+Plans:
+- [ ] 07-01-PLAN.md — Tracer: launch a Windows `.cmd` provider shim end-to-end through a new pure `buildSpawnPlan`, and measure the escaping on a real `windows-latest` run (PRV-01, PRV-02, UX-01)
+- [ ] 07-02-PLAN.md — Promote `ProviderStatus` to a capability level, add the per-CLI approval-channel table, and state the limitation on the provider card (PRV-04, PRV-05, UX-01)
+- [ ] 07-03-PLAN.md — Register Gemini/Codex with `node` + args + `env` on every platform, and delete the POSIX wrapper in the same commit (SC-7) (PRV-03, PRV-04, PRV-05)
+- [ ] 07-04-PLAN.md — Guaranteed `mcp remove`: unconditional dual-scope startup sweep plus a value-free security log line (PRV-03, PRV-04)
+- [ ] 07-05-PLAN.md — Phase close: README rows, validation contract, the recorded Windows run and its vehicle caveat (PRV-01, PRV-04, PRV-05)
+
+**Research flag**: RESOLVED 2026-08-21 by `07-RESEARCH.md`. Gemini: no open Windows-MCP issue was found by title/query search (bodies not read — weak evidence, so SC-5's real-machine checkpoint is KEPT, in Phase 9/10). Codex `${VAR}` expansion **does not exist at all** — source-verified; the reference text would be delivered verbatim as the token, so it is definitively off the table. `DRIFT_TOKEN_FILE` is recommended against for this phase and the resulting token-at-rest trade is escalated to a blocking `checkpoint:decision` in plan 07-03.
 
 ### Phase 8: Process Lifecycle
 
