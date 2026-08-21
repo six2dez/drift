@@ -1605,7 +1605,35 @@ async function resolveCommand(
         // per-spawn suppression Windows offers is not declared in this runtime's
         // spawn options surface at all, so removing the flash is real work
         // rather than one word. Grep UX-04 to find every site that phase owns.
-        const child = spawn(searchCommand.command, searchCommand.args(command));
+        //
+        // The same guard spawnAndWait carries, for the same reason. A
+        // synchronous throw inside a Promise executor REJECTS the promise, and
+        // the `error` handler the comment above leans on can never fire for it.
+        // Two concrete synchronous throwers reach this line: a NUL byte in
+        // `command` - rehydrated from the persisted provider settings, the same
+        // untrusted blob getNodeExecutable already defends against - and LLRT's
+        // child_process shim, whose ENOENT surface is unverified in EITHER
+        // direction while the win32 arm now spawns a different binary
+        // (`where.exe`) on it. The `.cmd` EINVAL measured in 03-FINDINGS.md
+        // § P1-CMD does not apply here (neither `which` nor `where.exe` is a
+        // `.cmd`), but the executor shape that makes it fatal is identical.
+        //
+        // Unguarded, the rejection is re-thrown by resolveWithCache and travels
+        // resolveCommand -> checkProvider -> Promise.all -> getProviderStatuses,
+        // taking ALL FOUR provider statuses down as one rejected RPC.
+        //
+        // CMP-01: on macOS and Linux the spawn does not throw, so the catch arm
+        // is not entered and this site behaves exactly as it always has.
+        let child: ChildProcessWithoutNullStreams;
+        try {
+          child = spawn(searchCommand.command, searchCommand.args(command));
+        } catch {
+          // The same fall-through the "error" handler below produces: no PATH
+          // hit, walk the candidates. Return so nothing downstream of the failed
+          // spawn runs.
+          resolve(undefined);
+          return;
+        }
         // PERF-04 site 7 — the accumulator every earlier inventory in this phase
         // missed, because `grep -n "stdout += "` is structurally blind to a
         // variable named `out`. Bounded rather than EXCLUDED: the tempting
@@ -3637,13 +3665,79 @@ async function sendCliMessage(
       // `env` option REPLACES the parent block, and under Caido's LLRT there is
       // no libuv to back-fill even the eleven names Windows would otherwise
       // restore.
-      const proc = spawnWithEnv(resolved, args, {
-        env: buildSpawnEnv({
-          parentEnv: readParentEnv(),
-          driftVars: injectedDriftVars,
-        }),
-        stdio: ["pipe", "pipe", "pipe"],
-      });
+      //
+      // The same guard spawnAndWait carries, for the same measured reason.
+      // Windows refuses a DIRECT spawn of a `.cmd` or `.bat` under Node's
+      // CVE-2024-27980 guard and throws that EINVAL SYNCHRONOUSLY rather than
+      // emitting it as an "error" event. Measured, not assumed: 03-FINDINGS.md,
+      // § P1-CMD, on a real windows-latest host. (Cite the findings file, never
+      // the CI artifact - those expire.) A NUL byte in `resolved` - rehydrated
+      // from the persisted provider command, the same untrusted blob
+      // getNodeExecutable already defends against - throws synchronously too.
+      //
+      // A synchronous throw inside a Promise executor REJECTS the promise, so
+      // the proc.on("error") handler below can never fire for it. The enclosing
+      // `try { ... } catch (e)` does NOT catch it either: `return <promise>`
+      // from an async function ADOPTS the rejection without passing through the
+      // catch (only `return await` would). Unguarded, the RPC rejects and none
+      // of the executor runs: no terminal session state is published, the
+      // session is never entered into activeProcesses so cancelCliMessage
+      // cannot clean it up, and - the part that matters against PROJECT.md's
+      // token constraint - the token-bearing mcp-<chatId>.json and the
+      // per-session runtime files are left on disk, because finalize()'s rm
+      // calls are their only deleters.
+      //
+      // This stopped being unreachable in Phase 6: the resolver now emits
+      // `.cmd` candidates, and the install table this phase added tells Windows
+      // users to run the `npm install -g` that produces exactly that file.
+      //
+      // What this guard does NOT do, stated plainly: it does not make a `.cmd`
+      // launchable. A refused spawn becomes a Drift error on the session, which
+      // is graceful degradation, not launchability. Making a `.cmd` actually
+      // launch is PRV-02 in Phase 7, which owns the cmd.exe branch. Deliberately
+      // absent here: any shell option, any interpreter wrapper, any extension
+      // check - all three are PRV-02's to design.
+      //
+      // CMP-01: catching a throw that POSIX never produces changes nothing on
+      // macOS or Linux. There the spawn does not throw, so the catch arm is not
+      // entered and every statement below runs in the order it always did.
+      //
+      // The cleanup is written out here rather than delegating to finalize():
+      // finalize is a `const` declared LOWER in this same executor, so it is in
+      // its temporal dead zone at this point and calling it would throw a
+      // ReferenceError - synchronously, inside the executor, rejecting the very
+      // promise this guard exists to keep resolving. The two rm blocks below
+      // mirror finalize()'s exactly.
+      let proc: ChildProcessWithoutNullStreams;
+      try {
+        proc = spawnWithEnv(resolved, args, {
+          env: buildSpawnEnv({
+            parentEnv: readParentEnv(),
+            driftVars: injectedDriftVars,
+          }),
+          stdio: ["pipe", "pipe", "pipe"],
+        });
+      } catch (e) {
+        const message = `Spawn error: ${String(e)}`;
+        appendSessionDebugLog(sessionDebugLogPath, `spawn() threw synchronously: ${message}`);
+        setSessionState("error", message, {
+          mcpAttached: mcpTempDir !== undefined,
+          reasonCode: "spawn_error",
+        });
+        void (async () => {
+          if (runtimeFiles !== undefined) {
+            sessionRuntimeFiles.delete(input.sessionId);
+            await rm(runtimeFiles.activityFilePath, { force: true }).catch(() => undefined);
+            await rm(runtimeFiles.approvalsFilePath, { force: true }).catch(() => undefined);
+          }
+          if (claudeMcpConfigPath !== undefined) {
+            await rm(claudeMcpConfigPath, { force: true }).catch(() => undefined);
+          }
+          await disposeSessionDebugLog(sessionDebugLogPath);
+          resolve(err(message));
+        })();
+        return;
+      }
       appendSessionDebugLog(
         sessionDebugLogPath,
         `spawn() started pid=${String(proc.pid ?? "unknown")}`,
