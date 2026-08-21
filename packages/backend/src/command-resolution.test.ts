@@ -296,6 +296,173 @@ describe("buildCommandCandidatePaths (win32 named roots)", () => {
   });
 });
 
+// The win32 version-manager rows, asserted from LITERAL discovered names. The
+// names would come from a readdir on a real machine; feeding them as data is
+// what makes the SPELLING — which is the part that is easy to get wrong and
+// impossible to notice — provable on a Linux runner with no directory created.
+describe("buildCommandCandidatePaths (win32 version-manager walk)", () => {
+  const versionInput = {
+    platform: "win32" as const,
+    command: "claude",
+    pathResolution: undefined,
+    homeDirs: [],
+    roots: WIN32_ROOTS,
+    versionCandidatesByHomeDir: {},
+  };
+
+  it("spells the nvm-windows version row with no bin segment and a v-prefixed directory", () => {
+    const candidates = buildCommandCandidatePaths({
+      ...versionInput,
+      windowsVersionDirs: {
+        nvmWindows: ["v22.1.0"],
+        fnmModern: [],
+        fnmLegacy: [],
+        voltaNodeImages: [],
+      },
+    });
+
+    expect(candidates).toContain(
+      "C:\\Users\\six\\AppData\\Local\\nvm\\v22.1.0\\claude.exe",
+    );
+    // The `v` prefix is part of the directory name the installer creates, and
+    // node.exe sits DIRECTLY in it — the POSIX ~/.nvm layout's `bin` segment
+    // does not exist here.
+    expect(
+      candidates.filter((candidate) => candidate.includes("\\nvm\\")),
+    ).toEqual([
+      "C:\\Users\\six\\AppData\\Local\\nvm\\v22.1.0\\claude.exe",
+      "C:\\Users\\six\\AppData\\Local\\nvm\\v22.1.0\\claude.cmd",
+      "C:\\Users\\six\\AppData\\Local\\nvm\\v22.1.0\\claude.bat",
+      "C:\\Users\\six\\AppData\\Local\\nvm\\v22.1.0\\claude",
+    ]);
+    for (const candidate of candidates) {
+      expect(candidate.includes("\\nvm\\v22.1.0\\bin\\")).toBe(false);
+    }
+  });
+
+  // The asymmetry most likely to be "tidied up" by a later reader, so it is
+  // asserted from both sides in one test: fnm appends `bin` only on non-Windows
+  // (cfg(not(windows)) in src/commands/exec.rs), so the win32 row ends at
+  // installation and the POSIX row does not.
+  it("drops fnm's bin segment on win32 while the POSIX fnm row keeps it", () => {
+    const win32Candidates = buildCommandCandidatePaths({
+      ...versionInput,
+      windowsVersionDirs: {
+        nvmWindows: [],
+        fnmModern: ["v20.5.0"],
+        fnmLegacy: ["v18.0.0"],
+        voltaNodeImages: [],
+      },
+    });
+
+    expect(win32Candidates).toContain(
+      "C:\\Users\\six\\AppData\\Roaming\\fnm\\node-versions\\v20.5.0\\installation\\claude.exe",
+    );
+    expect(win32Candidates).toContain(
+      "C:\\Users\\six\\.fnm\\node-versions\\v18.0.0\\installation\\claude.exe",
+    );
+    for (const candidate of win32Candidates) {
+      expect(candidate.includes("installation\\bin")).toBe(false);
+    }
+
+    const posixCandidates = buildCommandCandidatePaths({
+      platform: "linux",
+      command: "claude",
+      pathResolution: undefined,
+      homeDirs: ["/home/six"],
+      roots: {},
+      versionCandidatesByHomeDir: {
+        "/home/six": [
+          "/home/six/.fnm/node-versions/v20.5.0/installation/bin/claude",
+        ],
+      },
+    });
+    expect(posixCandidates).toContain(
+      "/home/six/.fnm/node-versions/v20.5.0/installation/bin/claude",
+    );
+  });
+
+  it("emits only the newest three version directories per root on win32", () => {
+    const candidates = buildCommandCandidatePaths({
+      ...versionInput,
+      windowsVersionDirs: {
+        nvmWindows: ["v24.0.0", "v23.0.0", "v22.0.0", "v21.0.0", "v20.0.0"],
+        fnmModern: [],
+        fnmLegacy: [],
+        voltaNodeImages: [],
+      },
+    });
+
+    const nvmRows = candidates.filter((candidate) =>
+      candidate.includes("\\nvm\\v"),
+    );
+    // Three locations' worth of ladder, not five.
+    expect(nvmRows).toHaveLength(12);
+    expect(nvmRows).toEqual([
+      "C:\\Users\\six\\AppData\\Local\\nvm\\v24.0.0\\claude.exe",
+      "C:\\Users\\six\\AppData\\Local\\nvm\\v24.0.0\\claude.cmd",
+      "C:\\Users\\six\\AppData\\Local\\nvm\\v24.0.0\\claude.bat",
+      "C:\\Users\\six\\AppData\\Local\\nvm\\v24.0.0\\claude",
+      "C:\\Users\\six\\AppData\\Local\\nvm\\v23.0.0\\claude.exe",
+      "C:\\Users\\six\\AppData\\Local\\nvm\\v23.0.0\\claude.cmd",
+      "C:\\Users\\six\\AppData\\Local\\nvm\\v23.0.0\\claude.bat",
+      "C:\\Users\\six\\AppData\\Local\\nvm\\v23.0.0\\claude",
+      "C:\\Users\\six\\AppData\\Local\\nvm\\v22.0.0\\claude.exe",
+      "C:\\Users\\six\\AppData\\Local\\nvm\\v22.0.0\\claude.cmd",
+      "C:\\Users\\six\\AppData\\Local\\nvm\\v22.0.0\\claude.bat",
+      "C:\\Users\\six\\AppData\\Local\\nvm\\v22.0.0\\claude",
+    ]);
+  });
+
+  // The bound is win32-only ON PURPOSE: applying it to POSIX would silently drop
+  // version directories macOS and Linux users resolve today, which is exactly the
+  // CMP-01 regression this phase must not ship.
+  it("does not truncate the POSIX version list", () => {
+    const posixVersions = [
+      "/home/six/.nvm/versions/node/v24.0.0/bin/claude",
+      "/home/six/.nvm/versions/node/v23.0.0/bin/claude",
+      "/home/six/.nvm/versions/node/v22.0.0/bin/claude",
+      "/home/six/.nvm/versions/node/v21.0.0/bin/claude",
+      "/home/six/.nvm/versions/node/v20.0.0/bin/claude",
+    ];
+    const candidates = buildCommandCandidatePaths({
+      platform: "linux",
+      command: "claude",
+      pathResolution: undefined,
+      homeDirs: ["/home/six"],
+      roots: {},
+      versionCandidatesByHomeDir: { "/home/six": posixVersions },
+    });
+
+    expect(
+      candidates.filter((candidate) => candidate.includes("/.nvm/")),
+    ).toEqual(posixVersions);
+  });
+
+  it("emits the version rows after the fixed locations and before the rootless literal", () => {
+    const candidates = buildCommandCandidatePaths({
+      ...versionInput,
+      windowsVersionDirs: {
+        nvmWindows: ["v22.1.0"],
+        fnmModern: [],
+        fnmLegacy: [],
+        voltaNodeImages: [],
+      },
+    });
+
+    const scoopGlobal = candidates.indexOf(
+      "C:\\ProgramData\\scoop\\shims\\claude.exe",
+    );
+    const nvmVersion = candidates.indexOf(
+      "C:\\Users\\six\\AppData\\Local\\nvm\\v22.1.0\\claude.exe",
+    );
+    const literal = candidates.indexOf("C:\\nvm4w\\nodejs\\claude.exe");
+    expect(scoopGlobal).toBeGreaterThanOrEqual(0);
+    expect(nvmVersion).toBeGreaterThan(scoopGlobal);
+    expect(literal).toBeGreaterThan(nvmVersion);
+  });
+});
+
 // CMP-01 — the D-10 split reproduces the pre-split candidate ORDER exactly.
 //
 // 06-CONTEXT records the D-10 split as `costly` precisely because this evidence

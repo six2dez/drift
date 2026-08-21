@@ -17,6 +17,51 @@ import {
 // PATH already.
 const NVM_WINDOWS_SYMLINK_DIR = "C:\\nvm4w\\nodejs";
 
+// How many version directories per version-manager root the win32 arm EMITS.
+//
+// 3 is a COST bound chosen by the planner and is not a measurement — nobody
+// timed a Windows resolution to arrive at it. The reasoning it rests on: the
+// walk is a FALLBACK for a broken PATH (the nvm-windows installer puts its
+// symlink directory on PATH, so the PATH search normally answers first), each
+// additional version directory costs up to four `stat` calls once the extension
+// ladder is applied to it, D-09 already grows the location count, and Windows is
+// the platform where `stat` is slowest. The walk is kept rather than dropped
+// because a broken PATH is the case it exists for.
+//
+// The bound is applied to the EMISSION, in the pure builder, rather than to the
+// listing in the impure caller — that is Q3's own wording ("bound the win32
+// emission"), it is where the per-directory cost actually lives, and it is the
+// only place a five-entries-become-three assertion can be written from literal
+// inputs on a Linux runner.
+//
+// The existing reverse-LEXICAL sort is NOT semver-correct: a v9 entry sorts
+// after a v10 entry, so "newest" here means "lexically last". That is
+// pre-existing POSIX behaviour which CMP-01 forbids changing there, and it is
+// mirrored on win32 for symmetry rather than fixed — fixing it is a behaviour
+// change on macOS and Linux that RES-01 does not ask for.
+//
+// POSIX emission stays UNBOUNDED. Applying this bound there would be exactly the
+// CMP-01 regression this phase must not ship.
+const WIN32_VERSION_WALK_LIMIT = 3;
+
+// Version directory NAMES discovered by the impure caller, per version manager.
+// Bare directory names as read from disk, never full paths: the joining is the
+// pure builder's job, which is what keeps the win32 version rows assertable on a
+// Linux runner where none of these directories can exist.
+export type WindowsVersionDirs = {
+  nvmWindows: string[];
+  fnmModern: string[];
+  fnmLegacy: string[];
+  voltaNodeImages: string[];
+};
+
+const EMPTY_WINDOWS_VERSION_DIRS: WindowsVersionDirs = {
+  nvmWindows: [],
+  fnmModern: [],
+  fnmLegacy: [],
+  voltaNodeImages: [],
+};
+
 // Actionable install / resolution hint per provider. These surface inside the
 // chat error banner and in Settings → CLI Providers so a user who hits
 // "CLI not found" does not have to guess which package to install.
@@ -207,6 +252,7 @@ export function buildCommandCandidatePaths(input: {
   homeDirs: string[];
   roots: WindowsNamedRoots;
   versionCandidatesByHomeDir: Record<string, string[]>;
+  windowsVersionDirs?: WindowsVersionDirs;
 }): string[] {
   const candidates: string[] = [];
   pushUniqueCandidate(candidates, input.pathResolution);
@@ -345,6 +391,59 @@ export function buildCommandCandidatePaths(input: {
     // row in the node builder does.
     emitLocation(input.roots.programData, ["scoop", "shims"]);
 
+    // ── Version-manager rows ──
+    //
+    // The directory NAMES arrive already discovered from the thin impure caller;
+    // only the spelling happens here. Each list is bounded to the newest
+    // WIN32_VERSION_WALK_LIMIT entries — see that constant for why the number is
+    // a cost bound rather than a measurement, and why POSIX stays unbounded.
+    const versionDirs = input.windowsVersionDirs ?? EMPTY_WINDOWS_VERSION_DIRS;
+    const newest = (entries: string[]): string[] =>
+      entries.slice(0, WIN32_VERSION_WALK_LIMIT);
+
+    // P-04 / P-05. nvm-windows keeps node.exe DIRECTLY in the version directory:
+    // there is no `bin` segment, unlike the POSIX ~/.nvm row above. The entry
+    // name already carries its `v` prefix because that is how the installer
+    // names the directory — verified from coreybutler/nvm-windows `nvm.go`,
+    // filepath.Join(env.root, "v"+version).
+    for (const version of newest(versionDirs.nvmWindows)) {
+      emitLocation(input.roots.localAppData, ["nvm", version]);
+    }
+
+    // P-08 / P-10. fnm's modern base is under ROAMING application data — this
+    // CORRECTS the roadmap, and the source is fnm's own directory strategy
+    // (Schniz/fnm `src/directories.rs` calling etcetera's data_dir(), which on
+    // Windows is APPDATA).
+    //
+    // NO `bin` SEGMENT ON WINDOWS. fnm appends `bin` only on non-Windows —
+    // `src/commands/exec.rs` guards it with cfg(not(windows)) — while the
+    // version path itself is installations_dir/<v>/installation
+    // (`src/config.rs`, `src/version.rs`). The POSIX fnm row above keeps its
+    // `bin` segment and must not be "tidied up" to match this one; the two
+    // layouts genuinely differ, and the test file pins both halves.
+    for (const version of newest(versionDirs.fnmModern)) {
+      emitLocation(input.roots.appData, [
+        "fnm",
+        "node-versions",
+        version,
+        "installation",
+      ]);
+    }
+
+    // P-09. fnm's legacy base, which fnm itself still probes — a user upgraded
+    // from an older fnm has this layout. Same missing `bin` segment.
+    for (const version of newest(versionDirs.fnmLegacy)) {
+      emitLocation(input.roots.userProfile, [
+        ".fnm",
+        "node-versions",
+        version,
+        "installation",
+      ]);
+    }
+
+    // Volta node images (P-13) are node-only and belong to the node builder, not
+    // here: a provider CLI never lives under tools\image\node.
+
     // P-06 — the ONE deliberate drive-qualified literal in this module, and it
     // is the nvm-windows installer's own default rather than a guess: `nvm.iss`
     // seeds the symlink page with C:\nvm4w\nodejs and appends %NVM_SYMLINK% to
@@ -368,6 +467,54 @@ export function buildCommandCandidatePaths(input: {
   return candidates;
 }
 
+// The win32 half of the version walk, and the only place it does I/O. It reuses
+// listVersionDirectories rather than adding a second listing implementation, so
+// the reverse-sorted order, the dot-prefix skip and the per-entry catch that
+// ignores a broken entry are the SAME code the POSIX walk runs (T-06-T05).
+//
+// It returns bare directory NAMES. Nothing here decides how many of them get
+// emitted — that is WIN32_VERSION_WALK_LIMIT's job in the pure builder, where it
+// can be asserted from literal inputs.
+async function listWindowsVersionDirs(input: {
+  platform: Platform | undefined;
+  roots: WindowsNamedRoots;
+}): Promise<WindowsVersionDirs> {
+  const found: WindowsVersionDirs = {
+    nvmWindows: [],
+    fnmModern: [],
+    fnmLegacy: [],
+    voltaNodeImages: [],
+  };
+  if (input.platform !== "win32" && input.platform !== undefined) return found;
+
+  const listIfPresent = async (
+    root: string | undefined,
+    segments: string[],
+  ): Promise<string[]> => {
+    if (root === undefined) return [];
+    const dir = joinPath({ platform: "win32", segments: [root, ...segments] });
+    if (!(await pathExists(dir))) return [];
+    return listVersionDirectories({ root: dir, platform: "win32" });
+  };
+
+  found.nvmWindows = await listIfPresent(input.roots.localAppData, ["nvm"]);
+  found.fnmModern = await listIfPresent(input.roots.appData, [
+    "fnm",
+    "node-versions",
+  ]);
+  found.fnmLegacy = await listIfPresent(input.roots.userProfile, [
+    ".fnm",
+    "node-versions",
+  ]);
+  found.voltaNodeImages = await listIfPresent(input.roots.localAppData, [
+    "Volta",
+    "tools",
+    "image",
+    "node",
+  ]);
+  return found;
+}
+
 // The thin impure caller (D-10). Every filesystem call in the command-candidate
 // path lives HERE; the ordered list itself is built by the pure function above.
 export async function getCommandExecutableCandidates(input: {
@@ -386,7 +533,16 @@ export async function getCommandExecutableCandidates(input: {
     });
   }
 
-  return buildCommandCandidatePaths({ ...input, versionCandidatesByHomeDir });
+  const windowsVersionDirs = await listWindowsVersionDirs({
+    platform: input.platform,
+    roots: input.roots,
+  });
+
+  return buildCommandCandidatePaths({
+    ...input,
+    versionCandidatesByHomeDir,
+    windowsVersionDirs,
+  });
 }
 
 export async function getNodeExecutableCandidates(input: {
