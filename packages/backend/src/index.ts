@@ -93,6 +93,7 @@ import {
   getSweepRoots,
   getTempRoot,
   getWhichCommand,
+  rankPathSearchHits,
   getWindowsNamedRoots,
   isAbsolutePath,
   normalizePlatform,
@@ -1566,8 +1567,8 @@ async function resolveCommand(
         // PERF-04 site 7 — the accumulator every earlier inventory in this phase
         // missed, because `grep -n "stdout += "` is structurally blind to a
         // variable named `out`. Bounded rather than EXCLUDED: the tempting
-        // exemption ("it is only `which`, the output is one short path, and the
-        // 1-second timeout below caps it") is the same argument this phase
+        // exemption ("it is only a PATH search, the output is a few short
+        // paths, and the timeout below caps it") is the same argument this phase
         // explicitly rejects for callMcpMethod — a timeout bounds the exposure
         // WINDOW, not the VOLUME, and shipping that reading in one place while
         // rejecting it in the other turns an inconsistency into a precedent.
@@ -1596,7 +1597,7 @@ async function resolveCommand(
           if (settled) return;
           settled = true;
           clearTimeout(timeout);
-          // The HEAD's FIRST LINE, never renderBoundedBuffer. Above the cap the
+          // The retained HEAD, never renderBoundedBuffer. Above the cap the
           // rendered value splices `\n…[drift: truncated N bytes]…\n` BETWEEN
           // head and tail; the marker begins with a newline, so it survives
           // `.trim()`, and the result — head + marker — would be returned as a
@@ -1604,12 +1605,35 @@ async function resolveCommand(
           // consumer must never be shown the truncation marker: the marker is
           // for humans reading diagnostics, and this value is for the OS.
           //
-          // Taking one line is also correct on its own terms rather than merely
-          // safe: `which` prints one path per line and only the first is the
-          // resolution (Phase 3's P1-WHERE measured where.exe printing two).
-          // Below the cap and for a single-line hit — every real input — the
-          // returned path is unchanged.
-          const resolved = out.head.split("\n", 1)[0]?.trim() ?? "";
+          // D-03's other half — what the cap COSTS, and why it is acceptable
+          // rather than merely tolerated. Above the cap head retention drops
+          // the TAIL, and the dropped entries are the LOWEST PATH-priority hits,
+          // because the search tool walks PATH in order: the ranking below still
+          // sees every hit that could have won. And the partial final line head
+          // retention can leave behind is discarded by the ranker's own
+          // extension-termination check, since a truncated line does not end in
+          // a known extension. Neither loss can produce a wrong answer, only a
+          // narrower one — which is why this site takes the shared limit rather
+          // than an exemption from it.
+          //
+          // The first RANKED line, not the first PRINTED one. Every line the
+          // search tool prints is a real hit; the ranking picks among them by
+          // extension preference — a real executable ahead of a shim, SC-2 —
+          // with the tool's own emission order breaking ties inside one
+          // extension. On POSIX the extension ladder has exactly one entry, so
+          // the ranker's non-win32 arm returns exactly the first non-empty
+          // trimmed line and the single-answer semantics here are byte-for-byte
+          // what they always were (CMP-01).
+          //
+          // The split tolerates a carriage return because Phase 3's P1-WHERE
+          // measured CRLF-split output: a lone `\r` rides on every line but the
+          // last, and an untolerated split would hand a path with a trailing
+          // carriage return to fileExists.
+          const ranked = rankPathSearchHits({
+            lines: out.head.split(/\r?\n/),
+            platform: host?.platform,
+          });
+          const resolved = ranked[0] ?? "";
           resolve(code === 0 && resolved !== "" ? resolved : undefined);
         });
         child.on("error", () => {
