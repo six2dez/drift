@@ -162,3 +162,107 @@ describe("buildCommandCandidatePaths (win32 named roots)", () => {
     ).toEqual([]);
   });
 });
+
+// CMP-01 — the D-10 split reproduces the pre-split candidate ORDER exactly.
+//
+// 06-CONTEXT records the D-10 split as `costly` precisely because this evidence
+// is what would have to be rebuilt if the split were undone. This block IS that
+// evidence, so it asserts the WHOLE ordered array with toEqual and never with
+// toContain: toContain cannot detect a reordering, and reordering the candidate
+// list changes which binary a user actually gets when two of them exist.
+//
+// The expected values are POSIX string LITERALS, not path-module calls. That is
+// the opposite of the licensed host-flavoured comparison at :97-110 above, and
+// deliberately so: that test asserts a HOST-flavoured helper (the
+// path.dirname sibling walk), so its expectation must be built host-flavoured or
+// it fails on a real windows-latest run — which it did, on CI run 32376894371.
+// This block asserts a PLATFORM-INJECTED helper, so a host-flavoured expectation
+// would turn it back into a test of the runner, which is exactly what D-05 and
+// D-10 exist to eliminate.
+const CMP_01_POSIX_CANDIDATES = [
+  "/opt/homebrew/bin/claude",
+  "/usr/local/bin/claude",
+  "/usr/bin/claude",
+  "/bin/claude",
+  "/home/six/.local/bin/claude",
+  "/home/six/.volta/bin/claude",
+  "/home/six/.asdf/shims/claude",
+  "/home/six/.npm-global/bin/claude",
+  "/home/six/.bun/bin/claude",
+  "/home/six/Library/pnpm/claude",
+  "/home/six/.local/share/pnpm/claude",
+  "/home/six/.nvm/versions/node/v22.1.0/bin/claude",
+];
+
+const cmp01PosixInput = {
+  command: "claude",
+  // The pathResolution is also the first absolute row, so its absence from the
+  // list twice is pushUniqueCandidate's dedup asserted in passing.
+  pathResolution: "/opt/homebrew/bin/claude",
+  homeDirs: ["/home/six"],
+  versionCandidatesByHomeDir: {
+    "/home/six": ["/home/six/.nvm/versions/node/v22.1.0/bin/claude"],
+  },
+};
+
+describe("buildCommandCandidatePaths CMP-01 POSIX order", () => {
+  it("reproduces the pre-split candidate list on linux", () => {
+    expect(
+      buildCommandCandidatePaths({
+        ...cmp01PosixInput,
+        platform: "linux",
+        roots: {},
+      }),
+    ).toEqual(CMP_01_POSIX_CANDIDATES);
+  });
+
+  it("reproduces the pre-split candidate list on darwin", () => {
+    expect(
+      buildCommandCandidatePaths({
+        ...cmp01PosixInput,
+        platform: "darwin",
+        roots: {},
+      }),
+    ).toEqual(CMP_01_POSIX_CANDIDATES);
+  });
+
+  it("reproduces the pre-split candidate list before the platform probe has run", () => {
+    // The pre-probe POSIX case CMP-01 protects: on a machine where no Windows
+    // root variable is set, the union arm emits every win32 row as nothing, so
+    // the list is byte-identical to today's.
+    expect(
+      buildCommandCandidatePaths({
+        ...cmp01PosixInput,
+        platform: undefined,
+        roots: {},
+      }),
+    ).toEqual(CMP_01_POSIX_CANDIDATES);
+  });
+
+  it("appends the win32 rows after the POSIX rows rather than interleaving them", () => {
+    expect(
+      buildCommandCandidatePaths({
+        ...cmp01PosixInput,
+        platform: undefined,
+        roots: { appData: "C:\\Users\\six\\AppData\\Roaming" },
+      }),
+    ).toEqual([
+      ...CMP_01_POSIX_CANDIDATES,
+      "C:\\Users\\six\\AppData\\Roaming\\npm\\claude.exe",
+      "C:\\Users\\six\\AppData\\Roaming\\npm\\claude.cmd",
+      "C:\\Users\\six\\AppData\\Roaming\\npm\\claude.bat",
+      "C:\\Users\\six\\AppData\\Roaming\\npm\\claude",
+    ]);
+  });
+
+  it("emits no duplicate candidate for a home directory listed twice", () => {
+    expect(
+      buildCommandCandidatePaths({
+        ...cmp01PosixInput,
+        platform: "linux",
+        homeDirs: ["/home/six", "/home/six"],
+        roots: {},
+      }),
+    ).toEqual(CMP_01_POSIX_CANDIDATES);
+  });
+});
