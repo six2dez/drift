@@ -417,21 +417,52 @@ export function rankPathSearchHits(input: PathSearchHitsInput): string[] {
   return ranked.map((entry) => entry.value);
 }
 
-// WHICH environment variables name a home-ish directory, per platform. Per D-03
-// this ships the variable NAMES only — the install-location candidate arrays
-// built from them (%APPDATA%\npm, nvm-windows, scoop, …) stay in Phase 6's
-// `command-resolution.ts`, which this phase does not touch.
+// Named rather than inline for the same reason PathSearchHitsInput above is: an
+// inline object parameter closes as `}): string[] {`, a brace in column 0 that
+// silently ends a body-extracting `awk '/…/,/^}/'` range at the signature.
+type HomeDirCandidatesInput = {
+  platform: Platform | undefined;
+  env: Record<string, string | undefined>;
+};
+
+// WHICH environment variables name a home-ish directory, per platform. Per
+// 04-D-03 this ships the variable NAMES only: the install-location candidate
+// arrays built from them (%APPDATA%\npm, nvm-windows, scoop, …) live in
+// `command-resolution.ts`, which is where the SHAPE-versus-DATA line puts them,
+// and Phase 6 wires this function to that module's callers.
 //
 // Phase 3's P3-VARS confirmed USERPROFILE, APPDATA and LOCALAPPDATA are all
-// present and non-empty in the parent process on windows-latest.
-export function getHomeDirCandidates(input: {
-  platform: Platform;
-  env: Record<string, string | undefined>;
-}): string[] {
+// present and non-empty in the parent process on windows-latest (source:
+// .planning/phases/03-ci-spike-prove-llrt-basics-on-windows/03-FINDINGS.md
+// § P3-VARS — the committed findings document, never the CI artifacts, which
+// expire 2026-09-12).
+//
+// `undefined` — pre-probe — reads BOTH name sets, POSIX first. This is the
+// THIRD site applying the same union-when-unknown rule: the other two are
+// isAbsolutePath's `undefined` arm above and command-resolution.ts's
+// platform-blind shape-sniffing in extractHomeDir. All three read alike, so a
+// reader who has met one has met them all. Whichever variables the machine
+// actually sets decide the answer, because the wrong platform's names are
+// simply absent — which is exactly why the union costs a POSIX machine nothing
+// and is asserted as such.
+//
+// Defaulting to the POSIX name set pre-probe was REJECTED, with the sharpest
+// reason available: on Windows every provider status check that runs BEFORE MCP
+// start would read only a variable Windows does not set, so the Settings panel
+// shows all four CLIs unavailable — which is very close to the symptom this
+// milestone exists to fix. Gating resolution on the runtime probe instead was
+// rejected too: pre-probe checks would then lose the version-manager and
+// install-location fallbacks on EVERY platform, which is a macOS/Linux
+// regression (CMP-01), not a Windows-only cost.
+export function getHomeDirCandidates(input: HomeDirCandidatesInput): string[] {
+  const posixNames = ["HOME"];
+  const windowsNames = ["USERPROFILE", "APPDATA", "LOCALAPPDATA"];
   const names =
     input.platform === "win32"
-      ? ["USERPROFILE", "APPDATA", "LOCALAPPDATA"]
-      : ["HOME"];
+      ? windowsNames
+      : input.platform === undefined
+        ? [...posixNames, ...windowsNames]
+        : posixNames;
 
   const candidates: string[] = [];
   for (const name of names) {
