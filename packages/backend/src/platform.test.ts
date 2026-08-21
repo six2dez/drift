@@ -708,9 +708,22 @@ describe("getWindowsNamedRoots", () => {
 // The `path` import above is legitimate HERE and nowhere else in this module's
 // orbit: it is the ORACLE, not the implementation. platform.ts refuses the
 // import precisely because the module is host-flavoured — which is what makes it
-// useless as an implementation and perfect as a comparison target on a POSIX
-// runner, where its flavour is POSIX by construction. `grep -c 'from "path"'`
-// over platform.ts itself still returns 0.
+// useless as an implementation and perfect as a comparison target.
+// `grep -c 'from "path"'` over platform.ts itself still returns 0.
+//
+// The oracle is `path.posix`, NOT the bare `path`. That namespace is what makes
+// this block's own claim — "a POSIX runner, where its flavour is POSIX by
+// construction" — true by CONSTRUCTION rather than by accident of which runner
+// happens to execute it. With the bare module the flavour follows the HOST, so
+// on the blocking windows-latest leg the oracle turned win32 and these
+// assertions compared /home/six/.local/bin/claude against
+// \\home\\six\\.local\\bin\\claude: 25 red assertions for a reason that has nothing
+// to do with joinPath (WINDOWS.md entry 7, measured by aliasing the `path`
+// specifier to `path.win32`). `path.posix.join` is byte-identical to
+// `path.join` on a POSIX host, so 06-01's CMP-01 evidence keeps its exact value
+// and the expected strings below are unedited; it is simply also correct on
+// win32. LLRT's missing `path.posix` namespace constrains the SHIPPED
+// platform.ts, not a test file running under vitest on Node.
 //
 // The table below was enumerated from command-resolution.ts as it stands after
 // this plan: the POSIX candidate rows at :184-196 (four absolute directories
@@ -756,7 +769,7 @@ describe("joinPath CMP-01 POSIX byte-identity", () => {
   for (const row of cmp01Rows) {
     it(`joins ${row.join(" + ")} exactly as the path module does`, () => {
       expect(joinPath({ platform: "linux", segments: row })).toBe(
-        path.join(...row),
+        path.posix.join(...row),
       );
     });
 
