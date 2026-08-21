@@ -4,6 +4,7 @@ import path from "path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   buildCommandCandidatePaths,
+  buildNodeCandidatePaths,
   collectVersionManagerCommandCandidates,
   extractHomeDir,
   formatProviderUnavailableMessage,
@@ -129,11 +130,6 @@ describe("command resolution helpers", () => {
   });
 });
 
-// The SC-5 argument in miniature: a Windows install location asserted from
-// LITERAL roots on the Linux CI runner, with no directory created. The whole
-// point of D-10's pure/impure split is that C:\Users\six\AppData\Roaming\npm
-// cannot exist here, so the only way this list can be proven is by keeping the
-// builder free of filesystem calls.
 // The six named roots as a real Windows environment would supply them. Shared by
 // every win32 block below so a root spelling cannot drift between assertions.
 const WIN32_ROOTS = {
@@ -145,6 +141,11 @@ const WIN32_ROOTS = {
   programData: "C:\\ProgramData",
 };
 
+// The SC-5 argument in miniature: a Windows install location asserted from
+// LITERAL roots on the Linux CI runner, with no directory created. The whole
+// point of D-10's pure/impure split is that C:\Users\six\AppData\Roaming\npm
+// cannot exist here, so the only way this list can be proven is by keeping the
+// builder free of filesystem calls.
 describe("buildCommandCandidatePaths (win32 named roots)", () => {
   it("emits the %APPDATA%\\npm ladder in .exe, .cmd, .bat order", () => {
     expect(
@@ -564,5 +565,180 @@ describe("buildCommandCandidatePaths CMP-01 POSIX order", () => {
         roots: {},
       }),
     ).toEqual(CMP_01_POSIX_CANDIDATES);
+  });
+});
+
+// ── buildNodeCandidatePaths ────────────────────────────────────────────────
+//
+// Node resolution gets its own builder because its candidate list is genuinely
+// different from a provider CLI's: an exec path and a provider-adjacent sibling
+// at the front, and on Windows two node-only rows (the MSI directory and the
+// Volta node IMAGE) that no provider CLI ever lives in.
+describe("buildNodeCandidatePaths (win32)", () => {
+  it("emits the node-only rows in order, with an absent root emitting nothing", () => {
+    expect(
+      buildNodeCandidatePaths({
+        platform: "win32",
+        execPath: undefined,
+        pathResolution: undefined,
+        homeDirs: [],
+        roots: {
+          programFiles: "C:\\Program Files",
+          programFilesX86: "C:\\Program Files (x86)",
+        },
+        providerAdjacentDirs: ["C:\\Users\\six\\.local\\bin"],
+        versionCandidatesByHomeDir: {},
+      }),
+    ).toEqual([
+      // The provider-adjacent sibling gains the full ladder on win32: a bare
+      // `node` beside a `claude.cmd` is not a Windows executable name.
+      "C:\\Users\\six\\.local\\bin\\node.exe",
+      "C:\\Users\\six\\.local\\bin\\node.cmd",
+      "C:\\Users\\six\\.local\\bin\\node.bat",
+      "C:\\Users\\six\\.local\\bin\\node",
+      // P-02, the Node MSI directory.
+      "C:\\Program Files\\nodejs\\node.exe",
+      "C:\\Program Files\\nodejs\\node.cmd",
+      "C:\\Program Files\\nodejs\\node.bat",
+      "C:\\Program Files\\nodejs\\node",
+      // P-03, the x86 tree — kept as a WOW64 bitness arm, tagged an assumption.
+      "C:\\Program Files (x86)\\nodejs\\node.exe",
+      "C:\\Program Files (x86)\\nodejs\\node.cmd",
+      "C:\\Program Files (x86)\\nodejs\\node.bat",
+      "C:\\Program Files (x86)\\nodejs\\node",
+      // P-06, the rootless nvm-windows symlink default.
+      "C:\\nvm4w\\nodejs\\node.exe",
+      "C:\\nvm4w\\nodejs\\node.cmd",
+      "C:\\nvm4w\\nodejs\\node.bat",
+      "C:\\nvm4w\\nodejs\\node",
+    ]);
+  });
+
+  // Pitfall 3. A Volta-resolved `node` on Windows is a `.cmd` SHIM, and Phase 3
+  // measured a direct spawn of that spelling throwing synchronously. Reaching
+  // the real node.exe under tools\image first is a genuine reduction in Phase
+  // 7's cmd.exe surface — so the ordering is the claim, and an index comparison
+  // is the only assertion that can falsify it.
+  it("emits the Volta node image before the Volta shim", () => {
+    const candidates = buildNodeCandidatePaths({
+      platform: "win32",
+      execPath: undefined,
+      pathResolution: undefined,
+      homeDirs: [],
+      roots: WIN32_ROOTS,
+      providerAdjacentDirs: [],
+      versionCandidatesByHomeDir: {},
+      windowsVersionDirs: {
+        nvmWindows: [],
+        fnmModern: [],
+        fnmLegacy: [],
+        voltaNodeImages: ["22.1.0"],
+      },
+    });
+
+    const image = candidates.indexOf(
+      "C:\\Users\\six\\AppData\\Local\\Volta\\tools\\image\\node\\22.1.0\\node.exe",
+    );
+    const shim = candidates.indexOf(
+      "C:\\Users\\six\\AppData\\Local\\Volta\\bin\\node.exe",
+    );
+    expect(image).toBeGreaterThanOrEqual(0);
+    expect(shim).toBeGreaterThanOrEqual(0);
+    expect(image).toBeLessThan(shim);
+  });
+
+  it("emits four sibling entries on win32 and one on POSIX", () => {
+    const win32Siblings = buildNodeCandidatePaths({
+      platform: "win32",
+      execPath: undefined,
+      pathResolution: undefined,
+      homeDirs: [],
+      roots: {},
+      providerAdjacentDirs: ["C:\\Users\\six\\.local\\bin"],
+      versionCandidatesByHomeDir: {},
+    }).filter((candidate) => candidate.startsWith("C:\\Users\\six\\.local\\bin"));
+    expect(win32Siblings).toHaveLength(4);
+
+    const posixSiblings = buildNodeCandidatePaths({
+      platform: "linux",
+      execPath: undefined,
+      pathResolution: undefined,
+      homeDirs: [],
+      roots: {},
+      providerAdjacentDirs: ["/opt/providers/bin"],
+      versionCandidatesByHomeDir: {},
+    }).filter((candidate) => candidate.startsWith("/opt/providers/bin"));
+    expect(posixSiblings).toEqual(["/opt/providers/bin/node"]);
+  });
+
+  it("emits no nodejs row at all when neither program-files variable is set", () => {
+    const candidates = buildNodeCandidatePaths({
+      platform: "win32",
+      execPath: undefined,
+      pathResolution: undefined,
+      homeDirs: [],
+      roots: {
+        userProfile: "C:\\Users\\six",
+        appData: "C:\\Users\\six\\AppData\\Roaming",
+        localAppData: "C:\\Users\\six\\AppData\\Local",
+        programData: "C:\\ProgramData",
+      },
+      providerAdjacentDirs: [],
+      versionCandidatesByHomeDir: {},
+    });
+
+    expect(
+      candidates.some((candidate) => candidate.includes("Program Files")),
+    ).toBe(false);
+    // Never an empty prefix: a candidate BEGINNING with the nodejs segment would
+    // be a relative path resolving against the process working directory.
+    for (const candidate of candidates) {
+      expect(candidate.startsWith("nodejs")).toBe(false);
+    }
+  });
+});
+
+// CMP-01 for the node builder: the POSIX list and its ORDER are what a macOS or
+// Linux user resolves today, asserted as a literal array so the Q4 relocation of
+// the provider-adjacent derivation cannot quietly reorder them.
+describe("buildNodeCandidatePaths CMP-01 POSIX order", () => {
+  const NODE_CMP_01_POSIX = [
+    "/usr/local/bin/node",
+    "/opt/homebrew/bin/node",
+    "/opt/providers/bin/node",
+    "/usr/bin/node",
+    "/home/six/.volta/bin/node",
+    "/home/six/.asdf/shims/node",
+    "/home/six/.local/bin/node",
+    "/home/six/.nvm/versions/node/v22.1.0/bin/node",
+  ];
+
+  const posixInput = {
+    execPath: "/usr/local/bin/node",
+    pathResolution: "/opt/homebrew/bin/node",
+    homeDirs: ["/home/six"],
+    roots: {},
+    providerAdjacentDirs: ["/opt/providers/bin"],
+    versionCandidatesByHomeDir: {
+      "/home/six": ["/home/six/.nvm/versions/node/v22.1.0/bin/node"],
+    },
+  };
+
+  it("reproduces the pre-Phase-6 node candidate list on linux", () => {
+    expect(
+      buildNodeCandidatePaths({ ...posixInput, platform: "linux" }),
+    ).toEqual(NODE_CMP_01_POSIX);
+  });
+
+  it("reproduces it on darwin", () => {
+    expect(
+      buildNodeCandidatePaths({ ...posixInput, platform: "darwin" }),
+    ).toEqual(NODE_CMP_01_POSIX);
+  });
+
+  it("reproduces it before the platform probe has run", () => {
+    expect(
+      buildNodeCandidatePaths({ ...posixInput, platform: undefined }),
+    ).toEqual(NODE_CMP_01_POSIX);
   });
 });
