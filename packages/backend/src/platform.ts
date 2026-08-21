@@ -285,6 +285,86 @@ export function getExecutableNames(input: {
   ];
 }
 
+// Named rather than inline so the signature stays on ONE line. An inline object
+// parameter forces prettier to close it as `}): string[] {`, a line that begins
+// with a brace in column 0 — which silently ends any `awk '/…/,/^}/'` range at
+// the signature, so a gate meant to read this function's BODY would read its
+// first line instead and pass or fail for the wrong reason.
+type PathSearchHitsInput = {
+  lines: string[];
+  platform: Platform | undefined;
+};
+
+// Ranks every line of a PATH-search result and returns the survivors in
+// preference order — .exe hits first, then .cmd, then .bat (the order of
+// WINDOWS_EXECUTABLE_EXTENSIONS, read from the constant and never restated).
+//
+// (a) The ranking exists BECAUSE the search tool's cross-extension output order
+// is undocumented. Microsoft's `where` page describes the PATH and extension
+// search but says nothing about the order of the printed results, and Phase 3's
+// measurement returned two lines that carried the SAME extension, so it cannot
+// discriminate PATH-major from PATHEXT-major. "First line wins" would therefore
+// make SC-2's executable-over-shim preference an accident of the machine's PATH
+// rather than an implemented behaviour — on a box where the shim sits earlier in
+// PATH, the shim would win and Phase 7 would route it through a command
+// interpreter for no reason.
+//
+// (b) The contract needs only two facts, and both hold: the tool emits EVERY
+// hit (measured — two lines), and within a single extension it walks PATH in
+// order (documented). Neither fact is the undocumented one, which is why the
+// sort is stable and the within-extension tie-break is simply the input order.
+//
+// (c) The extension-termination filter is the SECOND of two independent guards
+// against a line that is not a path reaching a path consumer. The first is the
+// exit-code gate at the call site, which is not taken on a no-match; this one is
+// the guard that survives a future loosening of that gate, and it is also what
+// discards the partial final line the bounded output buffer leaves behind above
+// its cap. Both are asserted in tests.
+//
+// (d) Source for the measurement:
+// .planning/phases/03-ci-spike-prove-llrt-basics-on-windows/03-FINDINGS.md
+// § P1-WHERE — the committed findings document, never the CI artifacts, which
+// expire 2026-09-12.
+export function rankPathSearchHits(input: PathSearchHitsInput): string[] {
+  // Non-win32, `undefined` INCLUDED: the POSIX search tool has single-answer
+  // semantics, so the ranking arm must be a no-op there and return exactly what
+  // the single-line extraction this replaces returned. That byte-identity is
+  // D-01's CMP-01 obligation. `undefined` (pre-probe) takes this arm because
+  // only one binary can actually be spawned, so no union answer exists here —
+  // unlike getHomeDirCandidates, where one does.
+  if (input.platform !== "win32") {
+    const first = input.lines[0]?.trim() ?? "";
+    return first === "" ? [] : [first];
+  }
+
+  const ranked: { value: string; rank: number; order: number }[] = [];
+  for (const line of input.lines) {
+    // Trim before matching: the measured output was CRLF-split, so a lone
+    // carriage return rides on every line but the last.
+    const value = line.trim();
+    if (value === "") continue;
+    // Lowercased for the MATCH only; the original spelling is what is returned,
+    // because that is the string the OS was given and must be handed back.
+    const lowered = value.toLowerCase();
+    const rank = WINDOWS_EXECUTABLE_EXTENSIONS.findIndex((extension) =>
+      lowered.endsWith(extension),
+    );
+    if (rank === -1) continue;
+    ranked.push({ value, rank, order: ranked.length });
+  }
+
+  // Explicit order tie-break rather than relying on Array.prototype.sort being
+  // stable: the guarantee is only specified since ES2019 and this runs under a
+  // constrained engine, so the property the contract depends on is written down
+  // rather than assumed.
+  ranked.sort((left, right) =>
+    left.rank === right.rank
+      ? left.order - right.order
+      : left.rank - right.rank,
+  );
+  return ranked.map((entry) => entry.value);
+}
+
 // WHICH environment variables name a home-ish directory, per platform. Per D-03
 // this ships the variable NAMES only — the install-location candidate arrays
 // built from them (%APPDATA%\npm, nvm-windows, scoop, …) stay in Phase 6's
