@@ -1,5 +1,37 @@
 <script setup lang="ts">
 import Card from "primevue/card";
+import {
+  CLI_PROVIDER_DISPLAY_NAMES,
+  CliProvider,
+  PROVIDER_INSTALL_COMMANDS,
+} from "shared";
+
+// The install commands below come from the shared table in
+// `packages/shared/src/cli-providers.ts` — the SAME table the backend renders the
+// "CLI provider unavailable" error banner from. Those two are the only live
+// surfaces that can mislead a user mid-session, so they are the two wired to one
+// source of truth; a command corrected in one and left stale in the other would
+// still send someone to a dead repository.
+//
+// The list iterates the provider union rather than naming the four providers,
+// which is the point of the change: a provider added to `shared` appears here
+// with no edit to this file. The labels come from the shared display-name record
+// for the same reason — a second hand-written product-name list would be a second
+// thing to forget.
+//
+// This panel is static help with no platform value available to it, so it does
+// NOT guess: where the two platform arms differ it shows both, labelled — the
+// same union-when-unknown rule this phase applies at every other site.
+const installCommands = Object.values(CliProvider).map((providerId) => {
+  const commands = PROVIDER_INSTALL_COMMANDS[providerId];
+  return {
+    id: providerId,
+    label: CLI_PROVIDER_DISPLAY_NAMES[providerId],
+    posix: commands.posix,
+    win32: commands.win32,
+    sameOnBothPlatforms: commands.posix === commands.win32,
+  };
+});
 </script>
 
 <template>
@@ -204,21 +236,21 @@ import Card from "primevue/card";
               Install commands Drift suggests in its error messages:
             </div>
             <ul class="mt-1 text-xs text-surface-300 list-disc pl-5 space-y-0.5">
-              <li>
-                <span class="font-medium text-surface-100">Claude Code:</span>
-                <span class="font-mono">curl -fsSL https://claude.ai/install.sh | bash</span>
-              </li>
-              <li>
-                <span class="font-medium text-surface-100">Gemini CLI:</span>
-                <span class="font-mono">npm install -g @google/gemini-cli</span>
-              </li>
-              <li>
-                <span class="font-medium text-surface-100">Codex CLI:</span>
-                <span class="font-mono">npm install -g @openai/codex</span>
-              </li>
-              <li>
-                <span class="font-medium text-surface-100">Copilot CLI:</span>
-                <span class="font-mono">gh extension install github/gh-copilot</span>
+              <li v-for="item in installCommands" :key="item.id">
+                <span class="font-medium text-surface-100">{{ item.label }}:</span>
+                <span v-if="item.sameOnBothPlatforms" class="font-mono">{{
+                  item.posix
+                }}</span>
+                <template v-else>
+                  <div>
+                    macOS / Linux:
+                    <span class="font-mono">{{ item.posix }}</span>
+                  </div>
+                  <div>
+                    Windows:
+                    <span class="font-mono">{{ item.win32 }}</span>
+                  </div>
+                </template>
               </li>
             </ul>
           </div>
