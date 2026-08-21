@@ -220,26 +220,78 @@ export function getSweepRoots(input: {
   return roots;
 }
 
-// The binary that answers "where does this command live on PATH".
+// The binary that answers "where does this command live on PATH", and — on
+// Windows — the absolute path it is invoked by.
 //
-// "where.exe", not a bare "where": Phase 3's P1-WHERE measured it on a real
-// windows-latest host. Two facts from that measurement belong to Phase 6 and are
-// deliberately NOT implemented here — recorded so Phase 6 does not re-derive
-// them (source:
+// "where.exe", not a bare "where", and invoked by ABSOLUTE path: Phase 3's
+// P1-WHERE measured both on a real windows-latest host, where the binary
+// resolved a command across 2 CRLF-split lines (source:
 // .planning/phases/03-ci-spike-prove-llrt-basics-on-windows/03-FINDINGS.md,
-// § P1-WHERE):
-//   1. the measured invocation was by ABSOLUTE path,
-//      C:\Windows\System32\where.exe;
-//   2. the output was 2 CRLF-split lines, so the parse must split on /\r?\n/ —
-//      multi-line output is confirmed real, not hypothetical.
-export function getWhichCommand(input: { platform: Platform }): {
-  command: string;
-  args: (cmd: string) => string[];
-} {
+// § P1-WHERE — the committed findings document, never the CI artifacts, which
+// expire 2026-09-12). The multi-line half of that measurement is answered by
+// rankPathSearchHits above; this function answers the invocation half.
+//
+// The literal drive-qualified path Phase 3 measured is REJECTED as a hardcode.
+// It breaks on any machine where Windows is not on that drive or lives under a
+// non-default root, and it breaks in the worst available way: the spawn fails,
+// and a fully working CLI is reported to the user as "not found on PATH". The
+// root is therefore read from the machine's own environment, and the measured
+// literal survives only as the thing that told us the shape.
+//
+// The bare-name fallback is load-bearing, not defensive padding. The system-root
+// variable's guaranteed presence rests on libuv's eleven back-filled
+// required_vars — quoted verbatim in buildSpawnEnv's comment below — and that
+// back-fill is libuv's, i.e. Node's. Whether Caido's constrained runtime does
+// the same is unverified in EITHER direction, exactly as P2-OS and P3-UUID are
+// node-vehicle results rather than measurements of the shipping runtime. So the
+// fallback arm must be reachable and tested rather than treated as dead code,
+// and it is.
+//
+// Casing: Windows' own environment lookup is case-insensitive, so on the real
+// platform one spelling would do. The unit test runs on Linux, where a plain
+// object lookup is case-SENSITIVE, so both spellings are read — native first,
+// first non-empty trimmed value winning — and the test asserts the canonical
+// one. getWindowsNamedRoots below reads its mixed-case variables the same way.
+export function getWhichCommand(input: {
+  platform: Platform | undefined;
+  env: Record<string, string | undefined>;
+}): { command: string; args: (cmd: string) => string[] } {
+  const args = (cmd: string) => [cmd];
+
+  // The literal "win32" only: `undefined` is pre-probe and takes the POSIX arm
+  // below. Only ONE binary can actually be spawned, so unlike
+  // getHomeDirCandidates there is no union answer available here — and the
+  // POSIX arm is the one that keeps a PATH-only binary resolving on macOS and
+  // Linux during a pre-probe provider check, which is CMP-01 surface.
   if (input.platform === "win32") {
-    return { command: "where.exe", args: (cmd: string) => [cmd] };
+    let systemRoot = "";
+    for (const name of ["SystemRoot", "SYSTEMROOT"]) {
+      const value = input.env[name]?.trim();
+      if (value === undefined || value === "") continue;
+      systemRoot = value;
+      break;
+    }
+
+    // Strip every trailing separator before joining, so a root that already
+    // carries one does not produce a doubled separator. Unlike getTempRoot's
+    // strip there is no bare-drive guard, and deliberately: a segment is being
+    // APPENDED here rather than a root preserved, so reducing "D:\" to "D:"
+    // yields the correct "D:\System32\…" instead of a doubled separator.
+    let root = systemRoot;
+    while (root.length > 0) {
+      const last = root[root.length - 1];
+      if (last !== "\\" && last !== "/") break;
+      root = root.slice(0, -1);
+    }
+
+    // Explicit string logic with the win32 separator spelled here, not
+    // joinPath: this is one fixed two-segment join, and routing it through the
+    // other decision helper would make platform.ts's two helpers mutually
+    // dependent for no gain.
+    if (root === "") return { command: "where.exe", args };
+    return { command: `${root}\\System32\\where.exe`, args };
   }
-  return { command: "which", args: (cmd: string) => [cmd] };
+  return { command: "which", args };
 }
 
 // ".exe" first because Phase 6 (SC-2) requires preferring a real executable over

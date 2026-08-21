@@ -165,15 +165,15 @@ describe("getWhichCommand", () => {
   });
 
   it("passes the command as a single argument on every platform", () => {
-    expect(getWhichCommand({ platform: "darwin", env: {} }).args("node")).toEqual([
-      "node",
-    ]);
-    expect(getWhichCommand({ platform: "linux", env: {} }).args("node")).toEqual([
-      "node",
-    ]);
-    expect(getWhichCommand({ platform: "win32", env: {} }).args("node")).toEqual([
-      "node",
-    ]);
+    expect(
+      getWhichCommand({ platform: "darwin", env: {} }).args("node"),
+    ).toEqual(["node"]);
+    expect(
+      getWhichCommand({ platform: "linux", env: {} }).args("node"),
+    ).toEqual(["node"]);
+    expect(
+      getWhichCommand({ platform: "win32", env: {} }).args("node"),
+    ).toEqual(["node"]);
   });
 
   it("invokes the search binary by absolute path under the machine's own system root", () => {
@@ -207,7 +207,8 @@ describe("getWhichCommand", () => {
       "where.exe",
     );
     expect(
-      getWhichCommand({ platform: "win32", env: { SystemRoot: "   " } }).command,
+      getWhichCommand({ platform: "win32", env: { SystemRoot: "   " } })
+        .command,
     ).toBe("where.exe");
     expect(
       getWhichCommand({ platform: "win32", env: { SystemRoot: undefined } })
