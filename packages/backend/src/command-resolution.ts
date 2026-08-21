@@ -17,6 +17,11 @@ import {
 // PATH already.
 const NVM_WINDOWS_SYMLINK_DIR = "C:\\nvm4w\\nodejs";
 
+// The ONLY profile-root directory name extractHomeDir recognises on Windows.
+// Compared lowercased on both sides because Windows filesystems are
+// case-insensitive; see the non-claims recorded at the arm that reads it.
+const WINDOWS_PROFILE_DIR_NAME = "Users";
+
 // How many version directories per version-manager root the win32 arm EMITS.
 //
 // 3 is a COST bound chosen by the planner and is not a measurement — nobody
@@ -124,8 +129,10 @@ export function pushUniqueCandidate(candidates: string[], candidate: string | un
 // capability — see 05-RESEARCH.md § Pitfall 7. Phase 4's platform.ts sets the
 // precedent this follows: a pure path decision imports nothing.
 //
-// This does NOT teach the function about "C:\\Users\\<name>". That is RES-03
-// and it belongs to Phase 6.
+// This normaliser itself is POSIX-only and deliberately stays that way. The
+// Windows profile shape "C:\\Users\\<name>" (RES-03) is recognised by a SEPARATE
+// arm inside extractHomeDir below, which runs BEFORE this normaliser and uses
+// explicit character tests rather than a second, drive-aware normaliser.
 function normalizePosixPath(input: string): string {
   const isAbsolute = input.startsWith("/");
   const out: string[] = [];
@@ -144,6 +151,84 @@ function normalizePosixPath(input: string): string {
 export function extractHomeDir(candidatePath: string | undefined): string | undefined {
   const normalized = candidatePath?.trim();
   if (normalized === undefined || normalized === "") return undefined;
+
+  // ── The Windows profile arm (RES-03, D-06) ──────────────────────────────
+  //
+  // Runs on the TRIMMED input, BEFORE the POSIX normalisation below, and returns
+  // only on a match — so the POSIX route through this function is byte-for-byte
+  // the one it has always been, which is what CMP-01 pins. Ordering it first is
+  // deliberate, not incidental: a backslash-spelled path happens to survive
+  // normalizePosixPath unchanged today (that normaliser splits on "/" only), but
+  // relying on that accident would couple the two arms silently.
+  //
+  // The function stays PLATFORM-BLIND — one string in, no injected platform —
+  // matching isAbsolutePath's `platform: undefined` arm. getKnownHomeDirs is
+  // reachable from a provider status check at plugin load, BEFORE the runtime
+  // probe sets the host facts, so every pre-probe call site would pass undefined
+  // anyway and this shape-sniffing arm would be needed regardless.
+  //
+  // Recognition is by explicit character tests and never a regular expression
+  // containing a backslash, for the readability reason isAbsolutePath and
+  // getTempRoot already state.
+  //
+  // NON-CLAIMS, recorded beside the code that makes them rather than only in a
+  // planning document:
+  //   * A UNC path ("\\\\server\\share\\...") is deliberately NOT recognised.
+  //     A network share has no C:\\Users\\<name> analogue, so inferring a home
+  //     directory from one would be unsourced guessing — and would seed every
+  //     candidate row from a remote root. This follows the module's existing
+  //     allow-list discipline: return undefined for anything unrecognised
+  //     rather than guess.
+  //   * Only a profile directory literally named "Users" is recognised. A
+  //     redirected or non-default profile root is a KNOWN, accepted
+  //     non-recognition, not a gap to be filled by guessing another name.
+  const driveLetter = normalized[0] ?? "";
+  const isDriveLetter =
+    (driveLetter >= "A" && driveLetter <= "Z") ||
+    (driveLetter >= "a" && driveLetter <= "z");
+  const driveSeparator = normalized[2] ?? "";
+  if (
+    isDriveLetter &&
+    normalized[1] === ":" &&
+    (driveSeparator === "\\" || driveSeparator === "/")
+  ) {
+    // Split the remainder on BOTH separator spellings, dropping empty segments.
+    // Win32 accepts either interchangeably, so both must be understood here.
+    const remainder = normalized.slice(3);
+    const segments: string[] = [];
+    let segment = "";
+    for (let index = 0; index < remainder.length; index += 1) {
+      const character = remainder[index] ?? "";
+      if (character === "\\" || character === "/") {
+        if (segment !== "") segments.push(segment);
+        segment = "";
+        continue;
+      }
+      segment += character;
+    }
+    if (segment !== "") segments.push(segment);
+
+    // A "." or ".." segment REJECTS the whole input rather than collapsing it.
+    // The POSIX arm reaches the same outcome by normalising first and then
+    // failing the prefix test; matching that here would mean shipping a second,
+    // drive-aware normaliser this phase has no other use for.
+    const hasTraversal = segments.some((part) => part === "." || part === "..");
+    const profile = segments[0];
+    const user = segments[1];
+    if (
+      !hasTraversal &&
+      profile !== undefined &&
+      user !== undefined &&
+      profile.toLowerCase() === WINDOWS_PROFILE_DIR_NAME.toLowerCase()
+    ) {
+      // The separator that ARRIVED is the separator emitted, and both segments
+      // are emitted in their ORIGINAL casing: Windows is case-PRESERVING as
+      // well as case-insensitive, so echoing the caller's own spelling keeps
+      // the result comparable to the string it was derived from.
+      return `${driveLetter}:${driveSeparator}${profile}${driveSeparator}${user}`;
+    }
+  }
+
   const resolved = normalizePosixPath(normalized);
 
   if (resolved.startsWith("/Users/")) {
