@@ -2409,10 +2409,6 @@ function spawnAndWait(
   options?: { env?: Record<string, string> },
 ): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
-    const proc =
-      options?.env === undefined
-        ? spawn(cmd, args, { stdio: ["pipe", "pipe", "pipe"] })
-        : spawnWithEnv(cmd, args, { stdio: ["pipe", "pipe", "pipe"], env: options.env });
     // Head retention: every consumer of this stream reads the FIRST line - a
     // `which` path, a `node --version` string, a short `mcp add` acknowledgement.
     let stdout = createBoundedBuffer({
@@ -2425,6 +2421,59 @@ function spawnAndWait(
       maxChars: SPAWN_STDERR_MAX_CHARS,
       retention: "tail",
     });
+    // Both buffers are declared ABOVE the guard on purpose: the catch arm has to
+    // be able to render them, and a declaration inside the guarded region would
+    // not be in scope there. Their maxChars and retention settings, and the two
+    // comments above, are unchanged.
+    //
+    // Why the guard exists. Windows refuses a DIRECT spawn of a `.cmd` or `.bat`
+    // under Node's CVE-2024-27980 guard and reports it as EINVAL - and it throws
+    // that error SYNCHRONOUSLY rather than emitting it as an "error" event.
+    // Measured, not assumed: 03-FINDINGS.md, § P1-CMD, on a real windows-latest
+    // host. (Cite the findings file, never the CI artifact - those expire.)
+    //
+    // A synchronous throw inside a Promise executor REJECTS the promise. The
+    // `proc.on("error")` handler below can therefore never fire for it, and this
+    // helper's documented "always resolves, never rejects" contract - the one
+    // every caller in this file relies on by reading `code` and never catching -
+    // would be false exactly where a caller is least able to see it. The
+    // rejection would then travel resolveWithCache -> requireNodeExecutable ->
+    // startMcpServer with no catch anywhere on the path and reach the user as an
+    // unhandled RPC rejection instead of a Drift error message. That is the same
+    // failure mode the comment at getNodeExecutable's provider-command reading
+    // already defends against for a different input.
+    //
+    // This stopped being unreachable in Phase 6: the resolver now emits `.cmd`
+    // and `.bat` candidates, and getNodeExecutable SPAWNS every candidate that
+    // passes fileExists.
+    //
+    // What this guard does NOT do, stated plainly: it does not make a `.cmd`
+    // launchable. A `.cmd` Windows refuses now resolves as exit code 1, which the
+    // node validation loop reads as "not a working executable" and steps past -
+    // graceful degradation, not launchability. Making a `.cmd` actually launch is
+    // PRV-02 in Phase 7, which owns the cmd.exe branch; this token is here so
+    // PRV-02 can find the seam by search rather than re-inventorying every spawn
+    // in this file. Deliberately absent here: any shell option, any command
+    // interpreter wrapper, any extension check. All three are PRV-02's to design,
+    // and adding one now would turn a correctness fix into a launchability claim.
+    let proc: ChildProcessWithoutNullStreams;
+    try {
+      proc =
+        options?.env === undefined
+          ? spawn(cmd, args, { stdio: ["pipe", "pipe", "pipe"] })
+          : spawnWithEnv(cmd, args, { stdio: ["pipe", "pipe", "pipe"], env: options.env });
+    } catch {
+      // The same failure shape the "error" handler below resolves: a non-zero
+      // code so a caller can still tell a failed spawn from a successful one,
+      // with whatever the buffers hold rendered exactly as at every other resolve
+      // boundary. Return so nothing downstream of the failed spawn runs.
+      resolve({
+        code: 1,
+        stdout: renderBoundedBuffer(stdout),
+        stderr: renderBoundedBuffer(stderr),
+      });
+      return;
+    }
     proc.stdout?.on("data", (d: Buffer) => { stdout = appendBounded(stdout, d.toString()); });
     proc.stderr?.on("data", (d: Buffer) => { stderr = appendBounded(stderr, d.toString()); });
     // Rendered at the resolve boundary, so the PUBLIC shape of this function is
