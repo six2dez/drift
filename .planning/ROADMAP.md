@@ -8,6 +8,8 @@ This milestone has two layers. **Phases 1–2 are a pre-port hardening layer** a
 
 Two things shape the port's order. First, Caido's LLRT/QuickJS runtime behavior on Windows is unverified, so **Phase 3 is a CI spike** that proves the seven load-bearing primitives before any production code is built on them. Second, the **blocking must-have is Claude on Windows end-to-end (PRV-01)** — its critical path is **Phases 3 → 4 → 5 → 6 + the provider-spawn slice of Phase 7**. Phases 8–10 unlock the remaining three CLIs' lifecycle hardening, the permanent CI gate, and first-class Windows install polish.
 
+**Phases 11-13 are a third layer**, added 2026-08-21: the **Plugin Bridge**. Drift's ~18 tools all wrap *core* Caido capabilities; none reach the plugins the user has installed, which is where most of the domain power in a real Caido setup lives. Neither the official `caido-mode` skill nor any community MCP reaches them either — all of them stop at listing. The bridge is sequenced last because it is feature work and the Windows port is the blocking must-have, but it depends only on Phase 4's spawn-env contract and can be pulled forward if the port stalls. Its evidence base is `.planning/research/PLUGIN-BRIDGE.md`, which measures 305 callable plugin functions across 22 backends on the maintainer's own installation.
+
 **Validation mechanism:** the maintainer cannot test native Windows locally, so `windows-latest` CI (build + vitest, including the `mcp-server.*.test.ts` integration spawn tests) is the source of truth for every port phase, supplemented where possible by the original reporter confirming on a real machine. Phases 1–2 are validated on the existing Linux/macOS runners.
 
 **Milestone invariant (CMP-01 / CMP-02):** every phase must preserve existing macOS/Linux behavior — the POSIX launch path stays byte-for-byte unchanged behind `os.platform()` guards, and the existing snapshot/unit tests must stay green. CMP-01 and CMP-02 each anchor to one phase below for traceability, but the invariant is enforced in every phase.
@@ -33,6 +35,9 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [ ] **Phase 8: Process Lifecycle** - Process-tree death on Windows *and* POSIX so cancel/timeout leaves no token-bearing orphan
 - [ ] **Phase 9: CI Hardening** - Required `windows-latest` job green for the right reasons (`.gitattributes`, `\r?\n`-safe snapshots)
 - [ ] **Phase 10: Windows Polish** - Install/prereqs docs, not-on-PATH detection, Windows-aware diagnostics, `windowsHide`
+- [ ] **Phase 11: Plugin Capability Discovery** - Turn installed plugins into a machine-readable capability catalogue (spec package -> bundle extraction -> names-only)
+- [ ] **Phase 12: Plugin Call Bridge** - `plugin_call` with the injected-`sdk` offset handled and the blast radius bounded by the existing safety machinery
+- [ ] **Phase 13: Plugin Events & Bridge Validation** - `plugin_events` subscription plus end-to-end proof against spec-backed *and* spec-less plugins
 
 ## Phase Details
 
@@ -239,8 +244,18 @@ Plans:
   4. A "CLI / Node not found" error shows correct per-provider Windows install commands, including the corrected `@github/copilot` guidance (replacing the deprecated `gh copilot` extension hint).
   5. Extended `command-resolution` unit tests cover the Windows cases and run green on the Linux CI runner.
 
-**Plans**: 2 plans (provisional)
-**Research flag**: NO for Windows install paths (build-time note: re-verify the Volta/fnm/nvm-windows candidate list against current installer docs).
+**Plans**: 7 plans
+
+Plans:
+- [ ] 06-01-PLAN.md — Substrate: `joinPath`, `getWindowsNamedRoots`, the pure/impure candidate-builder split (D-05/D-10), wired end to end by a tracer, plus both CMP-01 byte-identity proofs *(wave 1)*
+- [ ] 06-02-PLAN.md — The sourced Windows install-location catalogue, the bounded version-manager walks, and the node-specific rows (D-09/D-11/D-12) *(wave 2)*
+- [ ] 06-03-PLAN.md — `rankPathSearchHits`, `getWhichCommand` by absolute path, `getHomeDirCandidates` union (D-01/D-02/D-08) *(wave 2)*
+- [ ] 06-04-PLAN.md — Windows home-dir recognition, the win32 dedup fold, and the recorded non-claims (D-06/D-07) *(wave 3)*
+- [ ] 06-05-PLAN.md — Wire the PATH search at the `resolveCommand` seam: binary, multi-line parse, ranking, platform-aware timeout (D-01–D-04, D-08) *(wave 4)*
+- [ ] 06-06-PLAN.md — The shared install-command table, the platform-armed hint renderer, the Copilot correction, the Node error's Windows arm (D-13–D-16) *(wave 5)*
+- [ ] 06-07-PLAN.md — The help panel renders from the shared table, readme prose accuracy, and the phase evidence gate (D-15) *(wave 6)*
+
+**Research flag**: NO for Windows install paths (build-time note: re-verify the Volta/fnm/nvm-windows candidate list against current installer docs). **Done — 06-RESEARCH.md § *Windows Install-Location Catalogue* verified every row against the installer's own source and CORRECTED three of SC-1's paths: nvm-windows lives under `%LOCALAPPDATA%\nvm` (not `%APPDATA%`), its symlink is `C:\nvm4w\nodejs` (not `%ProgramFiles%\nodejs`, which survives as the Node MSI row), and fnm's modern base is `%APPDATA%\fnm` (not `%LOCALAPPDATA%`). Those corrections supersede the SC-1 list above, per D-09's own deferral to D-12's deliverable.**
 
 ### Phase 7: Provider Spawn & Registration
 
@@ -308,6 +323,61 @@ Plans:
 **Plans**: 1 plan (provisional)
 **Research flag**: NO — UX copy and file-system probes.
 
+### Phase 11: Plugin Capability Discovery
+
+**Goal**: Turn the user's installed plugin set into a machine-readable capability catalogue — which packages ship a backend, what RPC functions each registers, and with what arity — without a hand-maintained registry and without guessing.
+**Depends on**: Phase 4 (the `{ ...process.env, ...driftVars }` spawn-env contract from SC-9, which PBR-03 rides on). Sequenced after Phase 10 by roadmap position, **not** by a technical dependency on Phases 5-10 — it may be pulled forward if the port stalls.
+**Requirements**: PBR-01, PBR-02, PBR-03, PBR-08
+**Success Criteria** (what must be TRUE):
+
+  1. The plugins root is derived as `path.dirname(sdk.meta.path())` — no hardcoded path, no platform branch — and reaches the MCP process through the existing spawn `env` block. It is **never** re-derived inside `mcp-server.mjs`, which has no `sdk`.
+  2. A discovery module enumerates installed packages via the `pluginPackages` query and, for each backend plugin, produces its registered function list.
+  3. The extractor matches the **receiver**, not the method name: only `sdk.api.register` yields callable functions. A fixture containing `sdk.commands.register` yields zero. In the 2026-08-21 sample, 14 of 69 installed plugins registered only command-palette entries, and a name-only grep would have offered them as callable.
+  4. Two-pass extraction (`api.register("name", handlerIdent)` then `function handlerIdent(params)`) resolves parameter names for at least 95% of discovered functions. Measured baseline on the maintainer's 69-plugin installation: 303 of 305 (99%).
+  5. When `@caido-community/<manifestId>` is installed, its `Spec` is preferred over extraction; both sources normalise to one internal shape, so downstream code cannot tell which path produced an entry.
+  6. A function whose signature cannot be resolved is emitted as **unknown-arity**, never guessed (PBR-08).
+  7. Results are cached and invalidated on plugin version change — reuse `resolution-cache.ts` rather than adding a second cache.
+
+**Plans**: 3 plans (provisional)
+**Research flag**: PARTIAL — the mechanism is already measured (`.planning/research/PLUGIN-BRIDGE.md`). The open question is whether regex extraction is trustworthy enough or a real JS parser is required. Resolve during planning, not execution.
+
+### Phase 12: Plugin Call Bridge
+
+**Goal**: Make the catalogue actionable — one `plugin_call` tool that can invoke any discovered backend function, with the argument offset handled correctly and the blast radius bounded by Drift's existing tool-safety machinery.
+**Depends on**: Phase 11
+**Requirements**: PBR-04, PBR-05
+**Success Criteria** (what must be TRUE):
+
+  1. `plugin_call` invokes through `callFunction({ name, arguments })`, and a test asserts the Caido-injected `sdk` first parameter is **dropped**: `apiGetProviders(_sdk)` is called with zero arguments, `createSession(_sdk, providerId)` with exactly one. Getting this wrong offsets every argument by one and is the single most likely silent defect in the phase.
+  2. The bridge adds a **bounded** number of MCP tools (3), not one tool per discovered function. The 305-function catalogue is *data* returned by `plugin_capabilities`; exposing it as tools would swamp every provider's context window.
+  3. Failure modes are distinguished for the agent: `PluginFunctionCallError` (transport, unregistered name, backend threw) versus a plugin's own `Result`-shaped functional failure. `{ kind: "Error" }` is a `quickssrf` convention, **not** an SDK contract, and must not be hard-coded as the error shape.
+  4. Discovery is free; invocation is opt-in per plugin. A newly installed plugin is discoverable but not callable until the user enables it.
+  5. Mutating-looking actions route through the existing sensitive-action confirmation flow. The measured corpus contains `deleteSession`, `deleteNote`, `clearScans`, `clearAllTemplates` and `stopAgent`.
+  6. Multi-backend packages are disambiguated by passing `manifestId` to `callFunction`.
+  7. `plugin_call` never presents an inferred argument schema as a validated one — PBR-08 enforced at the tool boundary, not only in discovery.
+
+**Plans**: 2 plans (provisional)
+**Research flag**: NO — the SDK surface and wire format are documented and verified.
+
+### Phase 13: Plugin Events and Bridge Validation
+
+**Goal**: Close the loop with event subscription, then prove the whole bridge against real plugins — both the three that publish a spec package and at least two that do not.
+**Depends on**: Phase 12
+**Requirements**: PBR-06, PBR-07
+**Success Criteria** (what must be TRUE):
+
+  1. `plugin_events` subscribes via `subscribeEvent` / `createdPluginEvent`, buffered through the Phase 4 `bounded-buffer.ts` caps rather than an unbounded accumulator.
+  2. Subscriptions die with the chat session — none outlives the turn that created it, matching the Phase 8 lifecycle discipline for spawned processes.
+  3. End-to-end invocation is proven against the three spec-backed plugins: **Scanner**, **QuickSSRF** and **Autorize**.
+  4. End-to-end invocation is proven against **at least two plugins with no spec package**, driven purely by extracted signatures. This is the criterion that decides whether extraction is real or wishful.
+  5. The existing MCP self-test / health check covers the bridge: tool discovery plus one live `plugin_capabilities` call.
+  6. Help tab and README state plainly what the bridge can and cannot know — names and arity, **not** types or semantics — so the limitation is the user's to reason about rather than a surprise.
+
+**Stopping rule**: if criteria 3 and 4 cannot both be met, the bridge ships **discovery-only** (`plugin_capabilities`) and `plugin_call` / `plugin_events` are cut rather than shipped unreliable. A bridge that invokes third-party code with guessed arguments is worse than no bridge.
+
+**Plans**: 2 plans (provisional)
+**Research flag**: NO — validation against live plugins, not investigation.
+
 ## Critical Path
 
 **Claude on Windows end-to-end (PRV-01, the blocking must-have)** = Phase 1 → Phase 3 → Phase 4 → Phase 5 → Phase 6 + the provider-spawn slice of Phase 7.
@@ -330,8 +400,8 @@ Phases 8–10 follow: process-lifecycle hardening on both platforms, the permane
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9 → 10.
-Parallelism opportunities: Phase 2 may run alongside Phase 3 (both depend only on Phase 1); Phase 6 may run alongside Phase 5 (both depend only on Phase 4); Phase 9 CI setup may begin alongside Phase 7.
+Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9 → 10 → 11 → 12 → 13.
+Parallelism opportunities: Phase 2 may run alongside Phase 3 (both depend only on Phase 1); Phase 6 may run alongside Phase 5 (both depend only on Phase 4); Phase 9 CI setup may begin alongside Phase 7; Phases 11-13 (Plugin Bridge) depend only on Phase 4 and may be pulled forward if the port stalls.
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
@@ -345,6 +415,9 @@ Parallelism opportunities: Phase 2 may run alongside Phase 3 (both depend only o
 | 8. Process Lifecycle | 0/1 | Not started | - |
 | 9. CI Hardening | 0/1 | Not started | - |
 | 10. Windows Polish | 0/1 | Not started | - |
+| 11. Plugin Capability Discovery | 0/3 | Not started | - |
+| 12. Plugin Call Bridge | 0/2 | Not started | - |
+| 13. Plugin Events & Bridge Validation | 0/2 | Not started | - |
 
 *Plan counts are provisional and refined by `/gsd-plan-phase`.*
 

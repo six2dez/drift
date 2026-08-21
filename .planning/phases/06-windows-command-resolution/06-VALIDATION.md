@@ -49,9 +49,41 @@ Windows box would produce. `C:\...` need never exist for the test to be real evi
 
 ## Per-Task Verification Map
 
+Filled by `/gsd-plan-phase 6` on 2026-08-21. Task IDs follow this repository's existing in-code
+marker convention (`T-04-25`, `T-04-04`, …): phase-wide sequential, so a task can be cited from a
+source comment. Threat IDs refer to the `<threat_model>` register in the owning plan.
+
 | Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
-| *(planner fills once task IDs exist — source rows below)* | | | | | | | | | ⬜ pending |
+| T-06-01 | 06-01 | 1 | RES-01, RES-03 | T-06-T02, T-06-T03 | Absent named root emits no candidate — never an empty-prefix relative path; no env value logged at the new seam | unit | `pnpm exec vitest run packages/backend/src/platform.test.ts packages/backend/src/command-resolution.test.ts` | ✅ both | ⬜ pending |
+| T-06-02 | 06-01 | 1 | CMP-01 | — | — | unit | `pnpm exec vitest run packages/backend/src/platform.test.ts -t "CMP-01"` | ✅ | ⬜ pending |
+| T-06-03 | 06-01 | 1 | CMP-01 | — | — | unit | `pnpm exec vitest run packages/backend/src/command-resolution.test.ts -t "CMP-01"` | ✅ | ⬜ pending |
+| T-06-04 | 06-02 | 2 | RES-01 | T-06-T06 | Absent `%ProgramFiles%` / `%ProgramData%` skips its row entirely | unit | `pnpm exec vitest run packages/backend/src/command-resolution.test.ts` | ✅ | ⬜ pending |
+| T-06-05 | 06-02 | 2 | RES-01 | T-06-T05, T-06-T07 | Version walk reuses the guarded, dot-skipping listing helper; win32 emission bounded | unit | `pnpm exec vitest run packages/backend/src/command-resolution.test.ts` | ✅ | ⬜ pending |
+| T-06-06 | 06-02 | 2 | RES-01 | T-06-T08 | Volta node image ordered ahead of the `.cmd` shim so a real `node.exe` wins | unit | `pnpm exec vitest run packages/backend/src/command-resolution.test.ts` | ✅ | ⬜ pending |
+| T-06-07 | 06-03 | 2 | RES-02 | T-06-T10 | A line that is not extension-terminated produces no candidate — the `INFO:` sentence and the truncated partial line both | unit | `pnpm exec vitest run packages/backend/src/platform.test.ts -t "rankPathSearchHits"` | ✅ | ⬜ pending |
+| T-06-08 | 06-03 | 2 | RES-02 | T-06-T11, T-06-T12 | Search binary resolved by absolute path under the machine's own `SystemRoot`; bare-name fallback reachable and tested | unit | `pnpm exec vitest run packages/backend/src/platform.test.ts -t "getWhichCommand"` | ✅ (`:147`) | ⬜ pending |
+| T-06-09 | 06-03 | 2 | RES-03 | T-06-T13 | Returns data only; no home-dir value is rendered into a log or diagnostic | unit | `pnpm exec vitest run packages/backend/src/platform.test.ts -t "getHomeDirCandidates"` | ✅ (`:212`) | ⬜ pending |
+| T-06-10 | 06-04 | 3 | RES-03 | T-06-T14, T-06-T15 | Traversal segments and UNC shapes both yield `undefined` — no home inferred outside the profile tree or from a network share | unit | `pnpm exec vitest run packages/backend/src/command-resolution.test.ts -t "home director"` | ✅ (`:22`) | ⬜ pending |
+| T-06-11 | 06-04 | 3 | RES-03 | T-06-T16 | Fold applies on the literal win32 platform only, so no genuinely distinct POSIX candidate is dropped | unit | `pnpm exec vitest run packages/backend/src/command-resolution.test.ts -t "foldCandidateKey"` | ✅ | ⬜ pending |
+| T-06-12 | 06-04 | 3 | RES-03 | T-06-T17 | `normalizePathForCompare` preserved and uncalled, with the decline recorded beside the export | source assertion + unit | `pnpm exec vitest run packages/backend/src/runtime-probe.test.ts` | ✅ (`:531`) | ⬜ pending |
+| T-06-13 | 06-05 | 4 | RES-02 | T-06-T20, T-06-T21, T-06-T22 | No env VALUE logged (05-D-11); platform-aware timeout kills the child on expiry; binary invoked by absolute path | suite + gates † | `pnpm exec vitest run && pnpm -r typecheck && pnpm lint` | n/a † | ⬜ pending |
+| T-06-14 | 06-05 | 4 | RES-02 | T-06-T18 | Rendered buffer form never read at the PATH-search site; exit-code gate kept; shared size limit unchanged | suite + gates † | `pnpm exec vitest run && pnpm -r typecheck && pnpm lint` | n/a † | ⬜ pending |
+| T-06-15 | 06-05 | 4 | RES-03 | T-06-T20 | Defensive `globalThis` env accessor retained; no bare `process.env` read introduced | suite + gates † | `pnpm exec vitest run && pnpm -r typecheck && pnpm lint` | n/a † | ⬜ pending |
+| T-06-16 | 06-06 | 5 | UX-02 | T-06-SC, T-06-T25 | Every install command carries a first-party citation; the one unsourced name keeps its `[ASSUMED]` tag and an unchanged string; module stays data-only | unit + typecheck | `pnpm -r typecheck && pnpm lint && pnpm exec vitest run` | ✅ | ⬜ pending |
+| T-06-17 | 06-06 | 5 | UX-02 | T-06-T24 | The archived-repository install command is absent from every package source directory | unit | `pnpm exec vitest run packages/backend/src/command-resolution.test.ts -t "install hint"` | ⚠️ **inverts `:73`** | ⬜ pending |
+| T-06-18 | 06-06 | 5 | UX-02 | T-06-T23 | `lastNodeSearchCandidates` never reaches the user-facing banner | suite + gates † | `pnpm exec vitest run && pnpm -r typecheck && pnpm lint` | n/a † | ⬜ pending |
+| T-06-19 | 06-07 | 6 | UX-02 | T-06-T26, T-06-T27 | Both live surfaces render from one table, so a command cannot be corrected in one and left stale in the other | build + gates † | `pnpm -r typecheck && pnpm lint && pnpm exec vitest run && pnpm build` | n/a † | ⬜ pending |
+| T-06-20 | 06-07 | 6 | UX-02, CMP-01 | T-06-T28 | Phase closed on cited run evidence from both CI legs, not on a claim | suite + gates + CI | `pnpm exec vitest run && pnpm -r typecheck && pnpm lint && pnpm build` | n/a † | ⬜ pending |
+
+† `packages/backend/src/index.ts` has **no unit-test file** in this repository — it is the
+integration seam, and all seven of its Phase 4 predecessors were verified the same way. Those rows
+are covered by the full suite plus the workspace typecheck plus the zero-warning lint gate, and by
+the per-task source assertions in each plan's `<acceptance_criteria>`. The pure DECISIONS those rows
+wire are each unit-tested one layer down, in `platform.test.ts` (T-06-07, T-06-08, T-06-09) and
+`command-resolution.test.ts` (T-06-01 … T-06-06, T-06-10, T-06-11) — which is the whole reason
+D-10 split them out. Sampling continuity holds: every task in the phase has an `<automated>` verify
+and no three consecutive tasks lack one.
 
 ### Requirement → behavior source rows (from RESEARCH § Validation Architecture)
 
@@ -76,15 +108,37 @@ Windows box would produce. `C:\...` need never exist for the test to be real evi
 
 ## Wave 0 Requirements
 
-- [ ] **No new test files needed** — both target files already exist.
-- [ ] **The real Wave 0 gap is the D-10 seam itself:** until `buildCommandCandidatePaths` is a pure
+Each item is now assigned to the plan and task that closes it.
+
+- [x] **No new test files needed** — both target files already exist. Confirmed at plan time.
+- [x] **The real Wave 0 gap is the D-10 seam itself:** until `buildCommandCandidatePaths` is a pure
       export, the win32 cases cannot be written at all. **Sequence the split before the data.**
-- [ ] `platform.test.ts` has no `describe` for `joinPath` or `rankPathSearchHits` — new blocks
+      → Closed by **T-06-01** (plan 06-01, wave 1), which is the phase's tracer task and ships the
+      seam with exactly one sourced named-root row before any catalogue data arrives in wave 2.
+- [x] `platform.test.ts` has no `describe` for `joinPath` or `rankPathSearchHits` — new blocks
       following the existing one-describe-per-export convention.
-- [ ] `command-resolution.test.ts:73` asserts `toContain("gh extension install")`. **This is the only
-      existing assertion Phase 6 makes false.** It must be a deliberate, commented inversion citing
-      D-14 — never a silent edit. A verifier seeing a changed assertion needs the reason beside it.
-- [ ] Framework install: none — Vitest 4.0.18 already present.
+      → `joinPath` by **T-06-01**; `rankPathSearchHits` by **T-06-07** (plan 06-03, wave 2).
+- [x] `command-resolution.test.ts:73` asserts the deprecated Copilot install command is present.
+      **This is the only existing assertion Phase 6 makes false.** It must be a deliberate,
+      commented inversion citing D-14 — never a silent edit.
+      → Closed by **T-06-17** (plan 06-06, wave 5), whose acceptance criteria require the D-14
+      reference and the 2025-10-30 archive date to appear in the test file beside the inverted
+      assertion, and require the deprecated command to be absent from every package source
+      directory.
+- [x] Framework install: none — Vitest 4.0.18 already present.
+
+**Two additional Wave-0-shaped gaps found at plan time**, both closed inside wave 1 rather than
+deferred:
+
+- [x] `command-resolution.test.ts` has no test asserting one helper's output equals another
+      implementation's output — the shape both CMP-01 proofs need.
+      → **T-06-02** (the `joinPath` POSIX byte-identity table) and **T-06-03** (the pure builder's
+      POSIX order regression net), both in plan 06-01, wave 1. 06-CONTEXT § *Specific Ideas*
+      forbids leaving either to review.
+- [x] Three existing tests change call shape when the builders are split (`:29-45`, `:47-66`,
+      `:90-122`). These are mechanical updates with every expected value preserved, and the comment
+      at `:94-107` — which records the real `windows-latest` red — must survive byte-identical.
+      → **T-06-01**, with the comment-preservation gate in **T-06-06**.
 
 ---
 
