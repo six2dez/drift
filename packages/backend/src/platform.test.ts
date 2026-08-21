@@ -6,7 +6,9 @@ import {
   getSweepRoots,
   getTempRoot,
   getWhichCommand,
+  getWindowsNamedRoots,
   isAbsolutePath,
+  joinPath,
   normalizePlatform,
 } from "./platform";
 
@@ -329,5 +331,131 @@ describe("buildSpawnEnv", () => {
     expect(env).not.toBe(parentEnv);
     expect(parentEnv["CAIDO_TOKEN"]).toBeUndefined();
     expect(Object.keys(parentEnv)).toEqual(["PATH"]);
+  });
+});
+
+describe("joinPath", () => {
+  it("spells a Windows candidate with backslashes on win32", () => {
+    expect(
+      joinPath({
+        platform: "win32",
+        segments: ["C:\\Users\\six\\AppData\\Roaming", "npm", "claude.exe"],
+      }),
+    ).toBe("C:\\Users\\six\\AppData\\Roaming\\npm\\claude.exe");
+  });
+
+  it("spells a POSIX candidate with forward slashes on linux", () => {
+    expect(
+      joinPath({ platform: "linux", segments: ["/opt/homebrew/bin", "claude"] }),
+    ).toBe("/opt/homebrew/bin/claude");
+  });
+
+  it("takes the POSIX arm before the RUN-05 probe has resolved a platform", () => {
+    expect(
+      joinPath({ platform: undefined, segments: ["/usr/local/bin", "claude"] }),
+    ).toBe("/usr/local/bin/claude");
+  });
+
+  it("returns the empty string for an empty segment list", () => {
+    expect(joinPath({ platform: "linux", segments: [] })).toBe("");
+    expect(joinPath({ platform: "win32", segments: [] })).toBe("");
+  });
+
+  it("drops an empty or whitespace-only segment instead of doubling the separator", () => {
+    expect(joinPath({ platform: "linux", segments: ["/home/x", "", "bin"] })).toBe(
+      "/home/x/bin",
+    );
+    expect(joinPath({ platform: "linux", segments: ["/home/x", "   ", "bin"] })).toBe(
+      "/home/x/bin",
+    );
+  });
+
+  it("emits exactly one separator at a seam that already carries one", () => {
+    expect(joinPath({ platform: "linux", segments: ["/home/x/", ".local"] })).toBe(
+      "/home/x/.local",
+    );
+    expect(joinPath({ platform: "linux", segments: ["/home/x", "/.local"] })).toBe(
+      "/home/x/.local",
+    );
+    expect(joinPath({ platform: "win32", segments: ["C:\\", "Users"] })).toBe(
+      "C:\\Users",
+    );
+    expect(
+      joinPath({ platform: "win32", segments: ["C:\\Users\\", "\\six"] }),
+    ).toBe("C:\\Users\\six");
+  });
+
+  it("preserves the first segment's own leading separator", () => {
+    expect(joinPath({ platform: "linux", segments: ["/", "usr", "bin"] })).toBe(
+      "/usr/bin",
+    );
+    expect(joinPath({ platform: "linux", segments: ["relative", "bin"] })).toBe(
+      "relative/bin",
+    );
+  });
+});
+
+describe("getWindowsNamedRoots", () => {
+  it("leaves every field absent when the environment carries none of them", () => {
+    const roots = getWindowsNamedRoots({ env: {} });
+    // Object.keys rather than toEqual({}): toEqual ignores a
+    // present-but-undefined property, so it cannot tell "absent" from
+    // "present and empty" — and an empty prefix is exactly the T-06-T02 threat
+    // (a relative path resolved against the process working directory).
+    expect(Object.keys(roots)).toEqual([]);
+  });
+
+  it("reads all six named roots from their native-cased variables", () => {
+    expect(
+      getWindowsNamedRoots({
+        env: {
+          USERPROFILE: "C:\\Users\\six",
+          APPDATA: "C:\\Users\\six\\AppData\\Roaming",
+          LOCALAPPDATA: "C:\\Users\\six\\AppData\\Local",
+          ProgramFiles: "C:\\Program Files",
+          "ProgramFiles(x86)": "C:\\Program Files (x86)",
+          ProgramData: "C:\\ProgramData",
+        },
+      }),
+    ).toEqual({
+      userProfile: "C:\\Users\\six",
+      appData: "C:\\Users\\six\\AppData\\Roaming",
+      localAppData: "C:\\Users\\six\\AppData\\Local",
+      programFiles: "C:\\Program Files",
+      programFilesX86: "C:\\Program Files (x86)",
+      programData: "C:\\ProgramData",
+    });
+  });
+
+  it("falls back to the SCREAMING-case spelling when the native-cased key is absent", () => {
+    expect(
+      getWindowsNamedRoots({
+        env: {
+          PROGRAMFILES: "C:\\Program Files",
+          "PROGRAMFILES(X86)": "C:\\Program Files (x86)",
+          PROGRAMDATA: "C:\\ProgramData",
+        },
+      }),
+    ).toEqual({
+      programFiles: "C:\\Program Files",
+      programFilesX86: "C:\\Program Files (x86)",
+      programData: "C:\\ProgramData",
+    });
+  });
+
+  it("prefers the native-cased key when both spellings are present", () => {
+    expect(
+      getWindowsNamedRoots({
+        env: {
+          ProgramFiles: "C:\\Program Files",
+          PROGRAMFILES: "D:\\Elsewhere",
+        },
+      }),
+    ).toEqual({ programFiles: "C:\\Program Files" });
+  });
+
+  it("treats a whitespace-only value as absent rather than as an empty prefix", () => {
+    const roots = getWindowsNamedRoots({ env: { APPDATA: "   ", USERPROFILE: "" } });
+    expect(Object.keys(roots)).toEqual([]);
   });
 });

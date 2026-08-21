@@ -3,6 +3,7 @@ import os from "os";
 import path from "path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  buildCommandCandidatePaths,
   collectVersionManagerCommandCandidates,
   extractHomeDir,
   formatProviderUnavailableMessage,
@@ -51,8 +52,10 @@ describe("command resolution helpers", () => {
 
     const candidates = await getCommandExecutableCandidates({
       command: "claude",
+      platform: "linux",
       pathResolution: "/opt/homebrew/bin/claude",
       homeDirs: [homeDir],
+      roots: {},
     });
 
     expect(candidates[0]).toBe("/opt/homebrew/bin/claude");
@@ -119,5 +122,43 @@ describe("command resolution helpers", () => {
     expect(candidates).toContain("/opt/homebrew/bin/node");
     expect(candidates).toContain(path.join(providerDir, "node"));
     expect(candidates).toContain(path.join(homeDir, ".volta", "bin", "node"));
+  });
+});
+
+// The SC-5 argument in miniature: a Windows install location asserted from
+// LITERAL roots on the Linux CI runner, with no directory created. The whole
+// point of D-10's pure/impure split is that C:\Users\six\AppData\Roaming\npm
+// cannot exist here, so the only way this list can be proven is by keeping the
+// builder free of filesystem calls.
+describe("buildCommandCandidatePaths (win32 named roots)", () => {
+  it("emits the %APPDATA%\\npm ladder in .exe, .cmd, .bat order", () => {
+    expect(
+      buildCommandCandidatePaths({
+        platform: "win32",
+        command: "claude",
+        pathResolution: undefined,
+        homeDirs: [],
+        roots: { appData: "C:\\Users\\six\\AppData\\Roaming" },
+        versionCandidatesByHomeDir: {},
+      }),
+    ).toEqual([
+      "C:\\Users\\six\\AppData\\Roaming\\npm\\claude.exe",
+      "C:\\Users\\six\\AppData\\Roaming\\npm\\claude.cmd",
+      "C:\\Users\\six\\AppData\\Roaming\\npm\\claude.bat",
+      "C:\\Users\\six\\AppData\\Roaming\\npm\\claude",
+    ]);
+  });
+
+  it("emits nothing at all for a named root the environment did not provide", () => {
+    expect(
+      buildCommandCandidatePaths({
+        platform: "win32",
+        command: "claude",
+        pathResolution: undefined,
+        homeDirs: [],
+        roots: {},
+        versionCandidatesByHomeDir: {},
+      }),
+    ).toEqual([]);
   });
 });
