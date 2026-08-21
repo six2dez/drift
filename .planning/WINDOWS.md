@@ -2,9 +2,9 @@
 schema_version: 1
 open_count: 1
 waived_count: 0
-fixed_count: 7
-total_count: 8
-last_updated: 2026-08-21T11:55:43.210Z
+fixed_count: 9
+total_count: 10
+last_updated: 2026-08-21T13:17:01.729Z
 ---
 
 # Broken Windows Ledger
@@ -23,6 +23,8 @@ last_updated: 2026-08-21T11:55:43.210Z
 | 6 | 06 | deviation | packages/backend/src/command-resolution.test.ts | 90 | windows-latest CI leg fails two node-candidate assertions until 06-02 T-06-06 lands: getNodeExecutableCandidates now spells paths through joinPath's temporary POSIX-arm pass-through while the test expectation is host-flavoured path.join. POSIX green; Windows-only, test-expectation mismatch, no runtime break. | fixed |  | 2026-08-21T10:57:32.676Z | 2026-08-21T11:15:49.095Z |
 | 7 | 06 | unmet-truth | packages/backend/src/platform.test.ts | 518 | joinPath CMP-01 POSIX byte-identity uses the HOST path module as its oracle, so its 25 assertions are red on the blocking windows-latest leg: joinPath({platform:'linux'}) spells with '/' while path.join on win32 spells with '\\'. MEASURED with a path->path.win32 alias shim (25 failures, all I/O-free and therefore faithful). Plan 06-02 was forbidden from editing the CMP-01 blocks, so this is left open. Fix is one token: use path.posix.join as the oracle, which is byte-identical on POSIX and correct on win32. | fixed |  | 2026-08-21T11:15:49.193Z | 2026-08-21T11:31:37.409Z |
 | 8 | 06 | unrun-verify | packages/backend/src/index.ts |  | WIN32_PATH_SEARCH_TIMEOUT_MS = 5000 is a headroom estimate, not a measurement; closes on the Phase 9/10 real-machine report | open |  | 2026-08-21T11:55:43.210Z |  |
+| 9 | 06 | deviation | packages/backend/src/index.ts |  | CR-01/WR-01 (06-REVIEW): the provider spawn in sendCliMessage and the PATH-search spawn in resolveCommand were unguarded Promise-executor spawns, so a synchronous throw rejected the RPC instead of resolving. CLOSED in Phase 6 per 06-VERIFICATION human item 5: both now carry the same try/catch shape spawnAndWait already had. Provider site publishes spawn_error and cleans up runtimeFiles + the token-bearing mcp-<chatId>.json inline (finalize is in its TDZ at that point); PATH-search site resolves undefined, identical to its untouched error handler. Graceful degradation only - .cmd launchability stays PRV-02/Phase 7. | fixed |  | 2026-08-21T13:16:47.639Z | 2026-08-21T13:17:01.634Z |
+| 10 | 06 | deviation | packages/backend/src/command-resolution.ts |  | CR-02 (06-REVIEW): two catalogue rows were non-administrator-writable on default Windows ACLs, and a binary resolved from either is spawned with CAIDO_TOKEN in its environment. CLOSED in Phase 6 per 06-VERIFICATION human item 4, option (a): %ProgramData%\\scoop\\shims dropped entirely; C:\\nvm4w\\nodejs now gated on nvm-windows' own NVM_HOME/NVM_SYMLINK contract via the new pure isNvmWindowsInstalled (platform.ts), threaded in as the injected nvmWindowsInstalled input so the three builders stay I/O-free and never read process.env. Both removals recorded as in-code non-claims naming the token exposure. | fixed |  | 2026-08-21T13:16:56.847Z | 2026-08-21T13:17:01.729Z |
 
 ````json
 [
@@ -121,6 +123,30 @@ last_updated: 2026-08-21T11:55:43.210Z
     "reason": "",
     "recorded_at": "2026-08-21T11:55:43.210Z",
     "resolved_at": null
+  },
+  {
+    "id": 9,
+    "kind": "deviation",
+    "phase": "06",
+    "file": "packages/backend/src/index.ts",
+    "line": null,
+    "description": "CR-01/WR-01 (06-REVIEW): the provider spawn in sendCliMessage and the PATH-search spawn in resolveCommand were unguarded Promise-executor spawns, so a synchronous throw rejected the RPC instead of resolving. CLOSED in Phase 6 per 06-VERIFICATION human item 5: both now carry the same try/catch shape spawnAndWait already had. Provider site publishes spawn_error and cleans up runtimeFiles + the token-bearing mcp-<chatId>.json inline (finalize is in its TDZ at that point); PATH-search site resolves undefined, identical to its untouched error handler. Graceful degradation only - .cmd launchability stays PRV-02/Phase 7.",
+    "status": "fixed",
+    "reason": "",
+    "recorded_at": "2026-08-21T13:16:47.639Z",
+    "resolved_at": "2026-08-21T13:17:01.634Z"
+  },
+  {
+    "id": 10,
+    "kind": "deviation",
+    "phase": "06",
+    "file": "packages/backend/src/command-resolution.ts",
+    "line": null,
+    "description": "CR-02 (06-REVIEW): two catalogue rows were non-administrator-writable on default Windows ACLs, and a binary resolved from either is spawned with CAIDO_TOKEN in its environment. CLOSED in Phase 6 per 06-VERIFICATION human item 4, option (a): %ProgramData%\\scoop\\shims dropped entirely; C:\\nvm4w\\nodejs now gated on nvm-windows' own NVM_HOME/NVM_SYMLINK contract via the new pure isNvmWindowsInstalled (platform.ts), threaded in as the injected nvmWindowsInstalled input so the three builders stay I/O-free and never read process.env. Both removals recorded as in-code non-claims naming the token exposure.",
+    "status": "fixed",
+    "reason": "",
+    "recorded_at": "2026-08-21T13:16:56.847Z",
+    "resolved_at": "2026-08-21T13:17:01.729Z"
   }
 ]
 ````
