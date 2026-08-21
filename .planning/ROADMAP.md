@@ -247,12 +247,29 @@ Plans:
 **Plans**: 7 plans
 
 Plans:
+**Wave 1**
+
 - [ ] 06-01-PLAN.md — Substrate: `joinPath`, `getWindowsNamedRoots`, the pure/impure candidate-builder split (D-05/D-10), wired end to end by a tracer, plus both CMP-01 byte-identity proofs *(wave 1)*
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 06-02-PLAN.md — The sourced Windows install-location catalogue, the bounded version-manager walks, and the node-specific rows (D-09/D-11/D-12) *(wave 2)*
 - [ ] 06-03-PLAN.md — `rankPathSearchHits`, `getWhichCommand` by absolute path, `getHomeDirCandidates` union (D-01/D-02/D-08) *(wave 2)*
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
 - [ ] 06-04-PLAN.md — Windows home-dir recognition, the win32 dedup fold, and the recorded non-claims (D-06/D-07) *(wave 3)*
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
 - [ ] 06-05-PLAN.md — Wire the PATH search at the `resolveCommand` seam: binary, multi-line parse, ranking, platform-aware timeout (D-01–D-04, D-08) *(wave 4)*
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
 - [ ] 06-06-PLAN.md — The shared install-command table, the platform-armed hint renderer, the Copilot correction, the Node error's Windows arm (D-13–D-16) *(wave 5)*
+
+**Wave 6** *(blocked on Wave 5 completion)*
+
 - [ ] 06-07-PLAN.md — The help panel renders from the shared table, readme prose accuracy, and the phase evidence gate (D-15) *(wave 6)*
 
 **Research flag**: NO for Windows install paths (build-time note: re-verify the Volta/fnm/nvm-windows candidate list against current installer docs). **Done — 06-RESEARCH.md § *Windows Install-Location Catalogue* verified every row against the installer's own source and CORRECTED three of SC-1's paths: nvm-windows lives under `%LOCALAPPDATA%\nvm` (not `%APPDATA%`), its symlink is `C:\nvm4w\nodejs` (not `%ProgramFiles%\nodejs`, which survives as the Node MSI row), and fnm's modern base is `%APPDATA%\fnm` (not `%LOCALAPPDATA%`). Those corrections supersede the SC-1 list above, per D-09's own deferral to D-12's deliverable.**

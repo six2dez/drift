@@ -56,7 +56,7 @@ Requirements: **RES-01, RES-02, RES-03, UX-02.**
 
 ### The `where.exe` resolution contract (RES-02)
 
-- **D-01: Rank ALL `where.exe` output lines by extension; first-line-wins is replaced.**
+- **D-01:** Rank ALL `where.exe` output lines by extension; first-line-wins is replaced.
   Parse every CRLF-split line and order by `WINDOWS_EXECUTABLE_EXTENSIONS` (`.exe` > `.cmd` >
   `.bat`), with `where`'s own PATH order breaking ties within an extension.
 
@@ -69,9 +69,9 @@ Requirements: **RES-01, RES-02, RES-03, UX-02.**
   arm is a no-op and `which`'s single-answer semantics are unchanged.
   — **Reversibility:** reversible — one pure function and one call site.
 
-- **D-02: `getWhichCommand`'s input grows to `{ platform, env }`; the win32 arm returns
+- **D-02:** `getWhichCommand`'s input grows to `{ platform, env }`; the win32 arm returns
   `${SystemRoot}\System32\where.exe`, falling back to the bare `"where.exe"` when the variable is
-  missing or empty.**
+  missing or empty.
 
   Phase 3's P1-WHERE measured the absolute-path invocation
   (`C:\Windows\System32\where.exe`). Hardcoding that literal was rejected: it breaks on any machine
@@ -82,8 +82,8 @@ Requirements: **RES-01, RES-02, RES-03, UX-02.**
   literal `env`.
   — **Reversibility:** reversible.
 
-- **D-03: The multi-line parse reads `out.head` and splits on `/\r?\n/`. `renderBoundedBuffer` is
-  still forbidden here, and `SPAWN_STDOUT_MAX_CHARS` is unchanged.**
+- **D-03:** The multi-line parse reads `out.head` and splits on `/\r?\n/`. `renderBoundedBuffer` is
+  still forbidden here, and `SPAWN_STDOUT_MAX_CHARS` is unchanged.
 
   The existing comment's invariant holds unmodified: above the cap the rendered form splices
   `\n…[drift: truncated N bytes]…\n` between head and tail, the marker survives `.trim()`, and the
@@ -98,8 +98,8 @@ Requirements: **RES-01, RES-02, RES-03, UX-02.**
   convenience grounds would turn a closed principle back into a negotiation.
   — **Reversibility:** reversible.
 
-- **D-04: The PATH-search spawn timeout becomes platform-aware — 1000 ms on POSIX (unchanged),
-  longer on win32.**
+- **D-04:** The PATH-search spawn timeout becomes platform-aware — 1000 ms on POSIX (unchanged),
+  longer on win32.
 
   On Windows the spawn is `where.exe` under Defender real-time scanning on a cold
   process-creation path, measurably slower than `which`. A silent timeout there is
@@ -114,8 +114,8 @@ Requirements: **RES-01, RES-02, RES-03, UX-02.**
 
 ### Windows path shapes without a win32 `path` (RES-03)
 
-- **D-05: A hand-rolled, separator-aware `joinPath({ platform, segments })` replaces every
-  `path.join` in the candidate builders.** Backslash on win32, forward slash otherwise.
+- **D-05:** A hand-rolled, separator-aware `joinPath({ platform, segments })` replaces every
+  `path.join` in the candidate builders. Backslash on win32, forward slash otherwise.
 
   This applies the module's own recorded lesson consistently instead of to one function. Under a
   POSIX-flavoured `path`, `path.join("C:\\Users\\x", ".local", "bin", cmd)` yields
@@ -130,8 +130,8 @@ Requirements: **RES-01, RES-02, RES-03, UX-02.**
   — **Reversibility:** costly — it is a mechanical sweep of ~20 call sites in one module, so undoing
   it touches all of them; nothing outside the module depends on it.
 
-- **D-06: `extractHomeDir` gains a drive-letter arm and stays PLATFORM-BLIND — one string in, no
-  injected `platform`.** It accepts both `C:\Users\<name>` and `C:/Users/<name>`.
+- **D-06:** `extractHomeDir` gains a drive-letter arm and stays PLATFORM-BLIND — one string in, no
+  injected `platform`. It accepts both `C:\Users\<name>` and `C:/Users/<name>`.
 
   This matches `isAbsolutePath`'s existing `platform: undefined` arm (accept either spelling; a
   wrong guess costs one failed `stat`) and keeps working before the RUN-05 probe has run — which
@@ -141,8 +141,8 @@ Requirements: **RES-01, RES-02, RES-03, UX-02.**
   with more ceremony around it.
   — **Reversibility:** reversible.
 
-- **D-07: Phase 6 dedups win32 candidates with a PURE lowercased, separator-normalized key and
-  does NOT wire `normalizePathForCompare`. The unused export still must not be deleted.**
+- **D-07:** Phase 6 dedups win32 candidates with a PURE lowercased, separator-normalized key and
+  does NOT wire `normalizePathForCompare`. The unused export still must not be deleted.
 
   04-D-04 expected Phase 6 to be its first caller, citing the 8.3-versus-long-form case
   (`C:\Users\RUNNER~1` from `os.tmpdir()` versus `C:\Users\runneradmin` from `USERPROFILE`).
@@ -157,8 +157,8 @@ Requirements: **RES-01, RES-02, RES-03, UX-02.**
   04-D-04's "do not clean up the unused export" still binds: the export stays.
   — **Reversibility:** reversible.
 
-- **D-08: `getHomeDirCandidates` widens to accept `Platform | undefined`; on `undefined` it reads
-  BOTH name sets — `HOME` and `USERPROFILE`/`APPDATA`/`LOCALAPPDATA`.** `getKnownHomeDirs` stops
+- **D-08:** `getHomeDirCandidates` widens to accept `Platform | undefined`; on `undefined` it reads
+  BOTH name sets — `HOME` and `USERPROFILE`/`APPDATA`/`LOCALAPPDATA`. `getKnownHomeDirs` stops
   hardcoding `process.env.HOME` and calls it.
 
   Whichever variables are actually set decide the answer, since the wrong platform's names are
@@ -173,8 +173,8 @@ Requirements: **RES-01, RES-02, RES-03, UX-02.**
 
 ### The Windows install-location catalogue (RES-01) and its evidence (SC-5)
 
-- **D-09: On win32 the three env vars are NAMED ROOTS with their own suffix lists — not a flat
-  `homeDirs` array crossed with one ladder.**
+- **D-09:** On win32 the three env vars are NAMED ROOTS with their own suffix lists — not a flat
+  `homeDirs` array crossed with one ladder.
 
   `USERPROFILE`, `APPDATA` and `LOCALAPPDATA` are not peers. `%APPDATA%\npm\claude.cmd` is real;
   `%APPDATA%\.local\bin\claude.exe` is nonsense. nvm-windows lives under `APPDATA`, fnm under
@@ -192,7 +192,7 @@ Requirements: **RES-01, RES-02, RES-03, UX-02.**
   — **Reversibility:** costly — it changes the input shape of the candidate builders, so every
   caller and every test that constructs those inputs moves with it.
 
-- **D-10: The candidate builders split into a PURE path builder and a thin impure I/O filter.**
+- **D-10:** The candidate builders split into a PURE path builder and a thin impure I/O filter.
   `buildCommandCandidatePaths({ platform, command, roots, discoveredVersions })` returns the full
   ordered list with zero I/O; the `stat`/`readdir` stay in a thin caller that feeds it.
 
@@ -206,8 +206,8 @@ Requirements: **RES-01, RES-02, RES-03, UX-02.**
   — **Reversibility:** costly — it re-splits two exported functions; the seam is what the SC-5
   tests are written against, so undoing it invalidates that evidence.
 
-- **D-11: Candidate ordering is LOCATION-MAJOR — walk locations in precedence order, trying
-  `.exe` → `.cmd` → `.bat` within each, and short-circuit on the first hit.**
+- **D-11:** Candidate ordering is LOCATION-MAJOR — walk locations in precedence order, trying
+  `.exe` → `.cmd` → `.bat` within each, and short-circuit on the first hit.
 
   An explicitly-installed binary in `%APPDATA%\npm` is a stronger signal than a `.exe` in a
   location the user never installed to, and real installs put exactly one spelling per directory,
@@ -220,8 +220,8 @@ Requirements: **RES-01, RES-02, RES-03, UX-02.**
   full walk on the platform where `stat` is slowest.
   — **Reversibility:** reversible.
 
-- **D-12: The phase researcher verifies EVERY Windows candidate path against upstream installer
-  docs and cites the URL. A path that cannot be sourced is DROPPED, not guessed.**
+- **D-12:** The phase researcher verifies EVERY Windows candidate path against upstream installer
+  docs and cites the URL. A path that cannot be sourced is DROPPED, not guessed.
 
   The roadmap flags "Research: NO for Windows install paths" but attaches a build-time note to
   re-verify Volta/fnm/nvm-windows against current installer docs — and those layouts have moved
@@ -238,7 +238,7 @@ Requirements: **RES-01, RES-02, RES-03, UX-02.**
 
 ### "CLI / Node not found" guidance (UX-02)
 
-- **D-13: `getProviderInstallHint` takes `{ providerId, platform }` — one table, two arms.** The
+- **D-13:** `getProviderInstallHint` takes `{ providerId, platform }` — one table, two arms. The
   POSIX arm is byte-identical to today, so CMP-01 is provable by inspection. Callers pass
   `host?.platform`; on `undefined` (reachable pre-probe) the hint shows BOTH spellings rather than
   guessing, matching D-08's union-when-unknown rule. The module stays pure — no I/O is added.
@@ -247,7 +247,7 @@ Requirements: **RES-01, RES-02, RES-03, UX-02.**
   Phase 10, and is deliberately not pulled forward.
   — **Reversibility:** reversible.
 
-- **D-14: The `@github/copilot` correction ships on EVERY platform, not just Windows.**
+- **D-14:** The `@github/copilot` correction ships on EVERY platform, not just Windows.
 
   `gh extension install github/gh-copilot` is the deprecated CLI; the current one is
   `npm install -g @github/copilot`. UX-02's own wording is "**replacing** the deprecated
@@ -257,8 +257,8 @@ Requirements: **RES-01, RES-02, RES-03, UX-02.**
   error string is not a behaviour regression.
   — **Reversibility:** reversible.
 
-- **D-15: The hint table moves to `packages/shared/src/` so backend and frontend render the same
-  data. README and CHANGELOG stay prose and are NOT wired to it.**
+- **D-15:** The hint table moves to `packages/shared/src/` so backend and frontend render the same
+  data. README and CHANGELOG stay prose and are NOT wired to it.
 
   The commands are hand-copied in four places today (`command-resolution.ts:7-16`,
   `HelpView.vue:207-223`, `README.md:38`, `CHANGELOG.md:75`) and the backend table is about to gain
@@ -272,7 +272,7 @@ Requirements: **RES-01, RES-02, RES-03, UX-02.**
   — **Reversibility:** costly — it crosses the package boundary, so unwinding it means re-inlining
   the table in two packages.
 
-- **D-16: `NODE_EXECUTABLE_ERROR` (`index.ts:160`) also gets a win32 arm.**
+- **D-16:** `NODE_EXECUTABLE_ERROR` (`index.ts:160`) also gets a win32 arm.
 
   UX-02 says "**CLI / Node** not found", so the Node message is in scope. Today it reads "Restart
   Caido from an environment where Node.js is available" — POSIX shell framing that does not map to

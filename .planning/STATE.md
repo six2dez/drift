@@ -1,18 +1,18 @@
 ---
 gsd_state_version: 1.0
 milestone: v1.0
-current_phase: 05
-current_phase_name: Kill Shell Wrappers
-status: verifying
+current_phase: 6
+current_phase_name: Windows Command Resolution
+status: executing
 stopped_at: Phase 6 context gathered
-last_updated: "2026-08-21T09:00:42.306Z"
+last_updated: "2026-08-21T10:40:54.700Z"
 last_activity: 2026-08-20
 last_activity_desc: Phase 05 execution started
-state_head: 76af902845752a76f8466e45075dd795d4ca4334
+state_head: 59bbb7700b0f92c87883515e805f7b5bc1ba8f12
 progress:
-  total_phases: 10
+  total_phases: 13
   completed_phases: 4
-  total_plans: 28
+  total_plans: 35
   completed_plans: 28
 milestone_name: milestone
 ---
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-06-26)
 
 ## Current Position
 
-Phase: 05 (Kill Shell Wrappers) — EXECUTED, AWAITING VERIFICATION
+Phase: 6 (Windows Command Resolution) — READY TO EXECUTE
 Plan: 6 of 6 (all six have SUMMARYs)
-Status: Phase complete on disk — ready for `/gsd-verify-work 05`. ROADMAP stays `In Progress` until that runs; it is not hand-edited to Complete.
+Status: Ready to execute
 Last activity: 2026-08-20 — Phase 05 closed on evidence (05-06)
 
 Progress: [███░░░░░░░] 30% (3 of 10 milestone phases)
@@ -69,6 +69,13 @@ Progress: [███░░░░░░░] 30% (3 of 10 milestone phases)
 | Phase 05 P06 | 2h 17min | 4 tasks | 6 files |
 
 ## Accumulated Context
+
+### Roadmap Evolution
+
+- Phases 11-13 added 2026-08-21 — **Plugin Bridge** (capability discovery, `plugin_call`, `plugin_events`). Appended to the v1.0 milestone rather than opened as v1.1, so the port stays the active queue and the bridge follows it. New requirement family PBR-01…PBR-08; evidence in `.planning/research/PLUGIN-BRIDGE.md`.
+  - Load-bearing finding: Caido has **no runtime introspection** of plugin functions, but plugin bundles are not identifier-minified, so a two-pass extraction recovers 303 of 305 signatures (99%) on a 69-plugin installation. That is what makes the bridge viable without a hand-maintained registry.
+  - Load-bearing constraint: `path.dirname(sdk.meta.path())` is the plugins root — portable across macOS/Linux/Windows with no platform branch, which is why PBR-03 forbids re-deriving it inside the MCP process.
+  - Deliberate non-goal: not another generic Caido MCP. Three already exist (official skill, `c0tton-fluff`, `bicilique`); none implement plugin invocation.
 
 ### Decisions
 
