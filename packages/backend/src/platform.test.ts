@@ -1,3 +1,4 @@
+import path from "path";
 import { describe, expect, it } from "vitest";
 import {
   buildSpawnEnv,
@@ -458,4 +459,74 @@ describe("getWindowsNamedRoots", () => {
     const roots = getWindowsNamedRoots({ env: { APPDATA: "   ", USERPROFILE: "" } });
     expect(Object.keys(roots)).toEqual([]);
   });
+});
+
+// CMP-01 — the byte-identity proof for the D-05 sweep.
+//
+// 06-CONTEXT § Specific Ideas: "The POSIX output of D-05's `joinPath` should be
+// asserted byte-identical to the current `path.join` output. That equality IS
+// the CMP-01 proof for the sweep; do not leave it to review." This block is that
+// assertion.
+//
+// The `path` import above is legitimate HERE and nowhere else in this module's
+// orbit: it is the ORACLE, not the implementation. platform.ts refuses the
+// import precisely because the module is host-flavoured — which is what makes it
+// useless as an implementation and perfect as a comparison target on a POSIX
+// runner, where its flavour is POSIX by construction. `grep -c 'from "path"'`
+// over platform.ts itself still returns 0.
+//
+// The table below was enumerated from command-resolution.ts as it stands after
+// this plan: the POSIX candidate rows at :184-196 (four absolute directories
+// plus the seven home-relative suffixes), the version-manager suffixes at
+// :129-141, and the node-only absolute rows at :271-278. It is iterated in a
+// loop rather than written out as individual assertions so that a suffix added
+// to the builders without a row here shows up as an omission a reader can spot,
+// not as silence.
+const CMP_01_HOME_DIRS = ["/home/six", "/Users/six2dez/"];
+
+const cmp01AbsoluteRows: string[][] = [
+  // command-resolution.ts:184-187
+  ["/opt/homebrew/bin", "claude"],
+  ["/usr/local/bin", "claude"],
+  ["/usr/bin", "claude"],
+  ["/bin", "claude"],
+  // command-resolution.ts:271-273 — node-only
+  ["/opt/homebrew/bin", "node"],
+  ["/usr/local/bin", "node"],
+  ["/usr/bin", "node"],
+];
+
+const cmp01HomeRows = (homeDir: string): string[][] => [
+  // command-resolution.ts:190-196
+  [homeDir, ".local", "bin", "claude"],
+  [homeDir, ".volta", "bin", "claude"],
+  [homeDir, ".asdf", "shims", "claude"],
+  [homeDir, ".npm-global", "bin", "claude"],
+  [homeDir, ".bun", "bin", "claude"],
+  [homeDir, "Library", "pnpm", "claude"],
+  [homeDir, ".local", "share", "pnpm", "claude"],
+  // command-resolution.ts:129-141 — the two version-manager walks
+  [homeDir, ".nvm", "versions", "node", "v22.1.0", "bin", "claude"],
+  [homeDir, ".fnm", "node-versions", "v20.5.0", "installation", "bin", "claude"],
+];
+
+const cmp01Rows: string[][] = [
+  ...cmp01AbsoluteRows,
+  ...CMP_01_HOME_DIRS.flatMap((homeDir) => cmp01HomeRows(homeDir)),
+];
+
+describe("joinPath CMP-01 POSIX byte-identity", () => {
+  for (const row of cmp01Rows) {
+    it(`joins ${row.join(" + ")} exactly as the path module does`, () => {
+      expect(joinPath({ platform: "linux", segments: row })).toBe(
+        path.join(...row),
+      );
+    });
+
+    it(`spells ${row.join(" + ")} identically on darwin and linux`, () => {
+      expect(joinPath({ platform: "darwin", segments: row })).toBe(
+        joinPath({ platform: "linux", segments: row }),
+      );
+    });
+  }
 });
