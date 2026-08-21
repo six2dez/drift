@@ -1,14 +1,14 @@
 ---
 gsd_state_version: 1.0
 milestone: v1.0
-current_phase: 6
+current_phase: 06
 current_phase_name: Windows Command Resolution
 status: executing
 stopped_at: Phase 6 context gathered
-last_updated: "2026-08-21T10:40:54.700Z"
-last_activity: 2026-08-20
-last_activity_desc: Phase 05 execution started
-state_head: 59bbb7700b0f92c87883515e805f7b5bc1ba8f12
+last_updated: "2026-08-21T10:43:05.729Z"
+last_activity: 2026-08-21
+last_activity_desc: Phase 06 execution started
+state_head: 7afc64a9be5e92ca62f2b9aca888250371a61728
 progress:
   total_phases: 13
   completed_phases: 4
@@ -24,14 +24,14 @@ milestone_name: milestone
 See: .planning/PROJECT.md (updated 2026-06-26)
 
 **Core value:** The user's local AI CLI must reliably start, attach to Caido via the MCP server, and run tools against live Caido data — on native Windows as well as macOS/Linux.
-**Current focus:** Phase 05 — Kill Shell Wrappers
+**Current focus:** Phase 06 — Windows Command Resolution
 
 ## Current Position
 
-Phase: 6 (Windows Command Resolution) — READY TO EXECUTE
-Plan: 6 of 6 (all six have SUMMARYs)
-Status: Ready to execute
-Last activity: 2026-08-20 — Phase 05 closed on evidence (05-06)
+Phase: 06 (Windows Command Resolution) — EXECUTING
+Plan: 1 of 7
+Status: Executing Phase 06
+Last activity: 2026-08-21 — Phase 06 execution started
 
 Progress: [███░░░░░░░] 30% (3 of 10 milestone phases)
 
