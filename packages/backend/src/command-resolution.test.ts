@@ -2,6 +2,7 @@ import { mkdtemp, mkdir, rm } from "fs/promises";
 import os from "os";
 import path from "path";
 import { afterEach, describe, expect, it } from "vitest";
+import { CliProvider } from "shared";
 import {
   buildCommandCandidatePaths,
   buildNodeCandidatePaths,
@@ -127,26 +128,145 @@ describe("command resolution helpers", () => {
     );
   });
 
-  it("returns an actionable install hint for every known provider", () => {
-    expect(getProviderInstallHint("claude-cli")).toContain("claude.ai/install.sh");
-    expect(getProviderInstallHint("gemini-cli")).toContain("@google/gemini-cli");
-    expect(getProviderInstallHint("codex-cli")).toContain("@openai/codex");
-    expect(getProviderInstallHint("copilot-cli")).toContain("gh extension install");
+  // The half of every hint that tells a user what to do when installing is not
+  // the answer. Preserved character for character across the move to the shared
+  // table, so it is spelled once here and reused by the byte-identity checks.
+  const SETTINGS_SUFFIX =
+    ", or set the absolute binary path in Settings → CLI Providers.";
+
+  it("reproduces the macOS/Linux install hint shipping today, byte for byte", () => {
+    // CMP-01, made mechanical. D-13 claims the macOS/Linux arm is byte-identical
+    // "by inspection"; equality assertions on the FULL sentence are that claim
+    // turned into a test. A toContain() check would pass even if the renderer
+    // silently reworded the product label or dropped the settings suffix.
+    expect(
+      getProviderInstallHint({ providerId: "claude-cli", platform: "linux" }),
+    ).toBe(
+      "Install Claude Code with `curl -fsSL https://claude.ai/install.sh | bash`" +
+        SETTINGS_SUFFIX,
+    );
+    expect(
+      getProviderInstallHint({ providerId: "gemini-cli", platform: "darwin" }),
+    ).toBe(
+      "Install Gemini CLI with `npm install -g @google/gemini-cli`" +
+        SETTINGS_SUFFIX,
+    );
+    expect(
+      getProviderInstallHint({ providerId: "codex-cli", platform: "linux" }),
+    ).toBe(
+      "Install Codex CLI with `npm install -g @openai/codex`" + SETTINGS_SUFFIX,
+    );
+  });
+
+  // D-14. THIS ASSERTION WAS INVERTED DELIBERATELY. It previously asserted the
+  // Copilot hint CONTAINED `gh extension install`; it now asserts the opposite.
+  // That command installs a `gh` CLI extension whose upstream repository was
+  // deprecated on 2025-10-25 and archived read-only on 2025-10-30, so the string
+  // Drift shipped pointed every user at a dead repository. The correction ships
+  // on EVERY platform, not only Windows, because UX-02's own wording is
+  // "replacing" — leaving the wrong command on macOS and Linux while fixing
+  // Windows would be a deliberate defect against the entire current user base.
+  // This is a COPY fix, not a behaviour change: CMP-01 protects macOS/Linux
+  // behaviour, and a corrected error string is not a POSIX regression.
+  it("names the current Copilot package, not the archived extension, on every platform", () => {
+    for (const platform of ["linux", "darwin", "win32", undefined] as const) {
+      const hint = getProviderInstallHint({
+        providerId: "copilot-cli",
+        platform,
+      });
+      expect(hint).toContain("npm install -g @github/copilot");
+      expect(hint).not.toContain("gh extension install");
+      expect(hint).not.toContain("gh-copilot");
+    }
+  });
+
+  it("returns the Windows install route on win32", () => {
+    const hint = getProviderInstallHint({
+      providerId: "claude-cli",
+      platform: "win32",
+    });
+    expect(hint).toContain("irm https://claude.ai/install.ps1 | iex");
+    // The macOS/Linux shell script must not appear on the Windows arm.
+    expect(hint).not.toContain("claude.ai/install.sh");
+    expect(hint.endsWith(SETTINGS_SUFFIX)).toBe(true);
+  });
+
+  it("names BOTH routes when the platform is unknown and the arms differ", () => {
+    // The fourth application of the union-when-unknown rule (isAbsolutePath,
+    // getHomeDirCandidates, extractHomeDir, and now the hint renderer): a
+    // pre-probe `undefined` platform is answered with every spelling rather than
+    // by guessing one.
+    const hint = getProviderInstallHint({
+      providerId: "claude-cli",
+      platform: undefined,
+    });
+    expect(hint).toContain("curl -fsSL https://claude.ai/install.sh | bash");
+    expect(hint).toContain("irm https://claude.ai/install.ps1 | iex");
+    expect(hint).toContain("macOS or Linux");
+    expect(hint).toContain("Windows");
+    expect(hint.endsWith(SETTINGS_SUFFIX)).toBe(true);
+  });
+
+  it("names ONE command when the platform is unknown and the arms are equal", () => {
+    // Three of the four providers install identically on both platforms, so
+    // duplicating the command under two platform labels would be noise.
+    const hint = getProviderInstallHint({
+      providerId: "gemini-cli",
+      platform: undefined,
+    });
+    expect(hint).toBe(
+      "Install Gemini CLI with `npm install -g @google/gemini-cli`" +
+        SETTINGS_SUFFIX,
+    );
+  });
+
+  it("returns a non-empty hint for every provider on every platform arm", () => {
+    for (const providerId of Object.values(CliProvider)) {
+      for (const platform of ["linux", "darwin", "win32", undefined] as const) {
+        const hint = getProviderInstallHint({ providerId, platform });
+        expect(hint.length).toBeGreaterThan(0);
+        expect(hint.endsWith(SETTINGS_SUFFIX)).toBe(true);
+      }
+    }
   });
 
   it("returns a generic hint for unknown providers", () => {
-    const hint = getProviderInstallHint("unknown-cli");
-    expect(hint).toContain("Install the CLI");
-    expect(hint).toContain("Settings");
+    // The provider id stays a loose string on the way in because callers hold
+    // configuration keys rather than union members; this fallback is what makes
+    // that safe, so it is asserted on a defined platform and an unknown one.
+    for (const platform of ["linux", "win32", undefined] as const) {
+      const hint = getProviderInstallHint({
+        providerId: "unknown-cli",
+        platform,
+      });
+      expect(hint).toContain("Install the CLI");
+      expect(hint).toContain("Settings");
+    }
   });
 
   it("appends the install hint to the cause in formatProviderUnavailableMessage", () => {
-    const message = formatProviderUnavailableMessage(
-      "claude-cli",
-      "CLI not found: claude",
-    );
+    const message = formatProviderUnavailableMessage({
+      providerId: "claude-cli",
+      cause: "CLI not found: claude",
+      platform: "linux",
+    });
     expect(message.startsWith("CLI not found: claude")).toBe(true);
     expect(message).toContain("claude.ai/install.sh");
+    // The separator is unchanged: cause, full stop, space, hint.
+    expect(message).toBe(
+      "CLI not found: claude. " +
+        getProviderInstallHint({ providerId: "claude-cli", platform: "linux" }),
+    );
+  });
+
+  it("threads the platform through formatProviderUnavailableMessage", () => {
+    const message = formatProviderUnavailableMessage({
+      providerId: "claude-cli",
+      cause: "CLI not found: claude",
+      platform: "win32",
+    });
+    expect(message).toContain("install.ps1");
+    expect(message).not.toContain("install.sh");
   });
 
   it("builds node candidates from known homes and provider-adjacent paths", async () => {
