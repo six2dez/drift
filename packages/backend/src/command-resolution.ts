@@ -2,6 +2,12 @@ import { readdir, stat } from "fs/promises";
 import path from "path";
 
 import {
+  CLI_PROVIDER_DISPLAY_NAMES,
+  PROVIDER_INSTALL_COMMANDS,
+  type ProviderInstallCommands,
+} from "shared";
+
+import {
   getExecutableNames,
   joinPath,
   type Platform,
@@ -67,32 +73,85 @@ const EMPTY_WINDOWS_VERSION_DIRS: WindowsVersionDirs = {
   voltaNodeImages: [],
 };
 
+// The half of every hint that tells a user what to do when installing is NOT the
+// answer — an already-installed CLI that Drift simply cannot find. Preserved
+// character for character from the strings shipping today: it is what makes the
+// composed macOS/Linux sentences byte-identical to the ones they replace.
+const INSTALL_HINT_SETTINGS_SUFFIX =
+  ", or set the absolute binary path in Settings → CLI Providers.";
+
+// The fallback for an unrecognised provider id. The renderer takes a LOOSE
+// string because its callers hold configuration keys rather than union members,
+// and this fallback is exactly what makes that safe — without it an unknown id
+// would render "Install undefined with `undefined`". Byte-identical to the
+// fallback shipping today.
+const GENERIC_INSTALL_HINT =
+  "Install the CLI for this provider" + INSTALL_HINT_SETTINGS_SUFFIX;
+
 // Actionable install / resolution hint per provider. These surface inside the
 // chat error banner and in Settings → CLI Providers so a user who hits
 // "CLI not found" does not have to guess which package to install.
-const PROVIDER_INSTALL_HINTS: Record<string, string> = {
-  "claude-cli":
-    "Install Claude Code with `curl -fsSL https://claude.ai/install.sh | bash`, or set the absolute binary path in Settings → CLI Providers.",
-  "gemini-cli":
-    "Install Gemini CLI with `npm install -g @google/gemini-cli`, or set the absolute binary path in Settings → CLI Providers.",
-  "codex-cli":
-    "Install Codex CLI with `npm install -g @openai/codex`, or set the absolute binary path in Settings → CLI Providers.",
-  "copilot-cli":
-    "Install GitHub Copilot CLI with `gh extension install github/gh-copilot`, or set the absolute binary path in Settings → CLI Providers.",
-};
+//
+// The command DATA now lives in packages/shared/src/cli-providers.ts (D-15), so
+// the frontend help panel renders the same strings this banner does; only the
+// sentence COMPOSITION lives here. One consequence of composing rather than
+// hand-writing is deliberate, and is stated here so a reviewer diffing the
+// output does not read it as an accident: the Copilot sentence's product label
+// is now the shared display name ("Copilot CLI") instead of the hand-written
+// "GitHub Copilot CLI" the backend table carried. That is the price of unifying
+// on one source of truth, paid on the one string D-14 is replacing wholesale
+// anyway. The other three sentences are unaffected, and command-resolution.test
+// asserts all three with full-sentence equality.
+export function getProviderInstallHint(input: {
+  providerId: string;
+  platform: Platform | undefined;
+}): string {
+  const commands = (
+    PROVIDER_INSTALL_COMMANDS as Record<
+      string,
+      ProviderInstallCommands | undefined
+    >
+  )[input.providerId];
+  const displayName = (
+    CLI_PROVIDER_DISPLAY_NAMES as Record<string, string | undefined>
+  )[input.providerId];
+  if (commands === undefined || displayName === undefined) {
+    return GENERIC_INSTALL_HINT;
+  }
 
-export function getProviderInstallHint(providerId: string): string {
-  return (
-    PROVIDER_INSTALL_HINTS[providerId] ??
-    "Install the CLI for this provider, or set the absolute binary path in Settings → CLI Providers."
-  );
+  if (input.platform === "win32") {
+    return `Install ${displayName} with \`${commands.win32}\`${INSTALL_HINT_SETTINGS_SUFFIX}`;
+  }
+  if (input.platform !== undefined) {
+    return `Install ${displayName} with \`${commands.posix}\`${INSTALL_HINT_SETTINGS_SUFFIX}`;
+  }
+
+  // Platform undefined — reachable PRE-PROBE, which is the normal path for a
+  // provider status check at plugin load, not an edge case. This is the FOURTH
+  // site applying the same union-when-unknown rule, and all four read alike:
+  // isAbsolutePath accepts both path spellings, getHomeDirCandidates unions both
+  // home-variable name sets, extractHomeDir recognises both profile-root shapes,
+  // and here the hint names both install routes. Guessing one platform would
+  // print a command that is simply wrong on the other half of the user base.
+  //
+  // Only when the arms DIFFER, though: three of the four providers install
+  // identically on macOS, Linux and Windows, so labelling one command twice
+  // would be noise in an error banner.
+  if (commands.posix === commands.win32) {
+    return `Install ${displayName} with \`${commands.posix}\`${INSTALL_HINT_SETTINGS_SUFFIX}`;
+  }
+  return `Install ${displayName} with \`${commands.posix}\` on macOS or Linux, or \`${commands.win32}\` on Windows${INSTALL_HINT_SETTINGS_SUFFIX}`;
 }
 
-export function formatProviderUnavailableMessage(
-  providerId: string,
-  cause: string,
-): string {
-  return `${cause}. ${getProviderInstallHint(providerId)}`;
+export function formatProviderUnavailableMessage(input: {
+  providerId: string;
+  cause: string;
+  platform: Platform | undefined;
+}): string {
+  return `${input.cause}. ${getProviderInstallHint({
+    providerId: input.providerId,
+    platform: input.platform,
+  })}`;
 }
 
 async function pathExists(candidatePath: string): Promise<boolean> {

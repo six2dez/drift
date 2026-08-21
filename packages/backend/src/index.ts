@@ -3121,7 +3121,13 @@ async function createCliSession(
   await dataReady;
   const status = await checkProvider(input.providerId);
   if (!status.available) {
-    return err(formatProviderUnavailableMessage(input.providerId, `CLI not available: ${status.error}`));
+    return err(
+      formatProviderUnavailableMessage({
+        providerId: input.providerId,
+        cause: `CLI not available: ${status.error}`,
+        platform: host?.platform,
+      }),
+    );
   }
 
   const sessionId = `drift-${Date.now()}`;
@@ -3189,10 +3195,11 @@ async function sendCliMessage(
 
     const resolved = await resolveCommand(config.command);
     if (resolved === undefined) {
-      const message = formatProviderUnavailableMessage(
+      const message = formatProviderUnavailableMessage({
         providerId,
-        `CLI not found: ${config.command}`,
-      );
+        cause: `CLI not found: ${config.command}`,
+        platform: host?.platform,
+      });
       setSessionState("error", message);
       return err(message);
     }

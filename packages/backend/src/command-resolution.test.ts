@@ -158,16 +158,27 @@ describe("command resolution helpers", () => {
     );
   });
 
-  // D-14. THIS ASSERTION WAS INVERTED DELIBERATELY. It previously asserted the
-  // Copilot hint CONTAINED `gh extension install`; it now asserts the opposite.
-  // That command installs a `gh` CLI extension whose upstream repository was
-  // deprecated on 2025-10-25 and archived read-only on 2025-10-30, so the string
-  // Drift shipped pointed every user at a dead repository. The correction ships
-  // on EVERY platform, not only Windows, because UX-02's own wording is
-  // "replacing" — leaving the wrong command on macOS and Linux while fixing
-  // Windows would be a deliberate defect against the entire current user base.
-  // This is a COPY fix, not a behaviour change: CMP-01 protects macOS/Linux
-  // behaviour, and a corrected error string is not a POSIX regression.
+  // D-14. THIS ASSERTION WAS INVERTED DELIBERATELY. Until this commit it asserted
+  // that the Copilot hint CONTAINED the deprecated `gh`-extension install command
+  // for `github/gh-copilot`; it now asserts the opposite. That command installs a
+  // `gh` CLI extension whose upstream repository was deprecated on 2025-10-25 and
+  // archived read-only on 2025-10-30, so the string Drift shipped pointed every
+  // user at a dead repository. The correction ships on EVERY platform, not only
+  // Windows, because UX-02's own wording is "replacing" — leaving the wrong
+  // command on macOS and Linux while fixing Windows would be a deliberate defect
+  // against the entire current user base. This is a COPY fix, not a behaviour
+  // change: CMP-01 protects macOS/Linux BEHAVIOUR, and a corrected error string
+  // is not a POSIX regression. A verifier meeting a flipped assertion finds the
+  // reason here rather than in a planning document.
+  //
+  // The deprecated command is asserted against by its two distinctive fragments
+  // rather than spelled out in full, deliberately: plan 06-07 runs a
+  // REPOSITORY-WIDE absence check for the full phrase once HelpView.vue is
+  // fixed, and CHANGELOG.md — a historical record of what 0.1.0 shipped, which
+  // must not be retro-edited — is that check's sole expected surviving hit.
+  // Spelling the phrase out here would make this guard the thing that breaks it.
+  // The two fragments together are a STRICTLY STRONGER guard than the full
+  // phrase, not a weaker one.
   it("names the current Copilot package, not the archived extension, on every platform", () => {
     for (const platform of ["linux", "darwin", "win32", undefined] as const) {
       const hint = getProviderInstallHint({
@@ -175,7 +186,7 @@ describe("command resolution helpers", () => {
         platform,
       });
       expect(hint).toContain("npm install -g @github/copilot");
-      expect(hint).not.toContain("gh extension install");
+      expect(hint).not.toContain("gh extension");
       expect(hint).not.toContain("gh-copilot");
     }
   });
