@@ -814,9 +814,21 @@ contradicted.** Three near-misses are recorded so the planner does not mistake t
 
 ---
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **What win32 PATH-search timeout value should D-04 use?**
+All five were closed by the planner in executable plan content — none is left invisible to an
+executor. Each question keeps its original text below so the reasoning that produced the answer
+stays readable; the pointer line records where the answer actually ships.
+
+| # | Question | Resolved in | Answer |
+|---|---|---|---|
+| Q1 | win32 PATH-search timeout value | **06-05**, § *Planner decisions* + T-06-13 | 5000 ms, bounded by the two in-repo anchors, labelled a headroom estimate in the source and gated on that phrasing |
+| Q2 | Which stream carries the no-match line | **06-03**, T-06-08/T-06-09 | Not answered — designed around, with the exit-code gate and the extension-termination filter as two independent guards, both asserted |
+| Q3 | Version-walk depth | **06-02**, § *Planner decisions* + T-06-05 | Walk kept; win32 emission bounded to 3 per root via `WIN32_VERSION_WALK_LIMIT`; POSIX left unbounded to preserve CMP-01; the lexical sort mirrored, not fixed |
+| Q4 | Does `dirname` join D-05's sweep | **06-02**, § *Planner decisions* + T-06-06 | `dirname` stays host-flavoured and moves into the thin impure caller; the exception is recorded in code and gated by a `path.dirname` count of exactly 1 |
+| Q5 | Does `%ProgramFiles(x86)%` earn its row | **06-02**, § *Planner decisions* + T-06-06 | KEEP, tagged `[ASSUMED]` in the code comment with the WOW64 bitness reasoning, gated by an `ASSUM` grep |
+
+1. **What win32 PATH-search timeout value should D-04 use?** *(RESOLVED — 06-05)*
    - *What we know:* the POSIX value is a `1000` literal at `index.ts:1533`. The codebase's other spawn
      helper, `spawnAndWait`, caps at `Math.min(currentSettings.processTimeoutSeconds * 1000, 10000)` — a
      **10 000 ms ceiling** that is the highest timeout already sanctioned in this module. PERF-03's cache
@@ -831,14 +843,14 @@ contradicted.** Three near-misses are recorded so the planner does not mistake t
      (Phase 9/10)."* Note the negative TTL is 30 s: a timeout longer than that would let a cold miss cost
      more than its own cache lifetime, which is a genuine upper bound worth naming.
 
-2. **Does `where.exe` write its no-match `INFO:` line to stdout or stderr?**
+2. **Does `where.exe` write its no-match `INFO:` line to stdout or stderr?** *(RESOLVED — 06-03)*
    - *What we know:* the message text is well attested; exit code `1` on failure is documented for `/q`.
    - *What's unclear:* the stream. Neither Microsoft Learn nor ss64 says.
    - *Recommendation:* do not attempt to answer it. Make the code correct under **either** answer — the
      `code === 0` gate plus D-01's extension-termination filter — and assert both in tests (Pitfall 1). This
      is cheaper than the answer and does not decay.
 
-3. **How deep should the nvm-windows / fnm / Volta version walks go?** (Claude's Discretion)
+3. **How deep should the nvm-windows / fnm / Volta version walks go?** (Claude's Discretion) *(RESOLVED — 06-02)*
    - *What we know:* the existing POSIX walk (`listVersionDirectories`, `command-resolution.ts:105`) sorts
      `readdir` output and `.reverse()`s it — newest-first by lexical sort — then emits **every** version.
      nvm-windows names its dirs `v<version>`, fnm names them by `v_str()`, Volta by bare node version.
@@ -851,7 +863,7 @@ contradicted.** Three near-misses are recorded so the planner does not mistake t
      win32 for symmetry, or to bound the list to the first N, is a genuine planner call — either way, say
      which and why.
 
-4. **Should the `dirname`-based provider-adjacent node sibling join D-05's sweep?**
+4. **Should the `dirname`-based provider-adjacent node sibling join D-05's sweep?** *(RESOLVED — 06-02)*
    - *What we know:* `command-resolution.ts:176` uses `path.join(path.dirname(commandPath), "node")`. The
      existing test comment (`command-resolution.test.ts:98-107`) records that this is **host-flavoured by
      design** and that "correct on a real Windows host where the command is `C:\...\claude.cmd`".
@@ -861,7 +873,7 @@ contradicted.** Three near-misses are recorded so the planner does not mistake t
      leave `dirname` alone, and **record the exception in the code** so a reader does not "finish the sweep".
      Note the sibling must also gain the extension ladder on win32 (`node.exe`, not bare `node`).
 
-5. **Does `%ProgramFiles(x86)%` earn its row (P-03)?**
+5. **Does `%ProgramFiles(x86)%` earn its row (P-03)?** *(RESOLVED — 06-02)*
    - *What we know:* the variable is standard; no first-party statement ties Node's MSI to it in current
      releases. The historical `nodejs/node#2951` report is from 2015 and long fixed.
    - *What's unclear:* whether Caido's backend host is 32-bit, which would make `%ProgramFiles%` *already*
