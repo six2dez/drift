@@ -35,7 +35,11 @@ describe("command resolution helpers", () => {
       recursive: true,
     });
 
-    const candidates = await collectVersionManagerCommandCandidates(homeDir, "claude");
+    const candidates = await collectVersionManagerCommandCandidates({
+      homeDir,
+      command: "claude",
+      platform: "linux",
+    });
 
     expect(candidates).toContain(
       path.join(homeDir, ".nvm", "versions", "node", "v22.1.0", "bin", "claude"),

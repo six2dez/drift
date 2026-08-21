@@ -105,13 +105,26 @@ export function extractHomeDir(candidatePath: string | undefined): string | unde
   return undefined;
 }
 
-async function listVersionDirectories(root: string): Promise<string[]> {
-  const entries = (await readdir(root)).sort().reverse();
+// The impure half of the D-05 sweep. The walk itself is unchanged — the
+// sorted-then-reversed listing, the dot-prefix skip, the per-entry catch that
+// ignores a broken entry, and the directory-existence guard all behave exactly
+// as before. Only the SPELLING moved: every path is now built for the TARGET
+// platform through joinPath instead of through the host-flavoured module join,
+// so a Windows version directory is not spelled with the runner's separator.
+// On POSIX the emitted strings are byte-identical, which is what makes this a
+// sweep rather than a behaviour change — and what the two CMP-01 blocks pin.
+async function listVersionDirectories(input: {
+  root: string;
+  platform: Platform | undefined;
+}): Promise<string[]> {
+  const entries = (await readdir(input.root)).sort().reverse();
   const versions: string[] = [];
   for (const entry of entries) {
     if (entry.startsWith(".")) continue;
     try {
-      const entryStat = await stat(path.join(root, entry));
+      const entryStat = await stat(
+        joinPath({ platform: input.platform, segments: [input.root, entry] }),
+      );
       if (entryStat.isDirectory()) versions.push(entry);
     } catch {
       // Ignore broken or transient entries while probing candidate paths.
@@ -120,25 +133,37 @@ async function listVersionDirectories(root: string): Promise<string[]> {
   return versions;
 }
 
-export async function collectVersionManagerCommandCandidates(
-  homeDir: string,
-  command: string,
-): Promise<string[]> {
+export async function collectVersionManagerCommandCandidates(input: {
+  homeDir: string;
+  command: string;
+  platform: Platform | undefined;
+}): Promise<string[]> {
   const candidates: string[] = [];
+  const join = (segments: string[]): string =>
+    joinPath({ platform: input.platform, segments });
 
-  const nvmDir = path.join(homeDir, ".nvm", "versions", "node");
+  const nvmDir = join([input.homeDir, ".nvm", "versions", "node"]);
   if (await pathExists(nvmDir)) {
-    const versions = await listVersionDirectories(nvmDir);
+    const versions = await listVersionDirectories({
+      root: nvmDir,
+      platform: input.platform,
+    });
     for (const version of versions) {
-      pushUniqueCandidate(candidates, path.join(nvmDir, version, "bin", command));
+      pushUniqueCandidate(candidates, join([nvmDir, version, "bin", input.command]));
     }
   }
 
-  const fnmDir = path.join(homeDir, ".fnm", "node-versions");
+  const fnmDir = join([input.homeDir, ".fnm", "node-versions"]);
   if (await pathExists(fnmDir)) {
-    const versions = await listVersionDirectories(fnmDir);
+    const versions = await listVersionDirectories({
+      root: fnmDir,
+      platform: input.platform,
+    });
     for (const version of versions) {
-      pushUniqueCandidate(candidates, path.join(fnmDir, version, "installation", "bin", command));
+      pushUniqueCandidate(
+        candidates,
+        join([fnmDir, version, "installation", "bin", input.command]),
+      );
     }
   }
 
@@ -244,16 +269,20 @@ export async function getCommandExecutableCandidates(input: {
 }): Promise<string[]> {
   const versionCandidatesByHomeDir: Record<string, string[]> = {};
   for (const homeDir of [...new Set(input.homeDirs)]) {
-    versionCandidatesByHomeDir[homeDir] = await collectVersionManagerCommandCandidates(
+    versionCandidatesByHomeDir[homeDir] = await collectVersionManagerCommandCandidates({
       homeDir,
-      input.command,
-    );
+      command: input.command,
+      platform: input.platform,
+    });
   }
 
   return buildCommandCandidatePaths({ ...input, versionCandidatesByHomeDir });
 }
 
 export async function getNodeExecutableCandidates(input: {
+  // No `platform` field yet: this signature gains one in plan 06-02's T-06-06.
+  // Until it does, every joinPath in the body below takes a temporary POSIX-arm
+  // pass-through — see the comment beside them.
   execPath?: string;
   pathResolution?: string;
   homeDirs: string[];
@@ -265,18 +294,43 @@ export async function getNodeExecutableCandidates(input: {
   pushUniqueCandidate(candidates, input.pathResolution);
 
   for (const commandPath of input.absoluteProviderCommands) {
-    pushUniqueCandidate(candidates, path.join(path.dirname(commandPath), "node"));
+    // `path.dirname` is the ONE deliberate module-path exception in this file and
+    // it survives the D-05 sweep: D-05 names every join and does not name
+    // `dirname`, and this call is host-flavoured BY DESIGN — on a real Windows
+    // host the command is "C:\...\claude.cmd" and only a win32-flavoured dirname
+    // finds its directory. Plan 06-02's T-06-06 relocates this derivation and
+    // writes the exception down beside it. Do not "finish the sweep" here.
+    pushUniqueCandidate(
+      candidates,
+      joinPath({
+        platform: undefined,
+        segments: [path.dirname(commandPath), "node"],
+      }),
+    );
   }
 
   pushUniqueCandidate(candidates, "/opt/homebrew/bin/node");
   pushUniqueCandidate(candidates, "/usr/local/bin/node");
   pushUniqueCandidate(candidates, "/usr/bin/node");
 
+  // Every `platform: undefined` below is a TEMPORARY POSIX-arm pass-through, not
+  // a platform that was defaulted on purpose. This function does not hold a
+  // platform yet — its public signature gains one in plan 06-02's T-06-06, which
+  // substitutes the real RUN-05 probe value at each of these sites. It is
+  // CMP-01-safe in the meantime because joinPath's POSIX arm IS the pre-sweep
+  // spelling, so the emitted strings are byte-identical to today's on POSIX.
+  const posix = (segments: string[]): string =>
+    joinPath({ platform: undefined, segments });
+
   for (const homeDir of [...new Set(input.homeDirs)]) {
-    pushUniqueCandidate(candidates, path.join(homeDir, ".volta", "bin", "node"));
-    pushUniqueCandidate(candidates, path.join(homeDir, ".asdf", "shims", "node"));
-    pushUniqueCandidate(candidates, path.join(homeDir, ".local", "bin", "node"));
-    for (const candidate of await collectVersionManagerCommandCandidates(homeDir, "node")) {
+    pushUniqueCandidate(candidates, posix([homeDir, ".volta", "bin", "node"]));
+    pushUniqueCandidate(candidates, posix([homeDir, ".asdf", "shims", "node"]));
+    pushUniqueCandidate(candidates, posix([homeDir, ".local", "bin", "node"]));
+    for (const candidate of await collectVersionManagerCommandCandidates({
+      homeDir,
+      command: "node",
+      platform: undefined,
+    })) {
       pushUniqueCandidate(candidates, candidate);
     }
   }
