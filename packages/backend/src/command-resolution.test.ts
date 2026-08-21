@@ -28,6 +28,42 @@ describe("command resolution helpers", () => {
     expect(extractHomeDir("claude")).toBeUndefined();
   });
 
+  // RES-03 / D-06. extractHomeDir is PLATFORM-BLIND — one string in, no injected
+  // platform — so every expectation here is a LITERAL. Building one with the
+  // host's `path` would make this a test of the runner rather than of the
+  // function: on the Linux runner `path.join("C:\\Users", "six")` yields
+  // "C:\\Users/six", which is neither spelling the function is asked about.
+  it("extracts home directories from Windows profile paths in both spellings", () => {
+    expect(extractHomeDir("C:\\Users\\six\\.local\\bin\\claude.exe")).toBe(
+      "C:\\Users\\six",
+    );
+    expect(extractHomeDir("C:/Users/six/.local/bin/claude")).toBe("C:/Users/six");
+    expect(extractHomeDir("c:\\users\\six\\AppData\\Roaming")).toBe(
+      "c:\\users\\six",
+    );
+    expect(extractHomeDir("D:\\Users\\six\\.bun\\bin\\claude.cmd")).toBe(
+      "D:\\Users\\six",
+    );
+    expect(extractHomeDir("C:\\Users\\six")).toBe("C:\\Users\\six");
+  });
+
+  it("declines the Windows path shapes it deliberately does not recognise", () => {
+    // No user segment under the profile root.
+    expect(extractHomeDir("C:\\Users")).toBeUndefined();
+    // Not a profile path at all.
+    expect(extractHomeDir("C:\\Program Files\\nodejs\\node.exe")).toBeUndefined();
+    // Traversal: rejected outright rather than collapsed, so no home directory
+    // outside the profile tree can ever be inferred (T-06-T14).
+    expect(extractHomeDir("C:\\Users\\..\\..\\Windows\\system32")).toBeUndefined();
+    // UNC: the recorded non-claim (T-06-T15). A network share has no
+    // C:\Users\<name> analogue and inventing one would seed every candidate row
+    // from a remote root.
+    expect(extractHomeDir("\\\\server\\share\\home\\six")).toBeUndefined();
+    // A bare drive is drive-RELATIVE; a drive root has no user segment.
+    expect(extractHomeDir("C:")).toBeUndefined();
+    expect(extractHomeDir("C:\\")).toBeUndefined();
+  });
+
   it("collects version manager command candidates", async () => {
     const homeDir = await mkdtemp(path.join(os.tmpdir(), "drift-home-"));
     tempDirs.push(homeDir);
