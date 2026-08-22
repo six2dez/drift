@@ -620,8 +620,24 @@ async function waitForApproval(toolName, argsSummary) {
     group: "read",
     sensitive: true,
   };
+  // Refuses on the PAIR, not on either file alone — approvals and the activity
+  // trace are ONE channel (D-07) and cannot be scoped apart: the approval
+  // request is itself written as an activity event. The condition is unchanged.
+  //
+  // The MESSAGE was upgraded because the old one named the tool and nothing
+  // else: a user whose channel silently failed got no cause and no remedy. This
+  // upgrade is unconditional and independent of any per-CLI capability verdict —
+  // it is the safety net for a table entry that turns out to be wrong on
+  // someone's machine. Key NAMES only, never values, and no interpolation of any
+  // environment value or path (05-D-11).
   if (DRIFT_APPROVALS_FILE === "" || DRIFT_ACTIVITY_FILE === "") {
-    throw new Error(`Sensitive tool confirmation is unavailable for ${toolName}.`);
+    throw new Error(
+      `Sensitive tool confirmation is unavailable for ${toolName}. ` +
+        "This Drift MCP server was started without an approval channel: it looked for the environment variables " +
+        "DRIFT_APPROVALS_FILE and DRIFT_ACTIVITY_FILE and did not receive both of them. " +
+        "Some CLIs build a clean environment for the MCP servers they start, so Drift cannot deliver the channel to them. " +
+        "Open Settings, then CLI Providers, in Drift to see this provider's status and what it can do.",
+    );
   }
 
   const approvalId = createId("approval");

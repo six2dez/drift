@@ -45,6 +45,8 @@ import {
   type McpSelfTestResults,
   type McpServerInfo,
   type ProviderStatus,
+  isProviderUsable,
+  providerMcpApprovalChannel,
   type SendCliMessageOutput,
   type Settings,
   type StoredChat,
@@ -1789,13 +1791,17 @@ async function checkProvider(
 ): Promise<ProviderStatus> {
   const config = currentSettings.providers[id];
   if (!config?.enabled || !config?.command) {
-    return { id, available: false, error: "Disabled" };
+    return { id, capability: "unavailable", error: "Disabled" };
   }
   const resolved = await resolveCommand(config.command, options);
   if (resolved === undefined) {
+      // The two error strings below are the precise per-case diagnostics UX-01
+      // deliberately does NOT duplicate in the UI (a frontend validator would be
+      // weaker and would contradict them). They are byte-unchanged; only the
+      // capability field moved.
       return {
         id,
-        available: false,
+        capability: "unavailable",
         error: isAbsolutePath({
           value: config.command,
           platform: host?.platform,
@@ -1804,7 +1810,7 @@ async function checkProvider(
           : `"${config.command}" not found in PATH or common install locations`,
       };
     }
-    return { id, available: true, resolvedPath: resolved };
+    return applyProviderLimitation({ id, capability: "available", resolvedPath: resolved });
 }
 
 // ── Events ──────────────────────────────────────────────────────────
@@ -2531,7 +2537,7 @@ async function runMcpSelfTest(
         .map(([id]) => id);
 
   const providerStatuses = await Promise.all(candidateProviderIds.map((id) => checkProvider(id)));
-  const targetProviderIds = candidateProviderIds.filter((_, index) => providerStatuses[index]?.available);
+  const targetProviderIds = candidateProviderIds.filter((_, index) => isProviderUsable(providerStatuses[index]));
 
   if (candidateProviderIds.length === 0) {
     return err("No provider is enabled. Enable at least one CLI provider before running the live MCP test.");
@@ -2568,7 +2574,7 @@ async function runMcpSelfTest(
   const nextResults: McpSelfTestResults = { ...lastMcpSelfTestResults };
   candidateProviderIds.forEach((targetProviderId, index) => {
     const providerStatus = providerStatuses[index];
-    const cliReady = providerStatus?.available ?? false;
+    const cliReady = isProviderUsable(providerStatus);
     const cliMessage =
       providerStatus === undefined
         ? "Provider status unavailable"
@@ -2837,8 +2843,19 @@ async function requireNodeExecutable(): Promise<Result<string>> {
 // this map so we clean up exactly what we registered, even if the user
 // has since disabled the provider (or uninstalled the CLI).
 const registeredMcpCliPaths = new Map<"gemini" | "codex", string>();
-// Reasons each CLI was skipped during the last register attempt, for
-// diagnostics surfacing. Written by tryRegisterMcpForProviders.
+// Reasons each CLI was skipped during the last register attempt. Written by
+// tryRegisterMcpForProviders.
+//
+// D-08 — THE MEANING OF AN ENTRY WIDENED IN PHASE 7, AND THIS IS THE ONLY PLACE
+// THAT CONTRACT IS WRITTEN DOWN. Before this phase every entry meant exactly one
+// thing: "Drift never registered this CLI at all". It now ALSO reaches
+// `getProviderStatuses` and renders on the Settings → CLI Providers card, where
+// an entry may equally mean "registered, but a capability is missing". The map
+// carries NO kind discriminator for the difference and deliberately gains none:
+// a separate per-provider capability notice was considered and rejected as new
+// frontend surface. Therefore every sentence written into this map MUST
+// disambiguate on its own — it has to tell a user which of those two states
+// they are in without any other field's help.
 const skippedMcpCliReasons = new Map<"gemini" | "codex", string>();
 
 type McpCliProviderId = "gemini-cli" | "codex-cli";
@@ -2846,6 +2863,49 @@ const MCP_CLI_TO_PROVIDER: Record<"gemini" | "codex", McpCliProviderId> = {
   gemini: "gemini-cli",
   codex: "codex-cli",
 };
+
+function mcpCliForProviderId(providerId: string): "gemini" | "codex" | undefined {
+  // Read THROUGH the existing map rather than writing a second, inverted one:
+  // two tables would be two things to keep in step.
+  for (const cli of ["gemini", "codex"] as const) {
+    if (MCP_CLI_TO_PROVIDER[cli] === providerId) return cli;
+  }
+  return undefined;
+}
+
+// D-08's wiring, and the ONE place the two limitation sources meet. Called only
+// on the resolved arm of `checkProvider` — a provider that never resolved is
+// `unavailable` with a precise error, and a capability sentence on top of that
+// would just be noise.
+//
+// A limitation NEVER rides the `error` field: `error` paints the status dot red,
+// and a registered-but-limited provider is genuinely working (PD-01).
+function applyProviderLimitation(status: ProviderStatus): ProviderStatus {
+  let next = status;
+
+  // Source 1 — the static per-CLI approval-channel table.
+  const channel = providerMcpApprovalChannel(status.id);
+  if (channel.kind === "None") {
+    next = { ...next, capability: "limited", limitation: channel.limitation };
+  }
+
+  // Source 2 — the live skip-reason map, for the two externally registered CLIs.
+  // A skip reason means Drift is not attached AT ALL, so the dot drops to amber
+  // rather than staying green: a provider that resolved but was not registered
+  // is genuinely between states, and the sentence is what tells the two apart.
+  const cli = mcpCliForProviderId(status.id);
+  if (cli !== undefined) {
+    const reason = skippedMcpCliReasons.get(cli);
+    if (reason !== undefined) {
+      // The skip reason WINS when both sources speak: "Drift could not register
+      // this CLI at all" is a stronger fact than what it would have been able to
+      // do had it registered.
+      next = { ...next, capability: "limited", limitation: reason };
+    }
+  }
+
+  return next;
+}
 
 async function registerMcpWithCli(
   cli: "gemini" | "codex",
@@ -3246,7 +3306,7 @@ async function createCliSession(
 ): Promise<Result<string>> {
   await dataReady;
   const status = await checkProvider(input.providerId);
-  if (!status.available) {
+  if (!isProviderUsable(status)) {
     return err(
       formatProviderUnavailableMessage({
         providerId: input.providerId,
@@ -4597,9 +4657,17 @@ async function exportSupportBundle(sdk: BackendSDK): Promise<Result<SupportBundl
       nodeVersion: runtimeProcess.process?.version ?? "unknown",
     },
     activeProvider: currentSettings.activeProvider,
+    // `available` is KEPT under its existing key so a v2 diagnostics consumer
+    // reading this bundle does not break — but it is now DERIVED, which is the
+    // concrete form of "the boolean is demoted to a derived detail". The
+    // capability level and the limitation sit beside it: three keys where there
+    // was one, and the two new ones are the only place a limited provider's
+    // state is machine-readable.
     providers: providerStatuses.value.map((status) => ({
       id: status.id,
-      available: status.available,
+      available: isProviderUsable(status),
+      capability: status.capability,
+      limitation: status.limitation,
       command: currentSettings.providers[status.id]?.command ?? "",
       resolvedPath: status.resolvedPath,
       error: status.error,
