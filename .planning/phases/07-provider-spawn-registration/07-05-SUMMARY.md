@@ -66,7 +66,7 @@ coverage:
         ref: "Source read of README.md lines 40-49: both rows name `mcp add`, the node executable, the server script and `--env`; neither names a wrapper"
         status: pass
     human_judgment: true
-    rationale: "The grep proves the wrong sentence is gone; whether the replacement READS correctly to a user is the 07-05 checkpoint's job and is still pending. Recorded here rather than claimed."
+    rationale: "The grep proves the wrong sentence is gone; whether the replacement READS correctly to a user is the 07-05 checkpoint's job, approved RELAYED (see D8) — a human sign-off on the wording as presented, not an observed read of the rendered README against the rendered card."
   - id: D2
     description: "Gemini's row states its approval channel as source-verified rather than measured, and names the upstream re-check point; Codex's row reuses the shared table's limitation sentence in the same voice"
     requirement: PRV-05
@@ -98,7 +98,7 @@ coverage:
     description: "Every task in plans 07-01 through 07-05 appears in the per-task verification map with the command that proves it, plus the five rows the seed did not anticipate"
     verification:
       - kind: other
-        ref: "Source read of 07-VALIDATION.md § Per-Task Verification Map: 15 task rows (07-01 T1-T3, 07-02 T1-T3, 07-03 T1-T3, 07-04 T1-T3, 07-05 T1-T3) plus the checkpoint row marked pending, plus a five-row 'rows the seed did not anticipate' table"
+        ref: "Source read of 07-VALIDATION.md § Per-Task Verification Map: 15 task rows (07-01 T1-T3, 07-02 T1-T3, 07-03 T1-T3, 07-04 T1-T3, 07-05 T1-T3) plus the checkpoint row, plus a five-row 'rows the seed did not anticipate' table"
         status: pass
     human_judgment: false
   - id: D6
@@ -125,9 +125,12 @@ coverage:
   - id: D8
     description: "The limitation sentence a Codex user actually sees reads as 'registered, but limited' on its own"
     requirement: PRV-05
-    verification: []
+    verification:
+      - kind: manual_procedural
+        ref: "07-05 checkpoint:human-verify — approved by the user, RELAYED through the orchestrating workflow (2026-08-22)"
+        status: pass
     human_judgment: true
-    rationale: "PENDING — not performed. This is the 07-05 `checkpoint:human-verify` and the one criterion in the phase no gate can reach: it needs a human to build the plugin, load it in Caido, open Settings → CLI Providers and read the sentence. It was NOT self-approved and must not be recorded as done. See § Checkpoint status."
+    rationale: "APPROVED-RELAYED, and that qualifier is load-bearing. What is attested: a human was shown the checkpoint checklist and the shipped wording as text, and replied \"approved\". What is NOT attested: that anyone built the plugin, loaded it in Caido, or looked at the rendered provider card. The executor did not observe the approval first-hand and does not assert the in-product steps were performed. This is a human sign-off on the WORDING AS PRESENTED, which is weaker than the in-product read the checkpoint describes. See § Checkpoint status."
 
 duration: 22min
 completed: 2026-08-22
@@ -143,23 +146,40 @@ status: complete
 - **Duration:** ~22 min
 - **Started:** 2026-08-22T10:05:00Z
 - **Completed:** 2026-08-22T10:27:00Z
-- **Tasks:** 3 of 3 executed and committed; the trailing checkpoint is **pending** (see below)
+- **Tasks:** 3 of 3 executed and committed; the trailing checkpoint is **approved (relayed)** (see below)
 - **Files modified:** 3 (0 created in source; 1 summary created)
 
-## Checkpoint status — PENDING, not approved
+## Checkpoint status — APPROVED (RELAYED), and the qualifier is the point
 
 The plan ends in a `checkpoint:human-verify` (gate `blocking`) asking a human to build the plugin,
 load it in Caido, open **Settings → CLI Providers**, and read the limitation sentence on the Codex
-card with their own eyes. **That has not happened.** It was not self-approved and it is not inferred
-from the unit tests — the predicate behind the sentence is unit-tested; whether the sentence *reads*
-correctly is the judgement the checkpoint exists for, and D-08 makes the wording requirement binding
-because the map it travels through carries no discriminator.
+card with their own eyes. **The user replied "approved" on 2026-08-22.** It was not self-approved and
+it was not inferred from the unit tests.
 
-Recorded as `human_judgment: true` with an empty `verification` array in coverage row **D8**, and as
-⏳ pending in 07-VALIDATION.md's per-task map. The provenance rule from the plan's resume signal
-stands: if the eventual approval reaches the record through the orchestrating workflow rather than
-being observed first-hand, that must be written down — a relayed human read is still a human read,
-but it is a weaker record.
+**What is attested, stated exactly.** A human was shown the checkpoint's checklist and the shipped
+limitation sentence *as text*, and approved it. That is a human sign-off on the **wording as
+presented to them**.
+
+**What is NOT attested.** The approval reached this record **through the orchestrating workflow, not
+first-hand** — the executor did not observe the user build the plugin, load it in Caido, or look at
+the rendered provider card, and does not assert that they did. Steps 1-5 of the checkpoint's
+`how-to-verify` (the amber dot, the resolved path, the side-by-side comparison against an
+unregistered provider, the command-field placeholder and its error behaviour) describe things only
+a rendered card can show, and nothing in this record establishes that they were seen.
+
+A later reader should therefore read D8 as **"a human approved the shipped wording"**, not as
+**"a human observed the rendered card"**. The plan's resume signal anticipated exactly this and
+required it be written down: a relayed human read is still a human read, but it is a weaker record
+than a direct observation, and it is the weaker one that happened here.
+
+Recorded as `human_judgment: true` in coverage row **D8** with a single `manual_procedural`
+verification entry labelled RELAYED — deliberately not promoted to a machine-verified result — and
+mirrored in 07-VALIDATION.md's per-task map.
+
+**Residual for a later phase.** The in-product visual confirmation the checkpoint describes remains
+un-witnessed. It is cheap to close on any machine that can run Caido, and it belongs beside the
+Phase 9/10 real-machine checkpoints (SC-1's reporter confirmation, SC-5's Gemini reliability read)
+rather than being treated as discharged here.
 
 ## Accomplishments
 
@@ -364,9 +384,11 @@ None new. The plan's `<threat_model>` dispositions as delivered:
 - **T-07-20 (Spoofing, high) — mitigated.** The vehicle caveat names all five uncovered areas; the
   Gemini row says source-verified rather than measured; the milestone's blocking must-have is
   recorded with the reporter confirmation as its residual and is not claimed closed.
-- **T-07-21 (Repudiation, low) — live and honoured.** The human read has not happened; it is recorded
-  as pending, and the provenance requirement is restated above so a relayed approval is labelled as
-  such when it arrives.
+- **T-07-21 (Repudiation, low) — mitigated, and this is the case it was written for.** The human read
+  arrived RELAYED through the orchestrating workflow rather than observed first-hand, and is recorded
+  with that provenance rather than as a first-hand or machine-verified result. The record states
+  what is attested (approval of the wording as presented) and what is not (that anyone looked at the
+  rendered card).
 - **T-07-SC (Tampering, high) — mitigated.** Documentation only; `git diff --stat package.json
   pnpm-lock.yaml` is empty.
 
@@ -376,8 +398,10 @@ None - no external service configuration required.
 
 ## Next Phase Readiness
 
-**Phase 7's code is complete and green on all five CI legs. One item is outstanding and it is a human
-read, not a build step:** the 07-05 checkpoint on the Codex limitation sentence.
+**Phase 7's code is complete and green on all five CI legs, and the 07-05 checkpoint on the Codex
+limitation sentence is approved — as a RELAYED human read of the shipped wording, not as an observed
+read of the rendered card.** The in-product visual confirmation remains un-witnessed and is named as
+a residual in § *Checkpoint status*.
 
 Binding on whoever closes it and on the phases that follow:
 
@@ -411,7 +435,10 @@ Binding on whoever closes it and on the phases that follow:
   `pnpm -r typecheck` exit 0, `pnpm lint` exit 0, all five CI legs green on run 32567316779 with the
   per-step conclusions recorded, the README carrying no pre-phase sentence and carrying the residue
   line, and the validation document naming the commands this repository has.
-- **One `<verification>` item is deliberately NOT satisfied: the human read of the limitation
-  sentence.** It is pending, it is recorded as pending in coverage row D8 and in 07-VALIDATION.md,
-  and it was not self-approved.
+- **The plan's fifth `<verification>` item — "one human read of the limitation sentence, recorded
+  with its provenance" — is satisfied in the weaker of its two possible forms.** The user replied
+  "approved"; the approval was RELAYED through the orchestrating workflow and the executor did not
+  witness the in-product steps. Recorded that way in coverage row D8 and in § *Checkpoint status*,
+  with the un-witnessed visual confirmation named as a residual. It was not self-approved and it is
+  not recorded as an observed read of the rendered card.
 - `STATE.md` and `ROADMAP.md` deliberately NOT modified — the orchestrator owns those writes.

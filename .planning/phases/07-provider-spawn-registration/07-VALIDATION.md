@@ -82,7 +82,7 @@ establish, and the command that proves it. "Exists" is the state on disk at phas
 | **07-05 T1** — README rows | PRV-04, PRV-05 | No pre-phase "not yet supported" sentence survives; both rows describe executable + args + env; the crash-residue line names the token, both config files and the manual commands | static | `test "$(grep -c 'not yet supported' README.md)" = 0 && grep -q 'crash' README.md && pnpm lint` | ✅ |
 | **07-05 T2** — this document + research correction | PRV-01, PRV-04, PRV-05 | The contract names the commands this repo has; the research artifact carries the same correction and a resolved open-questions section | static | `grep -q 'pnpm exec vitest run' 07-VALIDATION.md && test "$(grep -c 'pnpm[ ]test' 07-RESEARCH.md)" = 0 && grep -q 'RESOLVED' 07-RESEARCH.md` — the bracket expression is deliberate and matches the same text: written literally, this document would match its own gate, the self-non-matching property `ci.yml`'s secret gate documents | ✅ |
 | **07-05 T3** — `windows-latest` run on the phase tree | PRV-01 | All four Linux legs and the Windows leg green; the Windows-gated cases RAN rather than skipped | CI record | `gh run view "$RID" --json jobs` with an assertion that every job conclusion is `success` AND zero steps concluded `failure` | ✅ — see § *Windows evidence* |
-| **07-05 checkpoint** — the limitation sentence a Codex user reads | PRV-05, UX-01, D-08 | The sentence disambiguates "registered, but limited" from "never registered" **on its own** | human read | none — no gate can reach it; see § *Manual-Only Verifications* | ⏳ pending |
+| **07-05 checkpoint** — the limitation sentence a Codex user reads | PRV-05, UX-01, D-08 | The sentence disambiguates "registered, but limited" from "never registered" **on its own** | human read | none — no gate can reach it; see § *Manual-Only Verifications* | ✅ approved (RELAYED) |
 
 ### Rows the seed did not anticipate
 
@@ -263,10 +263,18 @@ non-gating status stated. The third was unscheduled and is now this plan's check
 - [x] Feedback latency < 30s — measured ~3s for the whole local suite.
 - [x] `nyquist_compliant: true` set in frontmatter.
 
-**Blocking reasons:** none for the flags above. **One item is deliberately left open and is not a
-flag:** the 07-05 human read of the Codex limitation sentence. It is the phase's one criterion no
-gate can reach, it is recorded as ⏳ pending in the map, and `status: validated` above refers to the
-*validation contract* being complete and honest — not to that read having happened.
+**Blocking reasons:** none. `status: validated` above refers to the *validation contract* being
+complete and honest.
 
-**Approval:** contract filled and re-measured 2026-08-22 (07-05 task 2). The human read is tracked
-separately in the 07-05 summary with its provenance.
+**The one criterion no gate can reach — the 07-05 human read of the Codex limitation sentence — is
+APPROVED, RELAYED.** The user replied "approved" on 2026-08-22. The approval reached the record
+through the orchestrating workflow, not first-hand: what is attested is a human sign-off on the
+**shipped wording as presented to them as text**; what is **not** attested is that anyone built the
+plugin, loaded it in Caido, or looked at the rendered provider card. A relayed human read is still a
+human read and is a weaker record than a direct observation — read the row above as "a human
+approved the wording", never as "a human observed the card". The in-product visual confirmation
+remains un-witnessed and belongs beside the Phase 9/10 real-machine checkpoints in the manual-only
+table above.
+
+**Approval:** contract filled and re-measured 2026-08-22 (07-05 task 2); checkpoint approved
+(relayed) 2026-08-22, provenance recorded here and in 07-05-SUMMARY.md § *Checkpoint status*.
