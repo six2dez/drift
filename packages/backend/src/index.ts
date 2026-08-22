@@ -1,5 +1,5 @@
 import type { DefineAPI, SDK, DefineEvents } from "caido:plugin";
-import { readFile, writeFile, open as openFile, stat, mkdir, rm, rename, readdir } from "fs/promises";
+import { readFile, writeFile, open as openFile, stat, mkdir, rm, readdir } from "fs/promises";
 // A second statement against the SAME specifier the line above already uses, and
 // the only source for the rung-2 presence check in `detectRealpathRung`. A
 // NAMESPACE import is deliberate: it tolerates a missing member as `undefined`,
@@ -109,6 +109,10 @@ import {
 // mcp-server-spec.spawn.test.ts — which is the whole point, because index.ts is
 // not importable under vitest and nothing in THIS file is test-reachable.
 import {
+  MCP_CLI_REMOVAL_SCOPES,
+  MCP_CLI_SERVER_NAME,
+  buildMcpCliRegistrationArgv,
+  buildMcpCliRegistrationEnv,
   buildMcpDriftVars,
   buildMcpServerSpec,
   findExpandableEnvKeys,
@@ -911,8 +915,9 @@ async function writeChatMcpConfig(
   sdk: BackendSDK,
 ): Promise<string | undefined> {
   if (mcpTempDir === undefined) return undefined;
-  // Unchanged, and it GAINS meaning: `command` used to be the wrapper `.sh` this
-  // very plan deletes, and is now the absolute `node` path the CLI will execute.
+  // `spec.command` is the absolute `node` path the CLI will execute. It was the
+  // shared POSIX wrapper script until Phase 5 replaced it here and Phase 7
+  // deleted that wrapper outright.
   if (!(await fileExists(spec.command))) return undefined;
 
   // T-05-13. Claude Code expands variable references INSIDE a stdio server's
@@ -941,37 +946,6 @@ async function writeChatMcpConfig(
   );
 }
 
-// TEMPORARY — DELETED IN PHASE 7 (PRV-03).
-//
-// POSIX-only, and it survives this phase for exactly one reason: Gemini and
-// Codex are registered with `mcp add drift -- <wrapper>`, which persists a PATH
-// and nothing else, so the `export` lines this function renders are the SOLE
-// carrier of CAIDO_URL, CAIDO_TOKEN and the DRIFT_* tool-policy variables for
-// those two CLIs on darwin and linux. Deleting it now, before Phase 7 lands
-// their env-passing registration, would be a live CMP-01 compatibility
-// regression for two shipping providers on the platforms the entire user base
-// runs today - not a theoretical one (D-01).
-//
-// The due date is named literally because an undated "temporary" comment
-// becomes permanent: Phase 7, PRV-03.
-//
-// Its `passThroughArgs` option now has exactly one caller, which is correct and
-// not an invitation to simplify the body - Phase 7 deletes the whole function.
-function renderExportExecScript(
-  command: string,
-  args: string[],
-  envVars: Record<string, string>,
-  options?: {
-    passThroughArgs?: boolean;
-  },
-): string {
-  return [
-    "#!/bin/bash",
-    ...Object.entries(envVars).map(([key, value]) => `export ${key}=${shellQuote(value)}`),
-    `exec ${shellQuote(command)}${args.length > 0 ? ` ${args.map(shellQuote).join(" ")}` : ""}${options?.passThroughArgs === true ? " \"$@\"" : ""}`,
-  ].join("\n");
-}
-
 function getSessionDebugLogPath(sessionId: string): string | undefined {
   if (!currentSettings.debugLogging) return undefined;
   // D-02 populates `host` only at MCP start, but a chat turn can run with MCP
@@ -995,12 +969,13 @@ function summarizeDebugChunk(text: string, maxChars = DEBUG_CHUNK_PREVIEW_CHARS)
 
 function redactDebugText(text: string): string {
   return text
-    // The shell arm. It outlives the provider launch script deleted in this
-    // plan, because the surviving POSIX Gemini/Codex wrapper still renders
-    // `export CAIDO_TOKEN='...'` lines and Phase 7 (PRV-03) is what removes
-    // both the wrapper and this arm. Narrowing a redactor as cosmetic cleanup
-    // is the wrong direction: a redactor that no longer covers a shape that
-    // still exists fails OPEN, and the failure is a token in a support bundle.
+    // The shell arm. Drift itself no longer writes `export CAIDO_TOKEN='...'`
+    // anywhere — Phase 7 (PRV-03) deleted the last wrapper that did — but this
+    // arm is KEPT, and deliberately so. Debug text is whatever a spawned CLI
+    // prints, and a CLI that echoes a shell-shaped line back at Drift is not
+    // something Drift controls. Narrowing a redactor as cosmetic cleanup is the
+    // wrong direction: a redactor that no longer covers a shape that can still
+    // appear fails OPEN, and the failure is a token in a support bundle.
     .replace(/(CAIDO_TOKEN=)'[^']*'/g, "$1'[redacted]'")
     .replace(/("CAIDO_TOKEN"\s*:\s*)"[^"]*"/g, "$1\"[redacted]\"");
 }
@@ -1046,27 +1021,6 @@ async function disposeSessionDebugLog(logPath: string | undefined): Promise<void
   sessionDebugLogWriteChains.delete(logPath);
   sessionDebugLogInitialized.delete(logPath);
   await rm(logPath, { force: true }).catch(() => undefined);
-}
-
-// TEMPORARY — DELETED IN PHASE 7 (PRV-03).
-//
-// POSIX-only, and it exists solely to quote the values the export-script
-// renderer above writes into the surviving Gemini/Codex wrapper - the wrapper
-// whose `export` lines are the only carrier of the Caido token and the
-// tool-policy variables for those two CLIs on darwin and linux. It has no
-// caller outside that render path, so it dies with it. Deleting either one
-// before Phase 7's env-passing registration lands would be a live CMP-01
-// regression for two shipping providers on the platforms the entire user base
-// runs today (D-01).
-//
-// (That renderer's identifier is deliberately not spelled in this block: the
-// phase counts it over the RAW file and expects exactly two - the definition
-// and the one call.)
-//
-// The due date is named literally because an undated "temporary" comment
-// becomes permanent: Phase 7, PRV-03.
-function shellQuote(value: string): string {
-  return `'${value.replace(/'/g, "'\"'\"'")}'`;
 }
 
 function isFileNotFound(error: unknown): boolean {
@@ -1150,20 +1104,6 @@ function updateCaidoHistoryContext(input: Partial<CaidoContextSnapshot>): boolea
   const changed = hasCaidoContextChanged(currentCaidoHistoryContext, nextContext);
   if (changed) currentCaidoHistoryContext = nextContext;
   return changed;
-}
-
-// The path of the surviving POSIX Gemini/Codex wrapper. Its rationale and its
-// removal date live in ONE place, on writeMcpWrapper below - read that block
-// rather than this one.
-//
-// The dated literal is deliberately NOT repeated here. The phase counts those
-// notices repository-wide and expects exactly four (the Windows probe workflow
-// header plus the three functions that render and write the wrapper), so a
-// fourth copy added here to be helpful would break the count that keeps the
-// survivors owned. Say it once, in the place that does the writing.
-function getMcpWrapperPath(): string | undefined {
-  if (mcpTempDir === undefined) return undefined;
-  return path.join(mcpTempDir, "mcp-wrapper.sh");
 }
 
 async function readStoredMcpContext(): Promise<StoredMcpContext> {
@@ -1413,53 +1353,6 @@ function renderHttpContextAttachment(httpContext: HttpContextPayload | undefined
   ];
 
   return `${headerLines.join("\n")}\n`;
-}
-
-// DELETED IN PHASE 7 (PRV-03).
-//
-// The last surviving POSIX shell wrapper, and it serves ONLY Gemini and Codex:
-// `gemini/codex mcp add drift -- <wrapper>` persists a PATH, so this script's
-// `export` lines are the sole carrier of CAIDO_URL/CAIDO_TOKEN/DRIFT_* for those
-// two CLIs. Deleting it before Phase 7 lands their `--env`/`-e` registration
-// would be a live CMP-01 regression for two shipping providers on the platforms
-// the entire user base runs today (D-01). Phase 7 is named literally because an
-// undated "temporary" comment becomes permanent.
-//
-// Its ONLY caller is tryRegisterMcpForProviders, which does not call it at all on
-// win32 — so no `.sh` is written and no `chmod` is spawned there (D-02/D-03).
-//
-// The win32-unreachability tripwire D-02 asks for is the pure
-// `planMcpCliRegistration` unit case in mcp-server-spec.test.ts, NOT an
-// assertion inside this file: index.ts is not importable under vitest (no
-// caido:plugin alias), so no test can execute a line of it. The predicate is
-// what is tested; that this function sits behind it is static-gate evidence.
-// It takes the spec so the wrapper and the direct spawn can never describe two
-// different launches.
-async function writeMcpWrapper(spec: McpServerSpec): Promise<string | undefined> {
-  if (mcpTempDir === undefined) return undefined;
-  // getMcpWrapperPath() is the single source of truth for the surviving POSIX
-  // wrapper path, which also keeps it from becoming an unused local now that the
-  // self-test no longer calls it.
-  const wrapperPath = getMcpWrapperPath();
-  if (wrapperPath === undefined) return undefined;
-  const tempWrapperPath = `${wrapperPath}.tmp`;
-  await writeFile(
-    tempWrapperPath,
-    // spec.driftVars, not spec.env: the wrapper exports Drift's own variables
-    // and `exec`s into a shell that already carries the parent environment.
-    renderExportExecScript(spec.command, spec.args, spec.driftVars, {
-      passThroughArgs: true,
-    }),
-    // 0o700: the wrapper exports the Caido token and must be executable.
-    { mode: 0o700 },
-  );
-  const chmodResult = await spawnAndWait("chmod", ["+x", tempWrapperPath]);
-  if (chmodResult.code !== 0) {
-    await rm(tempWrapperPath, { force: true });
-    return undefined;
-  }
-  await rename(tempWrapperPath, wrapperPath);
-  return wrapperPath;
 }
 
 // HLT-01. Spawns `node mcp-server.mjs --validate-auth` DIRECTLY, with the env
@@ -1889,9 +1782,9 @@ async function updateSettings(
   // It also sits immediately after the merge, ahead of the MCP-refresh branches
   // below, because refreshActiveMcpRuntime resolves Node — whose candidate list
   // is built from the provider commands — and bakes the result into a freshly
-  // written wrapper. Clearing after it would spawn from exactly the stale entry
-  // this invalidation exists to prevent, and the frontend pushes the WHOLE
-  // settings object, so that branch is taken on every save from the UI.
+  // written registration. Clearing after it would register from exactly the
+  // stale entry this invalidation exists to prevent, and the frontend pushes the
+  // WHOLE settings object, so that branch is taken on every save from the UI.
   //
   // The signature itself is never logged and never persisted: it carries a NUL
   // sentinel for a provider configured without a command.
@@ -1910,7 +1803,7 @@ async function updateSettings(
       syncError = await refreshActiveMcpRuntime(sdk);
     } catch (e) {
       syncError =
-        `Settings were saved, but Drift failed to refresh the MCP wrapper: ${String(e)}`;
+        `Settings were saved, but Drift failed to refresh the MCP runtime: ${String(e)}`;
       sdk.console.error(`[drift] ${syncError}`);
       await cleanupMcpRuntime(sdk, "error", syncError);
     }
@@ -2907,53 +2800,106 @@ function applyProviderLimitation(status: ProviderStatus): ProviderStatus {
   return next;
 }
 
+// Runs the CLI's own `mcp remove` then `mcp add`, with the ARGV already decided
+// by the pure planner. This function assembles no command line of its own.
+//
+// BOTH spawns go through buildSpawnPlan, not just the add. The pre-clean is a
+// separate spawn on the same binary, so routing only the add would leave a
+// `.cmd`-resolved Gemini or Codex failing the removal with EINVAL on Windows —
+// and 07-04 makes that removal load-bearing rather than best-effort.
+//
+// windowsVerbatimArguments is passed as a LITERAL key at each call, with its
+// value taken from the plan. Taking the plan's file and args while dropping its
+// flag is not a partial success: the runtime then applies its own per-element
+// MSVC quoting on top of a command line buildSpawnPlan already escaped, cmd
+// re-parses the result under different rules, and the argv arrives corrupted
+// while carrying a live credential. Nothing in this file is test-reachable, so
+// the phase's source criteria assert the flag's DELIVERY here.
 async function registerMcpWithCli(
   cli: "gemini" | "codex",
   cliBinary: string,
-  mcpScript: string,
+  argv: string[],
   sdk: BackendSDK,
 ): Promise<boolean> {
-  // Best-effort pre-clean — an old "drift" entry in the CLI's config
-  // is normal (previous Drift session); ignore its exit code.
-  await spawnAndWait(cliBinary, ["mcp", "remove", "drift"]);
-  const result = await spawnAndWait(cliBinary, [
-    "mcp", "add", "drift", "--", mcpScript,
-  ]);
+  // Best-effort pre-clean — an old "drift" entry in the CLI's config is normal
+  // (a previous Drift session); the exit code is ignored, and both CLIs' removal
+  // implementations exit zero whether or not an entry existed.
+  //
+  // EVERY scope, not just the one Drift writes. Releases up to and including
+  // Phase 5 passed no `--scope` at all, so Gemini's entry went to the PROJECT
+  // scope — and a workspace entry shadows the user one. Removing only the user
+  // scope would leave that stale record in place, still pointing at the
+  // `mcp-wrapper.sh` this same commit deletes.
+  for (const scopeArgs of MCP_CLI_REMOVAL_SCOPES[cli]) {
+    const removePlan = buildSpawnPlan({
+      command: cliBinary,
+      args: ["mcp", "remove", ...scopeArgs, MCP_CLI_SERVER_NAME],
+      platform: host?.platform,
+    });
+    await spawnAndWait(removePlan.file, removePlan.args, {
+      windowsVerbatimArguments: removePlan.windowsVerbatimArguments,
+    });
+  }
+
+  const addPlan = buildSpawnPlan({
+    command: cliBinary,
+    args: argv,
+    platform: host?.platform,
+  });
+  const result = await spawnAndWait(addPlan.file, addPlan.args, {
+    windowsVerbatimArguments: addPlan.windowsVerbatimArguments,
+  });
+  // THREE SCALARS, and no stderr — the CLI name, the resolved binary and the
+  // exit code. This log line used to interpolate `result.stderr`, and the
+  // skip-reason below used to as well; 07-02 wired `skippedMcpCliReasons` to the
+  // provider card, and that map already reaches the diagnostics bundle. A CLI
+  // that echoes its own configuration back on an error would therefore have put
+  // a live Caido token onto a user-visible surface and into an exportable
+  // support file. This is 05-D-11's standing key-names-never-values rule applied
+  // to a VALUE channel nobody had inventoried (T-07-05).
   sdk.console.log(
-    `[drift] ${cli} mcp add via ${cliBinary}: code=${result.code} ${result.stderr.trim()}`,
+    `[drift] ${cli} mcp add via ${cliBinary}: code=${String(result.code)}`,
   );
   if (result.code === 0) {
     registeredMcpCliPaths.set(cli, cliBinary);
     skippedMcpCliReasons.delete(cli);
     return true;
   }
+  // D-08: this sentence renders on the provider card and must disambiguate
+  // "never registered" from "registered, but limited" on its own.
   skippedMcpCliReasons.set(
     cli,
-    `mcp add exited with code ${String(result.code)}: ${result.stderr.trim() || "no stderr"}`,
+    `Drift could not register with this CLI: "mcp add" exited with code ${String(result.code)}.`,
   );
   return false;
 }
 
-// D-01/D-02/D-03. The ONE place the surviving POSIX wrapper is written after
-// this plan, which is why the platform guard lives HERE: both callers — MCP
-// start and the settings-save / token-sync refresh — inherit it, and guarding
-// only one would leave a win32 hole on the settings-save path.
+// D-03 / PRV-03. The ONE place Gemini and Codex are registered, and it now runs
+// on EVERY platform — the Phase 5 wrapper write and the `platform !== "win32"`
+// condition that guarded it are both gone, because there is no longer a shell
+// script to write and no platform on which registration is skipped for being
+// Windows. Both callers (MCP start, and the settings-save / token-sync refresh)
+// reach this one loop, so neither can drift from the other.
 //
-// On win32 (and on an unrecognised platform) writeMcpWrapper is not called AT
-// ALL: no `.sh` is written and no `chmod` is spawned, so MCP start cannot fail
-// on a POSIX-only step (T-05-17). A wrapper-write failure on POSIX is likewise a
-// SKIP REASON and never an MCP-start failure — after this plan the wrapper serves
-// only Gemini and Codex, so failing the health check on it would be a regression
-// dressed as strictness.
+// What replaces the wrapper: the CLIs' own `-e`/`--env` surface. The payload and
+// the argv are built by pure functions in mcp-server-spec.ts, precisely because
+// an `if (platform === …)` inside THIS file is unassertable — index.ts cannot be
+// imported under vitest, so anything decided here is unverifiable by
+// construction.
 //
-// The decision itself is a pure predicate in mcp-server-spec.ts, precisely
-// because an `if (platform === "win32")` inside this file is unassertable:
-// index.ts cannot be imported under vitest.
+// The four per-CLI guards below keep their sentences byte-for-byte: 07-02 wired
+// this map to the Settings → CLI Providers card, so rewording one would silently
+// change what a user reads.
 async function tryRegisterMcpForProviders(spec: McpServerSpec, sdk: BackendSDK): Promise<void> {
-  const wrapperPath =
-    host !== undefined && host.platform !== "win32"
-      ? await writeMcpWrapper(spec)
-      : undefined;
+  // Structurally always present — buildMcpServerSpec sets `args` to exactly
+  // `[mcpScriptPath]` — but `noUncheckedIndexedAccess` makes the read optional,
+  // and registering a server with an empty script path would be worse than not
+  // registering at all.
+  const mcpScriptPath = spec.args[0];
+  if (mcpScriptPath === undefined) return;
+  // The literal token, from the same source the spec itself uses. Only Codex's
+  // payload embeds it; Gemini's carries a reference (see the payload builder).
+  const caidoToken = getEffectiveCaidoToken();
 
   for (const cli of ["gemini", "codex"] as const) {
     const providerId = MCP_CLI_TO_PROVIDER[cli];
@@ -2979,17 +2925,36 @@ async function tryRegisterMcpForProviders(spec: McpServerSpec, sdk: BackendSDK):
       );
       continue;
     }
+    // The capability table (07-02) decides the tool policy, not a second
+    // hand-written list here: an absent approval channel is what turns Codex's
+    // allowlist into its sensitive-filtered form inside the builder (D-06).
+    const registrationEnv = buildMcpCliRegistrationEnv({
+      cli,
+      driftVars: spec.driftVars,
+      approvalChannel: providerMcpApprovalChannel(providerId),
+      caidoToken,
+    });
     const registration = planMcpCliRegistration({
       platform: host?.platform,
       cli,
-      wrapperPath,
+      registrationEnv,
+      argv: buildMcpCliRegistrationArgv({
+        cli,
+        registrationEnv,
+        nodeExecutable: spec.command,
+        mcpScriptPath,
+      }),
+      // The loud check's input. `spec.env` is the parent-merged block Drift
+      // hands the CLI child, so this is exactly the value a `${CAIDO_TOKEN}`
+      // reference would expand from at spawn time.
+      spawnEnvToken: spec.env.CAIDO_TOKEN,
     });
     if (registration.kind === "Skip") {
       skippedMcpCliReasons.set(cli, registration.reason);
       sdk.console.log(`[drift] ${cli} mcp register skipped: ${registration.reason}`);
       continue;
     }
-    await registerMcpWithCli(cli, resolved, registration.wrapperPath, sdk);
+    await registerMcpWithCli(cli, resolved, registration.argv, sdk);
   }
 }
 
@@ -3032,8 +2997,8 @@ async function cleanupMcpRuntime(
 }
 
 // Remove orphaned drift-mcp-* dirs left by a previous run that did not stop
-// cleanly (crash, hard kill). Those dirs hold the token-bearing wrapper
-// scripts, so leaking them is a credential-exposure risk. Safe to run here:
+// cleanly (crash, hard kill). Those dirs hold the token-bearing MCP config
+// documents, so leaking them is a credential-exposure risk. Safe to run here:
 // startMcpServer is only entered when MCP is not already running, so any
 // existing drift-mcp-* dir other than the (about-to-be-replaced) current one
 // is genuinely orphaned.
@@ -3116,7 +3081,7 @@ async function startMcpServer(sdk: BackendSDK): Promise<Result<McpServerInfo>> {
   // 0o700 is REQUESTED here and ASSERTED below, because requesting it is not
   // enough: mkdir(recursive) does not apply `mode` to a directory that already
   // exists, so on a shared /tmp the "other local users cannot read the
-  // token-bearing wrapper/config files written inside" property holds only for
+  // token-bearing config files written inside" property holds only for
   // a directory Drift itself created. enforceOwnerOnlyDir closes that gap and,
   // where it cannot, says so instead of assuming.
   //
@@ -3234,8 +3199,9 @@ async function startMcpServer(sdk: BackendSDK): Promise<Result<McpServerInfo>> {
   // `registeredMcpCliPaths` map so cleanup later runs against the
   // exact binary we used, regardless of future enabled-flag changes.
   //
-  // The wrapper write moved INSIDE the helper together with the win32 guard, so
-  // this path writes no `.sh` and spawns no chmod on Windows.
+  // Since Phase 7 the helper registers on EVERY platform: it writes no shell
+  // script, spawns no permission-bit step, and passes the environment through
+  // each CLI's own `-e`/`--env` surface instead (PRV-03).
   await tryRegisterMcpForProviders(spec.value, sdk);
   cliSessions.clear();
 
