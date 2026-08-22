@@ -213,36 +213,83 @@ describe.skipIf(process.platform !== "win32")("buildSpawnPlan on a real cmd.exe"
   );
 
   it(
-    "does NOT round-trip under the opposite double-escaping choice — the falsifiability leg for the escaping",
+    "round-trips under the OPPOSITE double-escaping depth as well — the A1 measurement, recorded rather than assumed",
     async () => {
       const fixture = await createFixture();
 
-      // The module ships upstream's heuristic, which single-escapes a global
-      // shim. This case drives the SAME production escaping primitives with the
-      // OPPOSITE depth and asserts the round trip breaks. Case one alone could
-      // pass under either choice; case one plus this one says the shipped choice
-      // is the correct one.
+      // THIS CASE ASSERTED THE OPPOSITE UNTIL A REAL RUNNER SAID OTHERWISE, and
+      // the original expectation is left described here because deleting it
+      // would hide the measurement. 07-RESEARCH.md's open question A1 predicted
+      // that escaping depth would DISCRIMINATE on an npm-global-shaped shim: one
+      // depth round-trips, the other corrupts. Run 32563348727 measured that BOTH
+      // depths round-trip the full hazard set byte-identically on
+      // windows-latest.
+      //
+      // The mechanism, now that the answer is in hand: after `/s` strips the one
+      // outer quote pair, each argument is still wrapped in its OWN quote pair,
+      // and `%*` proxies those quotes into the shim's second parse. Inside
+      // quotes cmd treats `&`, `|`, `<` and `>` as ordinary text, so the quoting
+      // — not the caret depth — is what survives the second parse. The extra
+      // caret layer is consumed harmlessly.
+      //
+      // What this does NOT license: dropping the caret pass. Escaping depth is
+      // not load-bearing on THIS shim shape; escaping ITSELF is, and the next
+      // case is the leg that proves it. The module keeps upstream's heuristic
+      // unchanged, because a depth that is merely harmless here is still the
+      // depth a decade of cross-spawn use has exercised everywhere else.
       const shipped = needsDoubleEscape(fixture.shimPath);
+      expect(shipped).toBe(false);
+
       const parts = [
         escapeCmdCommand(fixture.shimPath),
         ...HAZARD_ARGS.map((argument) => escapeCmdArgument(argument, !shipped)),
       ];
+      const code = await runToCompletion(
+        "cmd.exe",
+        ["/d", "/s", "/c", `"${parts.join(" ")}"`],
+        true,
+      );
 
-      let received: string[] | undefined;
-      try {
-        await runToCompletion(
-          "cmd.exe",
-          ["/d", "/s", "/c", `"${parts.join(" ")}"`],
-          true,
-        );
-        received = await readReceivedArgv(fixture.outputPath);
-      } catch {
-        // A non-zero exit or an unwritten output file is itself the negative
-        // result this case is looking for.
-        received = undefined;
-      }
+      expect(code).toEqual(0);
+      expect(await readReceivedArgv(fixture.outputPath)).toEqual(HAZARD_ARGS);
+    },
+    SPAWN_TIMEOUT_MS,
+  );
 
-      expect(received).not.toEqual(HAZARD_ARGS);
+  it(
+    "does NOT round-trip with the caret pass removed — the falsifiability leg for the escaping",
+    async () => {
+      const fixture = await createFixture();
+
+      // Without this case a green suite proves nothing about whether the
+      // escaping was needed at all, and a future refactor could delete the caret
+      // pass and stay green. It drives the same shim with the same production
+      // command escaping but hands the argument through BARE quoting — the
+      // `"…"` wrap with no caret pass — and asserts cmd mangles it.
+      //
+      // Deliberately ONE argument, and deliberately the percent one. The full
+      // hazard set unescaped carries `&`, `|`, `<` and `>` outside any quote
+      // pair, which would make cmd run and redirect fragments of a Drift
+      // argument on the CI runner's filesystem. A falsifiability leg must not
+      // be the most dangerous line in the suite; `%` discriminates just as
+      // sharply and expands to text rather than to an action.
+      const percentArgument = "%TEMP%\\not-expanded";
+      expect(HAZARD_ARGS).toContain(percentArgument);
+
+      const parts = [
+        escapeCmdCommand(fixture.shimPath),
+        `"${percentArgument}"`,
+      ];
+      const code = await runToCompletion(
+        "cmd.exe",
+        ["/d", "/s", "/c", `"${parts.join(" ")}"`],
+        true,
+      );
+
+      expect(code).toEqual(0);
+      expect(await readReceivedArgv(fixture.outputPath)).not.toEqual([
+        percentArgument,
+      ]);
     },
     SPAWN_TIMEOUT_MS,
   );
