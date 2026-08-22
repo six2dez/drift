@@ -1386,8 +1386,15 @@ whole milestone, not something Phase 7 introduces or can close.
 |---|---|
 | Framework | Vitest 4.0.18 |
 | Config file | `vitest.config.ts` (repo root) |
-| Quick run command | `pnpm vitest run packages/backend/src/spawn-plan.test.ts` |
-| Full suite command | `pnpm test` (`vitest run`) |
+| Quick run command | `pnpm exec vitest run packages/backend/src/spawn-plan.test.ts` |
+| Full suite command | `pnpm exec vitest run` |
+
+**CORRECTED 2026-08-22 (during 07-05 planning/execution, against `.github/workflows/ci.yml`).** Both
+rows originally named a `test` package script and a bare `vitest` passthrough. **This repository
+defines no `test` script** — `package.json` carries `typecheck`, `lint`, `lint:fix`, `format`,
+`build` and `dev` — so that invocation fails instead of running the suite. `pnpm exec vitest run` is what both CI legs invoke (`Test` step,
+ubuntu matrix and `Verify (Windows)`). Later phases read this table; the correction is dated so a
+reader can tell it from the original.
 
 ### Phase Requirements → Test Map
 | Req | Behavior | Type | Command | Exists? |
@@ -1403,8 +1410,9 @@ whole milestone, not something Phase 7 introduces or can close.
 | SC-7 | The four symbols are gone; `.sh` count 0; notice count 3→0 | static gate | `grep -c` per the roadmap checklist | ❌ Wave 0 |
 
 ### Sampling Rate
-- **Per task commit:** `pnpm vitest run packages/backend/src/spawn-plan.test.ts` + `pnpm typecheck`
-- **Per wave merge:** `pnpm test` + `pnpm lint`
+- **Per task commit:** `pnpm exec vitest run packages/backend/src/spawn-plan.test.ts` + `pnpm typecheck`
+- **Per wave merge:** `pnpm exec vitest run` + `pnpm lint` (corrected 2026-08-22 — see the
+  test-framework table above; the `test` script this line used to name does not exist here)
 - **Phase gate:** full suite green on **both** the ubuntu matrix and the `windows-latest` leg before
   `/gsd-verify-work`. The Windows leg is where PRV-01's only real evidence lives.
 
@@ -1461,15 +1469,40 @@ audit is recorded because the evaluation happened.
 | A4 | Caido's plugin-host cwd on Windows is not the user's home directory | Q4 | `gemini mcp add` exits 1 with "Please use --scope user". **Mitigated entirely by passing `--scope user`** — which is the recommendation, so this assumption need never be load-bearing. |
 | A5 | No open gemini-cli Windows-MCP issue exists (title/query search only; bodies not read) | Q4 | SC-5's premise is weaker than the roadmap assumes. Recommendation already keeps the checkpoint, so low risk. |
 
-## Open Questions
+## Open Questions — ALL THREE RESOLVED (2026-08-22)
+
+> **Status: RESOLVED.** Each question below was answered during Phase 7 execution. The original
+> reasoning is left intact — it is why the question was open, and it is still worth reading — with
+> the resolution added above each one. Do not reopen these without new evidence.
 
 1. **Does an npm-global `.cmd` shim need single or double `^`-escaping?** (A1)
+
+   > **RESOLVED — 07-01 task 3, measured on `windows-latest`, and the measurement FALSIFIED the
+   > prediction.** Both depths round-trip the full hazard set byte-identically
+   > ([run 32563348727](https://github.com/six2dez/drift/actions/runs/32563348727) is the red run
+   > that proved it; [32563543158](https://github.com/six2dez/drift/actions/runs/32563543158) is the
+   > reshaped green one). Escaping *depth* is not the discriminator; escaping *itself* is. The module
+   > keeps upstream's single-escape heuristic and a NEW falsifiability leg — the same shim with the
+   > caret pass removed — replaced the false assertion. Recorded with both run URLs in the
+   > `packages/backend/src/spawn-plan.ts` module header and in 07-01-SUMMARY.md § *The measurement*.
    - Known: cross-spawn double-escapes only for `node_modules/.bin/*.cmd`; the reason (`%*` re-parse)
      applies to the same generator's global output.
    - Unclear: whether the second cmd parse actually occurs for the global template.
    - **Recommendation:** answer it in CI with the Q5 echo shim before choosing. One test, both answers.
 
 2. **`${CAIDO_TOKEN}` or the literal token for Gemini?**
+
+   > **RESOLVED — 07-01/07-03's recorded decisions, and split per CLI.** Gemini takes the
+   > **`${CAIDO_TOKEN}` reference** *plus* the assertion this recommendation asks for: registration
+   > is REFUSED when the reference is used and Drift's own spawn environment carries no non-empty
+   > token, asserted in both directions. Codex takes the **literal** token — not by preference but
+   > because Codex performs no expansion anywhere on its read path, so a reference would become the
+   > token. That choice was a `checkpoint:decision` answered by the user (`literal-plus-guarantees`)
+   > and it **deviates knowingly from ROADMAP SC-3**, which authorises only a `${VAR}` reference or a
+   > token-file indirection; the user was offered an SC-3 amendment and declined it, so the roadmap
+   > text stands and the deviation is recorded rather than edited away. See 07-03-SUMMARY.md
+   > § *The checkpoint, and the roadmap deviation it creates*, and the `MCP_CLI_EXPANDS_ENV_REFERENCES`
+   > table in `packages/backend/src/mcp-server-spec.ts`.
    - Known: expansion works, resolves from the *un*sanitized parent env, and a missing variable
      becomes `""` (all source-verified). Literal works but rides a `split('=')` parser and persists.
    - Unclear: whether reopening 05-D-10 is wanted here. 05-D-10 was decided when the behaviour was
@@ -1479,6 +1512,14 @@ audit is recorded because the evaluation happened.
      to reopen it, the literal is defensible — record which, and why.
 
 3. **Does site 3′ (`getNodeExecutable`'s `--version` loop) get the cmd.exe plan?**
+
+   > **RESOLVED — NO, and it is written down as a decision (OQ-3).** `buildSpawnPlan` is applied at
+   > CALL SITES, never inside `spawnAndWait`; putting it inside would silently capture this candidate
+   > loop and the `where.exe` path search, adding a process-tree level to every Drift spawn — a
+   > direct cost to Phase 8's `taskkill /T /F` and Phase 10's console-flash count. Decided in
+   > 07-01's recorded decisions and transcribed as a comment at all three affected sites by 07-04
+   > task 3 (`packages/backend/src/index.ts`: the shared spawn helper, the node-validation candidate
+   > loop, the path-search spawn). The loop keeps degrading gracefully, deliberately.
    - Known: it currently degrades gracefully (a `.cmd` node candidate scores exit 1 and is skipped).
    - Unclear: whether any real user has *only* a `node.cmd`.
    - **Recommendation:** leave it degrading, and write that down as a decision. It keeps every Drift
