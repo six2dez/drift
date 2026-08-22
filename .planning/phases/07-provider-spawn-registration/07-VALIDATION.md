@@ -166,12 +166,72 @@ be reported as having closed the milestone's blocking must-have end to end.
 
 ### Windows evidence — the phase's single strongest record
 
-*To be recorded by 07-05 task 3, as a claim and not a tick: the run URL, every job leg's
-conclusion, the `Verify (Windows)` job's per-step conclusions, and the log line proving the
-win32-gated cases RAN on that host rather than skipping. Nothing is written here until it has been
-measured.*
+Recorded as a claim, not a tick: the run URL, every job leg's conclusion, the `Verify (Windows)`
+job's per-step conclusions, and the log line proving the win32-gated cases RAN on that host.
 
-**Earlier runs already on the record**, kept because a green run alone proves less:
+**Phase-tree run (07-05 task 3), 2026-08-22.** Scratch branch
+`scratch/ci-proof-07-05-phase-close` at `19a6c8e`, pushed to `origin` and torn down afterwards.
+
+- **Run URL:** <https://github.com/six2dez/drift/actions/runs/32567316779> (workflow `CI`, event
+  `push`, head SHA `19a6c8eaf8ba60bf1564911ffc216290196734eb`)
+- **Job conclusions — all five legs `success`:** `Verify (Node 20)`, `Verify (Node 22)`,
+  `Verify (Node 24)`, `Verify (Node 26)`, `Verify (Windows)`
+- **`Verify (Windows)` per-step conclusions:** `Gate: no secret material in CI configuration`
+  **success** · `Install dependencies` **success** · `Typecheck` **success** · `Lint` **success** ·
+  `Test` **success** · `Build` **success** (every other step in the job — setup and post steps —
+  also `success`)
+- **Steps concluding `failure` anywhere in the run:** **0**
+- **Log lines proving the win32-gated cases RAN rather than skipped** (extracted from the job log,
+  ANSI- and timestamp-stripped):
+
+  ```
+  ✓ packages/backend/src/spawn-plan.win32.test.ts (5 tests) 639ms
+  Test Files  34 passed (34)
+       Tests  491 passed (491)
+  ```
+
+  491 on Windows against **486 passed / 5 skipped** on the maintainer's macOS host — the delta is
+  exactly the five win32 cases. The only occurrence of the string `skip` anywhere in the Windows job
+  log is pnpm's `resolution step is skipped`; no vitest case skipped on that host.
+- **Build artifact asserted, not inferred:** `-rw-r--r-- 1 runneradmin 197121 2531026 Aug 22 10:21
+  dist/plugin_package.zip` — the `test -f` on the exact path release.yml signs.
+- **The gate DISCRIMINATES, and that was checked rather than assumed.** `gh` exits 0 on any
+  successful API call whatever the run concluded, so the assertion is on the data: every job
+  conclusion `success` AND zero steps concluding `failure`. Run against 07-01's known-RED run
+  [32563348727](https://github.com/six2dez/drift/actions/runs/32563348727) the same two checks
+  return `failure,success` and `1` — the gate goes red on a red run.
+- **The log-extraction pipeline was validated before any count from it was trusted** (the standing
+  rule from STATE `[03-03]`/`[03-04]`, and 07-01's fourth recurrence of the same class): the cleaned
+  stream was first checked to yield exactly one `Test Files` line and one `Tests` totals line — an
+  independently known non-zero control — before the `491` was read off it. Both the real-escape and
+  the literal `^[` ANSI forms are stripped, because `gh run view --log` emits the latter.
+- **Comparison against the run 07-01 recorded** ([32563543158](https://github.com/six2dez/drift/actions/runs/32563543158),
+  `Tests 444 passed (444)`): **no leg regressed**, and no leg that was green there is red here. The
+  count grew 444 → 491, which is exactly the 19 cases 07-02 added, the 14 07-04 added, and the
+  cases 07-03 added to `mcp-server-spec.test.ts` — growth, not replacement.
+- **Sibling workflow, recorded for completeness:** the same push also fired
+  `Windows LLRT Primitive Probe`
+  ([32567316768](https://github.com/six2dez/drift/actions/runs/32567316768)) — job
+  `Windows LLRT primitive assertions (CI-02)` **success**. It is Phase 3's instrument, not a Phase 7
+  gate, and it is stamped for deletion in Phase 9.
+
+**Teardown, asserted on the specific name.** After deleting the branch locally and on `origin`, the
+full **unfiltered** `git ls-remote --heads origin` listing was:
+
+```
+0cd81f3c0cf31bb4f7c4916bf595ec07a358b628	refs/heads/fix/security-hotfixes
+2d8cf16004b40a30dfd7721d99f2bf3e2b19e270	refs/heads/main
+3f7c7b3816c0cdd3b8936afdcccc723cb1591151	refs/heads/scratch/ci-06-07-phase-close
+```
+
+`scratch/ci-proof-07-05-phase-close` is absent — discriminated on the exact name, not on a
+`scratch/*` glob, because a glob listing exits 0 whether or not it matched (STATE `[03-04]`).
+`scratch/ci-06-07-phase-close` is **pre-existing**, created by an earlier phase, outside this plan's
+authorisation to delete, and named here so a later reader does not mistake it for this plan's
+leftover. Nothing was staged for the push: the branch carried only already-committed history, so
+the untracked `.planning/` documents in the working tree could not reach the public remote.
+
+**Earlier runs kept on the record**, because a green run alone proves less:
 [32563348727](https://github.com/six2dez/drift/actions/runs/32563348727) — RED, and it is the
 measurement that falsified 07-01's escaping-depth prediction;
 [32563543158](https://github.com/six2dez/drift/actions/runs/32563543158) — the reshaped green run,
