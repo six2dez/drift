@@ -109,16 +109,18 @@ import {
 // mcp-server-spec.spawn.test.ts — which is the whole point, because index.ts is
 // not importable under vitest and nothing in THIS file is test-reachable.
 import {
-  MCP_CLI_REMOVAL_SCOPES,
-  MCP_CLI_SERVER_NAME,
   buildMcpCliRegistrationArgv,
   buildMcpCliRegistrationEnv,
   buildMcpDriftVars,
   buildMcpServerSpec,
+  classifyMcpRemoveExit,
   findExpandableEnvKeys,
+  formatMcpRemoveFailure,
   formatSpawnDebugLine,
   planMcpCliRegistration,
+  planMcpCliRemoval,
   toMcpConfigDocument,
+  type McpCliRemovalScope,
   type McpServerSpec,
 } from "./mcp-server-spec";
 // The Phase 7 keystone (plan 07-01). Pure, zero-I/O, and the ONLY way a resolved
@@ -2751,6 +2753,40 @@ const registeredMcpCliPaths = new Map<"gemini" | "codex", string>();
 // they are in without any other field's help.
 const skippedMcpCliReasons = new Map<"gemini" | "codex", string>();
 
+// Every scope whose LAST removal attempt did not complete, per CLI, with the
+// exit code it failed with. Populated by the three removal sites below and
+// surfaced as a diagnostics field, so a support bundle carries the count and
+// the scope of a removal that did not finish — the machine-readable companion
+// to the security line the user reads on the provider card.
+//
+// Keyed by scope rather than appended to, so a later successful removal of the
+// SAME scope clears its own entry and nothing else. A CLI with no entries here
+// has nothing outstanding; that is the condition `registerMcpWithCli` consults
+// before it clears a skip reason, so a successful `mcp add` cannot erase a
+// security line about a stale entry it did not remove.
+const mcpCliRemovalFailures = new Map<
+  "gemini" | "codex",
+  Map<McpCliRemovalScope, number>
+>();
+
+function recordMcpCliRemovalOutcome(input: {
+  cli: "gemini" | "codex";
+  scope: McpCliRemovalScope;
+  exitCode: number;
+  failed: boolean;
+}): void {
+  const existing = mcpCliRemovalFailures.get(input.cli);
+  if (!input.failed) {
+    if (existing === undefined) return;
+    existing.delete(input.scope);
+    if (existing.size === 0) mcpCliRemovalFailures.delete(input.cli);
+    return;
+  }
+  const bucket = existing ?? new Map<McpCliRemovalScope, number>();
+  bucket.set(input.scope, input.exitCode);
+  mcpCliRemovalFailures.set(input.cli, bucket);
+}
+
 type McpCliProviderId = "gemini-cli" | "codex-cli";
 const MCP_CLI_TO_PROVIDER: Record<"gemini" | "codex", McpCliProviderId> = {
   gemini: "gemini-cli",
@@ -2821,24 +2857,41 @@ async function registerMcpWithCli(
   argv: string[],
   sdk: BackendSDK,
 ): Promise<boolean> {
-  // Best-effort pre-clean — an old "drift" entry in the CLI's config is normal
-  // (a previous Drift session); the exit code is ignored, and both CLIs' removal
-  // implementations exit zero whether or not an entry existed.
+  // Pre-clean, across EVERY scope the policy covers — and no longer
+  // best-effort. The scope list is `planMcpCliRemoval`'s, the same one the
+  // startup sweep and the session cleanup iterate, so the three removal sites
+  // cannot cover different ground.
   //
-  // EVERY scope, not just the one Drift writes. Releases up to and including
-  // Phase 5 passed no `--scope` at all, so Gemini's entry went to the PROJECT
-  // scope — and a workspace entry shadows the user one. Removing only the user
-  // scope would leave that stale record in place, still pointing at the
-  // `mcp-wrapper.sh` this same commit deletes.
-  for (const scopeArgs of MCP_CLI_REMOVAL_SCOPES[cli]) {
+  // A failure here is a SECURITY event on the same terms as everywhere else: a
+  // stale entry that survives a removal keeps holding a Caido session token,
+  // and for Gemini's working-directory scope it also SHADOWS the fresh
+  // user-scope entry the `mcp add` below is about to write.
+  for (const removal of planMcpCliRemoval({ cli, platform: host?.platform })) {
     const removePlan = buildSpawnPlan({
       command: cliBinary,
-      args: ["mcp", "remove", ...scopeArgs, MCP_CLI_SERVER_NAME],
+      args: removal.argv,
       platform: host?.platform,
     });
-    await spawnAndWait(removePlan.file, removePlan.args, {
+    const removeResult = await spawnAndWait(removePlan.file, removePlan.args, {
       windowsVerbatimArguments: removePlan.windowsVerbatimArguments,
     });
+    const failed =
+      classifyMcpRemoveExit({ cli, exitCode: removeResult.code }) === "failed";
+    recordMcpCliRemovalOutcome({
+      cli,
+      scope: removal.scope,
+      exitCode: removeResult.code,
+      failed,
+    });
+    if (failed) {
+      sdk.console.error(
+        formatMcpRemoveFailure({
+          cli,
+          scope: removal.scope,
+          exitCode: removeResult.code,
+        }),
+      );
+    }
   }
 
   const addPlan = buildSpawnPlan({
@@ -2862,7 +2915,25 @@ async function registerMcpWithCli(
   );
   if (result.code === 0) {
     registeredMcpCliPaths.set(cli, cliBinary);
-    skippedMcpCliReasons.delete(cli);
+    // Cleared ONLY when nothing is outstanding. A successful `mcp add` says
+    // Drift is attached; it says nothing about the stale entry a failed
+    // pre-clean left in another scope, and that entry still holds a credential.
+    // Deleting the reason unconditionally here would erase the security line
+    // written moments earlier in this same function — a silent wipe of the one
+    // message SC-3 exists to deliver.
+    if (mcpCliRemovalFailures.has(cli)) {
+      const outstanding = mcpCliRemovalFailures.get(cli);
+      const scope = [...(outstanding?.keys() ?? [])][0];
+      const exitCode = scope === undefined ? undefined : outstanding?.get(scope);
+      if (scope !== undefined && exitCode !== undefined) {
+        skippedMcpCliReasons.set(
+          cli,
+          formatMcpRemoveFailure({ cli, scope, exitCode }),
+        );
+      }
+    } else {
+      skippedMcpCliReasons.delete(cli);
+    }
     return true;
   }
   // D-08: this sentence renders on the provider card and must disambiguate
@@ -2958,21 +3029,158 @@ async function tryRegisterMcpForProviders(spec: McpServerSpec, sdk: BackendSDK):
   }
 }
 
+// The session-cleanup removal: what THIS run registered, taken back out.
+//
+// NOT gated on the current `enabled` flag — if we previously registered, we
+// clean up, even if the user disabled the provider afterwards. Otherwise we'd
+// leak dangling `drift` entries in external CLI config files.
+//
+// The early return on a path this process recorded STAYS, and the relationship
+// to `sweepStaleMcpCliRegistrations` is ADDITIVE rather than overlapping: this
+// is the cleanup path for what this run registered, and the sweep is the cover
+// for everything else — a previous run's entry, a crashed run's entry, an entry
+// from a release before this phase. Do not later "unify" the two into one
+// function: collapsing them would either make cleanup unconditional (removing
+// entries mid-session that a concurrent Drift may have just written) or make
+// the sweep conditional on a map a crash has already destroyed, which is the
+// exact gap the sweep exists to close.
+//
+// EVERY scope, from the same policy the sweep and the pre-clean iterate, and a
+// failure is the same security event on all three paths.
 async function unregisterMcpFromCli(cli: "gemini" | "codex", sdk: BackendSDK): Promise<void> {
-  // NOT gated on the current `enabled` flag — if we previously
-  // registered, we clean up, even if the user disabled the provider
-  // afterwards. Otherwise we'd leak dangling `drift` entries in
-  // external CLI config files.
   const storedPath = registeredMcpCliPaths.get(cli);
   if (storedPath === undefined) {
     // We never registered this CLI in this session — nothing to do.
     return;
   }
-  const result = await spawnAndWait(storedPath, ["mcp", "remove", "drift"]);
-  sdk.console.log(
-    `[drift] ${cli} mcp remove via ${storedPath}: code=${result.code}`,
-  );
+  for (const removal of planMcpCliRemoval({ cli, platform: host?.platform })) {
+    const removePlan = buildSpawnPlan({
+      command: storedPath,
+      args: removal.argv,
+      platform: host?.platform,
+    });
+    // windowsVerbatimArguments is a LITERAL key here, with its value taken from
+    // the plan. These spawns pass no environment, so they take spawnAndWait's
+    // NO-ENV branch, whose options object was hardcoded before 07-01 widened
+    // it. A removal that arrives with a re-quoted argv removes NOTHING and
+    // leaves the credential in place, which is the precise failure this whole
+    // plan exists to prevent — so the phase's source criteria assert the flag's
+    // DELIVERY at each removal site, not merely that the builder was called.
+    const result = await spawnAndWait(removePlan.file, removePlan.args, {
+      windowsVerbatimArguments: removePlan.windowsVerbatimArguments,
+    });
+    const failed =
+      classifyMcpRemoveExit({ cli, exitCode: result.code }) === "failed";
+    recordMcpCliRemovalOutcome({
+      cli,
+      scope: removal.scope,
+      exitCode: result.code,
+      failed,
+    });
+    if (!failed) continue;
+    const line = formatMcpRemoveFailure({
+      cli,
+      scope: removal.scope,
+      exitCode: result.code,
+    });
+    // BOTH channels. The console alone is diagnostics; the reason map is what
+    // 07-02 wired to the Settings -> CLI Providers card, and a security event
+    // that reaches only a support bundle is the surface 05-D-03 rejected.
+    sdk.console.error(line);
+    skippedMcpCliReasons.set(cli, line);
+  }
   registeredMcpCliPaths.delete(cli);
+}
+
+// Remove stale `drift` entries left in the external CLIs' own configuration by
+// a previous run that did not stop cleanly — a crash, a hard kill, a Caido
+// restart — or by a release from before this phase. Those entries hold a live
+// Caido session token in a home-directory file that sits OUTSIDE the temp root
+// `sweepOrphanedMcpTempDirs` walks, so they survive every sweep Drift had until
+// now. Safe to run here for the same reason the orphan sweep is: startMcpServer
+// is only entered when MCP is not already running, and both CLIs' removal
+// implementations exit zero whether or not an entry existed, so the removal is
+// idempotent and needs to know nothing about what is currently registered.
+//
+// UNCONDITIONAL, and the four gates it deliberately does NOT carry are the
+// whole point:
+//
+//   1. the provider's `enabled` flag — a user who disabled the CLI after a
+//      crash is exactly the case that never gets cleaned otherwise;
+//   2. `registeredMcpCliPaths` — that map is process-lifetime only, so the run
+//      that crashed took its record with it;
+//   3. any platform condition — refusing to remove leaves a credential behind,
+//      which inverts the fail-closed instinct every other predicate here obeys;
+//   4. a prior registration attempt succeeding.
+//
+// Those four are precisely why the pre-clean inside `registerMcpWithCli` does
+// not run on the paths that matter (07-RESEARCH.md § Q4 DEFECT 2): it sits
+// behind all of them. The reasoning is `unregisterMcpFromCli`'s own existing
+// argument — if we may have registered, we clean up even if the user has since
+// disabled the provider — extended across PROCESS LIFETIMES rather than
+// sessions.
+//
+// Per-iteration try/catch isolation, copied from the orphan sweep: one CLI that
+// hangs, throws or cannot be read must not abort the other's sweep or MCP start.
+async function sweepStaleMcpCliRegistrations(sdk: BackendSDK): Promise<void> {
+  for (const cli of ["gemini", "codex"] as const) {
+    try {
+      const providerConfig = currentSettings.providers[MCP_CLI_TO_PROVIDER[cli]];
+      const command = providerConfig?.command;
+      if (command === undefined || command === "") continue;
+      const resolved = await resolveCommand(command);
+      if (resolved === undefined) {
+        // A CLI that is not installed has no configuration to clean. This is
+        // recorded, not silent — and it is NOT a security event: nothing here
+        // says a Drift entry may remain.
+        skippedMcpCliReasons.set(
+          cli,
+          `command "${command}" did not resolve to an executable path`,
+        );
+        continue;
+      }
+      for (const removal of planMcpCliRemoval({
+        cli,
+        platform: host?.platform,
+      })) {
+        const removePlan = buildSpawnPlan({
+          command: resolved,
+          args: removal.argv,
+          platform: host?.platform,
+        });
+        // The literal key again, value from the plan — see the identical note
+        // at unregisterMcpFromCli. This is the removal that runs on the machine
+        // where the credential exposure is greatest, so a dropped flag here is
+        // the worst of the three.
+        const result = await spawnAndWait(removePlan.file, removePlan.args, {
+          windowsVerbatimArguments: removePlan.windowsVerbatimArguments,
+        });
+        const failed =
+          classifyMcpRemoveExit({ cli, exitCode: result.code }) === "failed";
+        recordMcpCliRemovalOutcome({
+          cli,
+          scope: removal.scope,
+          exitCode: result.code,
+          failed,
+        });
+        // A clean start writes NOTHING: no reason-map entry, no console line.
+        // A banner that appears on every start teaches the user to ignore the
+        // one message that matters, which would defeat SC-3 entirely.
+        if (!failed) continue;
+        const line = formatMcpRemoveFailure({
+          cli,
+          scope: removal.scope,
+          exitCode: result.code,
+        });
+        sdk.console.error(line);
+        skippedMcpCliReasons.set(cli, line);
+      }
+    } catch (error) {
+      sdk.console.error(
+        `[drift] Failed to sweep stale ${cli} MCP registrations: ${String(error)}`,
+      );
+    }
+  }
 }
 
 async function cleanupMcpRuntime(
@@ -2983,6 +3191,12 @@ async function cleanupMcpRuntime(
   await unregisterMcpFromCli("gemini", sdk);
   await unregisterMcpFromCli("codex", sdk);
 
+  // LIF-01 / Phase 8 (process lifecycle) owns a requirement that lands HERE: the
+  // provider process tree must be terminated BEFORE the temp-directory removal
+  // below, or a surviving MCP child keeps the Caido token in its environment
+  // while the files it was reading are deleted underneath it. The seam is marked
+  // and NOT acted on — the statement order in this function is deliberately
+  // unchanged by this phase, and no termination is added here. Grep LIF-01.
   if (mcpTempDir !== undefined) {
     try {
       await rm(mcpTempDir, { recursive: true, force: true });
@@ -3073,6 +3287,16 @@ async function startMcpServer(sdk: BackendSDK): Promise<Result<McpServerInfo>> {
   // therefore already comparing against undefined at this point, and stays
   // harmless, because every candidate it compares is a string.
   await sweepOrphanedMcpTempDirs(sdk, probe.value);
+
+  // Its sibling, and deliberately adjacent: "clean up other people's residue at
+  // startup" now has ONE home rather than two. The orphan sweep above covers
+  // the temp root; this one covers the two external CLIs' own configuration
+  // files, which live outside it and which no Drift release before this one
+  // ever swept.
+  //
+  // ORDER: before tryRegisterMcpForProviders below, so a stale entry is gone
+  // before a fresh one is written and the window between the two does not widen.
+  await sweepStaleMcpCliRegistrations(sdk);
 
   // Stage the MCP runtime under the resolved temp root rather than under the
   // plugin asset path - the Caido plugin path has spaces ("Application Support")
@@ -4574,6 +4798,24 @@ async function getDiagnostics(_sdk: BackendSDK): Promise<Result<Record<string, s
         ? "none"
         : [...skippedMcpCliReasons.entries()]
             .map(([cli, reason]) => `${cli}: ${reason}`)
+            .join(" | "),
+    // SC-3's support-bundle half. Count and scope only — no CLI output, and no
+    // path: the same three-scalar rule the security line itself obeys.
+    mcpCliRemovalFailures:
+      mcpCliRemovalFailures.size === 0
+        ? "none"
+        : [...mcpCliRemovalFailures.entries()]
+            .map(
+              ([cli, scopes]) =>
+                `${cli}: ${String(scopes.size)} failed (` +
+                [...scopes.entries()]
+                  .map(
+                    ([scope, exitCode]) =>
+                      `scope=${scope} exit=${String(exitCode)}`,
+                  )
+                  .join(", ") +
+                ")",
+            )
             .join(" | "),
   };
 

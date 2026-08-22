@@ -449,15 +449,6 @@ export const MCP_CLI_REGISTRATION_SCOPES: Record<McpCliName, string[]> = {
   codex: mcpCliScopeArgs(MCP_CLI_WRITE_SCOPE.codex),
 };
 
-// Retained ONLY until the last `index.ts` caller migrates to
-// `planMcpCliRemoval` in the next commit of this plan. It is derived from the
-// removal policy rather than restated, so the two cannot disagree even for the
-// one commit it survives.
-export const MCP_CLI_REMOVAL_SCOPES: Record<McpCliName, string[][]> = {
-  gemini: MCP_CLI_REMOVAL_SCOPE_NAMES.gemini.map(mcpCliScopeArgs),
-  codex: MCP_CLI_REMOVAL_SCOPE_NAMES.codex.map(mcpCliScopeArgs),
-};
-
 // The registered server name. Both CLIs validate it; `drift` is ASCII
 // alphanumeric and passes Codex's `name` check.
 export const MCP_CLI_SERVER_NAME = "drift";
