@@ -356,6 +356,77 @@ export const MCP_CLI_ENV_FLAG: Record<McpCliName, string> = {
   codex: "--env",
 };
 
+// ── Scopes, named once ─────────────────────────────────────────────
+//
+// Both CLIs' configuration lives under a SCOPE, and the register path and the
+// remove path read the same names from here. That is the whole point: a scope
+// Drift can write and cannot remove is exactly the orphan holding a live Caido
+// session token that PRV-03 exists to prevent, and two lists that agree today
+// are not the same thing as one list that cannot disagree.
+export const MCP_CLI_UNSCOPED = "unscoped";
+
+// `user` and `project` are Gemini's two settings scopes; `unscoped` is the
+// marker for a CLI whose configuration is a single global file and which
+// therefore takes no scope argument at all.
+export type McpCliRemovalScope = "user" | "project" | typeof MCP_CLI_UNSCOPED;
+
+// Every scope name this module can produce, so the remediation record below is
+// TOTAL over the type rather than partial with a fallback nobody exercises.
+const MCP_CLI_REMOVAL_SCOPE_VALUES: readonly McpCliRemovalScope[] = [
+  "user",
+  "project",
+  MCP_CLI_UNSCOPED,
+];
+
+// One scope name in, that CLI's scope arguments out. The flag SPELLING lives
+// here and nowhere else, so the registration argv, the removal argv and the
+// remediation command a user pastes are all the same three characters.
+function mcpCliScopeArgs(scope: McpCliRemovalScope): string[] {
+  return scope === MCP_CLI_UNSCOPED ? [] : ["--scope", scope];
+}
+
+// The scope each CLI's registration WRITES into. Read by
+// `MCP_CLI_REGISTRATION_SCOPES` below and by the removal scope list, which is
+// what makes "a scope Drift writes is always a scope Drift removes" structural.
+const MCP_CLI_WRITE_SCOPE: Record<McpCliName, McpCliRemovalScope> = {
+  gemini: "user",
+  codex: MCP_CLI_UNSCOPED,
+};
+
+// The scopes a REMOVAL must cover — necessarily a SUPERSET of the write scope,
+// and the write scope is read from the record above rather than repeated.
+//
+// Drift wrote Gemini's entry into the working-directory (`project`) scope on
+// every release up to and including Phase 5, because it passed no `--scope` at
+// all and that is the default. Removing only the user scope would leave every
+// pre-upgrade entry in place — and a workspace entry SHADOWS the user one, so
+// the stale record would win (07-RESEARCH.md § Q4 DEFECT 1, Pitfall D).
+//
+// Sweeping the working-directory scope unconditionally is safe, and the concern
+// that it might not be was real and specific: `gemini mcp add` carries a guard
+// that terminates the process with a non-zero status when the scope is
+// `project` and the working directory IS the user's home, and Drift passes no
+// working directory — so a plugin host launched from the user profile would
+// trip it on every start and paint a permanent, false credential-may-remain
+// banner on the provider card. That guard is ADD-ONLY.
+// [VERIFIED: google-gemini/gemini-cli — `packages/cli/src/commands/mcp/add.ts:41-48`
+//   is the only site carrying the `inHome` / `process.exit(1)` guard.
+//   `packages/cli/src/commands/mcp/remove.ts:26-30` carries NO such guard and,
+//   for a server name that is not present, logs a debug line and RETURNS:
+//   `if (!mcpServers[name]) { debugLogger.log(...); return; }` — an ordinary
+//   zero exit. Read from that project's source during this plan's research run,
+//   not recalled: the sweep's entire signal quality rests on it, and
+//   `classifyMcpRemoveExit` below is the backstop for the day it changes.]
+const MCP_CLI_REMOVAL_SCOPE_NAMES: Record<
+  McpCliName,
+  readonly McpCliRemovalScope[]
+> = {
+  // The write scope FIRST, then the historical one. Stable order so a log
+  // reading is reproducible.
+  gemini: [MCP_CLI_WRITE_SCOPE.gemini, "project"],
+  codex: [MCP_CLI_WRITE_SCOPE.codex],
+};
+
 // The scope arguments each CLI's registration WRITE takes.
 //
 // Gemini's `--scope` DEFAULTS TO `project`, and Drift passed no scope at all
@@ -374,25 +445,17 @@ export const MCP_CLI_ENV_FLAG: Record<McpCliName, string> = {
 // or `$CODEX_HOME`), so there is no scope to choose.
 // [VERIFIED: openai/codex codex-rs/utils/home-dir/src/lib.rs:13-18]
 export const MCP_CLI_REGISTRATION_SCOPES: Record<McpCliName, string[]> = {
-  gemini: ["--scope", "user"],
-  codex: [],
+  gemini: mcpCliScopeArgs(MCP_CLI_WRITE_SCOPE.gemini),
+  codex: mcpCliScopeArgs(MCP_CLI_WRITE_SCOPE.codex),
 };
 
-// The scopes a REMOVAL must cover — necessarily a superset of the write scope.
-//
-// Drift wrote Gemini's entry into the PROJECT scope on every release up to and
-// including Phase 5 (no `--scope` argument, hence the default). Removing only
-// the user scope after this plan would leave that stale entry in place, still
-// pointing at the `mcp-wrapper.sh` this same commit deletes — and a workspace
-// entry shadows the user one, so the stale record would win. Both scopes, always
-// (07-RESEARCH.md § Pitfall D). 07-04's unconditional startup sweep reads this
-// same table rather than restating it.
+// Retained ONLY until the last `index.ts` caller migrates to
+// `planMcpCliRemoval` in the next commit of this plan. It is derived from the
+// removal policy rather than restated, so the two cannot disagree even for the
+// one commit it survives.
 export const MCP_CLI_REMOVAL_SCOPES: Record<McpCliName, string[][]> = {
-  gemini: [
-    ["--scope", "user"],
-    ["--scope", "project"],
-  ],
-  codex: [[]],
+  gemini: MCP_CLI_REMOVAL_SCOPE_NAMES.gemini.map(mcpCliScopeArgs),
+  codex: MCP_CLI_REMOVAL_SCOPE_NAMES.codex.map(mcpCliScopeArgs),
 };
 
 // The registered server name. Both CLIs validate it; `drift` is ASCII
@@ -527,4 +590,135 @@ export function buildMcpCliRegistrationArgv(input: {
     input.nodeExecutable,
     input.mcpScriptPath,
   ];
+}
+
+// ── Removal: the policy, the classifier and the security line ───────
+//
+// 07-03 moved a live Caido session token into two external CLI configuration
+// files that live OUTSIDE the temp root `sweepOrphanedMcpTempDirs` watches.
+// Everything below is the other half of that trade. It is pure for the same
+// reason the registration half is: `index.ts`, where the removal actually runs,
+// declares no `caido:plugin` alias and cannot be imported by any test this
+// project can run, so a policy decided there is unverifiable by construction.
+
+// One scope and the complete argv that removes Drift's entry from it.
+export type McpCliRemovalPlanEntry = {
+  scope: McpCliRemovalScope;
+  argv: string[];
+};
+
+// The argv builder both the policy and the remediation string read, so the
+// operation name, the flag ordering and the server name are written once.
+function buildMcpCliRemovalArgv(scope: McpCliRemovalScope): string[] {
+  return ["mcp", "remove", ...mcpCliScopeArgs(scope), MCP_CLI_SERVER_NAME];
+}
+
+// Every removal one CLI needs, in a stable order.
+//
+// The policy carries NO notion of what is currently registered, and that is
+// deliberate rather than lazy: both CLIs' removal implementations exit ZERO
+// whether or not an entry existed (Codex prints "No MCP server named 'drift'
+// found." and returns `Ok(())` without even rewriting its config; Gemini logs a
+// debug line and returns), so an unconditional removal is idempotent and needs
+// no state to consult. State would be worse than useless here — the entry this
+// most needs to remove is the one a CRASHED Drift left behind, which by
+// definition no live map remembers.
+//
+// `platform` is accepted and DELIBERATELY not read. Every other predicate in
+// this module fails closed by skipping on an unknown platform; this one inverts
+// that, because the cost of skipping a removal is a credential left behind
+// rather than a capability withheld. The parameter is here so that inversion is
+// assertable — and so a future platform gate has to be added on purpose, past
+// this comment, rather than slipped in.
+export function planMcpCliRemoval(input: {
+  cli: McpCliName;
+  platform: Platform | undefined;
+}): McpCliRemovalPlanEntry[] {
+  return MCP_CLI_REMOVAL_SCOPE_NAMES[input.cli].map((scope) => ({
+    scope,
+    // A fresh array per call. A caller that mutates what it was handed must not
+    // be able to change what the next caller removes.
+    argv: buildMcpCliRemovalArgv(scope),
+  }));
+}
+
+// What a removal spawn's exit code MEANS. Two members, and the first one is
+// named for what Drift can actually observe: a zero exit tells it the CLI's
+// configuration no longer carries a `drift` entry, and says NOTHING about
+// whether one was deleted or was never there. Distinguishing those would take
+// the CLI's own stdout — the one input this path refuses to accept.
+export type McpRemoveOutcome = "removed-or-absent" | "failed";
+
+// The structural backstop for the day upstream changes.
+//
+// Only `"failed"` reaches the security formatter. Today the common case cannot
+// produce it: the scope entry above records, from that project's source, that
+// `gemini mcp remove` carries no home-directory guard and returns cleanly for
+// an absent server. This function exists so a future upstream guard cannot
+// silently convert the unconditional sweep into a permanent false banner on the
+// provider card — a warning that fires on every start teaches the user to
+// ignore the one message that matters, which would defeat SC-3's whole point.
+//
+// Its inputs are the exit code and the CLI. No output text, so it inherits the
+// same no-value-parameter property the formatter has, and a future maintainer
+// who wants to match on stderr has to widen the signature to do it.
+export function classifyMcpRemoveExit(input: {
+  cli: McpCliName;
+  exitCode: number;
+}): McpRemoveOutcome {
+  return input.exitCode === 0 ? "removed-or-absent" : "failed";
+}
+
+function buildMcpCliRemoveRemediation(
+  cli: McpCliName,
+): Record<McpCliRemovalScope, string> {
+  const commands = {} as Record<McpCliRemovalScope, string>;
+  for (const scope of MCP_CLI_REMOVAL_SCOPE_VALUES) {
+    commands[scope] = [cli, ...buildMcpCliRemovalArgv(scope)].join(" ");
+  }
+  return commands;
+}
+
+// The paste-able command per CLI and scope, derived from the SAME argv builder
+// the policy uses. A scope rename therefore moves the removal and the user's
+// remediation together, or neither — it cannot leave the user holding a command
+// that does not work. Total over every scope name the type allows, so the
+// formatter needs no fallback branch nobody exercises.
+export const MCP_CLI_REMOVE_REMEDIATION: Record<
+  McpCliName,
+  Record<McpCliRemovalScope, string>
+> = {
+  gemini: buildMcpCliRemoveRemediation("gemini"),
+  codex: buildMcpCliRemoveRemediation("codex"),
+};
+
+// SC-3's "a failed remove is logged, not dropped", rendered.
+//
+// THREE SCALARS, and the safety comes from there being no parameter through
+// which a value can arrive — not from anyone remembering the rule. This is the
+// same design `formatSpawnDebugLine` above states for the session debug line,
+// and the same rule `platform.ts:262` states at the merge point.
+//
+// Rejected, and recorded here so it is not re-proposed: passing the CLI's
+// stderr through a redaction pass. It fails for exactly the reason this file
+// already gives for rejecting a whole-environment redaction regex — it protects
+// only what someone thought to enumerate — and a CLI that echoes its own
+// configuration back on an error is precisely the case nobody enumerated. The
+// text would land in `skippedMcpCliReasons`, which renders on the Settings ->
+// CLI Providers card and is exported in the support bundle (T-07-05).
+export function formatMcpRemoveFailure(input: {
+  cli: McpCliName;
+  scope: McpCliRemovalScope;
+  exitCode: number;
+}): string {
+  const where =
+    input.scope === MCP_CLI_UNSCOPED
+      ? `${input.cli} is unscoped`
+      : `scope=${input.scope}`;
+  return (
+    `[drift] SECURITY: ${input.cli} mcp remove (${where}) exited ` +
+    `${String(input.exitCode)} — a Drift MCP entry carrying a Caido session ` +
+    `token may remain in this CLI's configuration. Remove it with: ` +
+    MCP_CLI_REMOVE_REMEDIATION[input.cli][input.scope]
+  );
 }
