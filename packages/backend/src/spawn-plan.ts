@@ -45,7 +45,38 @@
 //
 // MEASUREMENT — the A1 verdict (npm-global shim escaping depth) and the two
 // adjacency edge probes are recorded at `needsDoubleEscape` below, with the
-// `windows-latest` run that measured them.
+// `windows-latest` runs that measured them.
+//
+// MEASURED ON A REAL WINDOWS HOST, in the style `ci.yml` uses for its measured
+// timeout. Both runs are `Verify (Windows)` on `windows-latest`, Node 20, driving
+// `spawn-plan.win32.test.ts` against a real `cmd.exe` and a runtime-built
+// npm-GLOBAL-shaped `.cmd` shim (`@ECHO off` / `SETLOCAL` / `"node" "script" %*`)
+// sitting in a directory whose name carries a space and a parenthesis pair:
+//
+//   RED   https://github.com/six2dez/drift/actions/runs/32563348727
+//         job `Verify (Windows)` = failure, step `Test` = failure. The
+//         falsification, kept because it is the evidence.
+//   GREEN https://github.com/six2dez/drift/actions/runs/32563543158
+//         job `Verify (Windows)` = success, step `Test` = success,
+//         `✓ packages/backend/src/spawn-plan.win32.test.ts (5 tests) 508ms`,
+//         `Tests 444 passed (444)` with no skips — the win32 cases RAN on that
+//         host rather than being gated out.
+//
+// 1. A1 — ESCAPING DEPTH FOR AN npm-GLOBAL SHIM: this module ships upstream's
+//    heuristic unchanged, which SINGLE-escapes a global shim (the double escape
+//    is reserved for `node_modules/.bin`). The hazard set round-trips
+//    byte-identically under it. The predicted discriminator did NOT hold: the
+//    OPPOSITE (double) depth round-trips byte-identically too, because each
+//    argument keeps its own quote pair through the shim's `%*` and cmd treats
+//    metacharacters inside quotes as ordinary text. Depth is therefore not
+//    load-bearing on this shim shape — but the caret pass ITSELF is, and the
+//    win32 file's "caret pass removed" leg proves it by watching cmd expand a
+//    literal `%TEMP%`.
+// 2. EMPTY-STRING EDGE PROBE: an empty-string argument SURVIVES the round trip
+//    as its own distinct argv element — it neither vanishes nor merges with a
+//    neighbour (PRV-02 empty).
+// 3. SINGLE-SPACE EDGE PROBE: a single-space argument SURVIVES the round trip as
+//    its own distinct argv element with its space intact (PRV-02 adjacency).
 
 import { WINDOWS_EXECUTABLE_EXTENSIONS, type Platform } from "./platform";
 
@@ -129,12 +160,16 @@ const IS_CMD_SHIM_REG_EXP = /node_modules[\\/].bin[\\/][^\\/]+\.cmd$/i;
 //
 // MEASURED, NOT ASSUMED — 07-RESEARCH.md left this open as question A1 because
 // npm's global and local shims come from the same generator and the contradiction
-// was unresolved in the sources. `spawn-plan.win32.test.ts` settles it on a real
-// windows-latest runner: it round-trips a hazard set through an npm-global-shaped
-// shim under the shipped choice AND asserts the OPPOSITE choice does not round
-// trip, so a green run is non-vacuous.
+// was unresolved in the sources.
 //
-//   VERDICT: pending — filled in by 07-01 task 3 with its run URL.
+//   VERDICT (run 32563543158, windows-latest): upstream's heuristic is KEPT.
+//   A global shim is SINGLE-escaped and the hazard set round-trips
+//   byte-identically. The depth is not the discriminator A1 expected — the
+//   double depth round-trips too (run 32563348727 falsified the prediction) —
+//   so this predicate is retained on the strength of upstream's decade of use
+//   rather than because the alternative was measured to break. See the
+//   MEASURED block in this file's header for the mechanism and for the
+//   empty-string and single-space edge-probe outcomes.
 export function needsDoubleEscape(command: string): boolean {
   return IS_CMD_SHIM_REG_EXP.test(command);
 }
