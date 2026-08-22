@@ -1530,6 +1530,10 @@ async function resolveCommand(
         //
         // CMP-01: on macOS and Linux the spawn does not throw, so the catch arm
         // is not entered and this site behaves exactly as it always has.
+        // Outside the interpreter plan's scope by construction, so a future
+        // site inventory does not count it as a missed one: this spawn's target
+        // is `which` or `where.exe`, a real executable on either platform, and
+        // `buildSpawnPlan` is a passthrough for those.
         let child: ChildProcessWithoutNullStreams;
         try {
           child = spawn(searchCommand.command, searchCommand.args(command));
@@ -1839,9 +1843,10 @@ async function refreshActiveMcpRuntime(sdk: BackendSDK): Promise<string | undefi
 
   // RUN-01, and the site CONTEXT.md's list did not name. It is reached from a
   // settings save AND from syncCaidoSessionToken, which the frontend polls as
-  // part of its keep-alive — so leaving it on the wrapper would mean the first
-  // token refresh on Windows tears down a working MCP runtime through the
-  // cleanupMcpRuntime call below.
+  // part of its keep-alive. Before Phase 5 this refresh went through the POSIX
+  // launch script, which is why the first token refresh on Windows used to tear
+  // down a working MCP runtime through the cleanupMcpRuntime call below. That
+  // script no longer exists on any platform; the refresh rebuilds the spec.
   //
   // The return contract is unchanged and is NOT a Result: a message STRING on
   // failure, `undefined` on success, cleanupMcpRuntime first.
@@ -2575,14 +2580,24 @@ function spawnAndWait(
     // passes fileExists.
     //
     // What this guard does NOT do, stated plainly: it does not make a `.cmd`
-    // launchable. A `.cmd` Windows refuses now resolves as exit code 1, which the
-    // node validation loop reads as "not a working executable" and steps past -
-    // graceful degradation, not launchability. Making a `.cmd` actually launch is
-    // PRV-02 in Phase 7, which owns the cmd.exe branch; this token is here so
-    // PRV-02 can find the seam by search rather than re-inventorying every spawn
-    // in this file. Deliberately absent here: any shell option, any command
-    // interpreter wrapper, any extension check. All three are PRV-02's to design,
-    // and adding one now would turn a correctness fix into a launchability claim.
+    // launchable. A `.cmd` Windows refuses still resolves as exit code 1 here.
+    //
+    // That is a DECISION, recorded (07-01 OQ-3), not an unfinished edge. PRV-02
+    // landed: `buildSpawnPlan` routes a `.cmd`/`.bat` through `cmd.exe /d /s /c`
+    // with verbatim arguments on, and it is applied at the CALL SITES — the
+    // provider launch and the three MCP registration/removal loops — never
+    // inside this helper. Applying it here would silently capture every other
+    // caller, notably `getNodeExecutable`'s `--version` candidate loop and the
+    // `where.exe` path search, adding a process-tree level to spawns that do not
+    // need one and paying for it twice: once in LIF-01's tree termination
+    // (Phase 8) and once in UX-04's console-window count (Phase 10). Both of
+    // those sites keep exactly the behaviour they have; the decision is written
+    // at each of them.
+    //
+    // So no shell option, no interpreter wrapper and no extension check belong
+    // in this helper — not because nobody has designed them yet, but because the
+    // callers that need them already pass a plan and the callers that do not
+    // must not be given one by accident.
     let proc: ChildProcessWithoutNullStreams;
     try {
       proc =
@@ -2680,6 +2695,18 @@ async function getNodeExecutable(): Promise<string | undefined> {
   });
   lastNodeSearchCandidates = candidates;
 
+  // DECISION (07-01 OQ-3), not a known limitation — the difference matters,
+  // because a later reader should not "fix" this.
+  //
+  // A shim-shaped node candidate (`node.cmd` under a Windows version manager)
+  // resolves here as a non-zero exit and is stepped past, and the loop moves on
+  // to the next candidate. That is graceful degradation, and it is deliberately
+  // NOT launchability: routing the node binary itself through `buildSpawnPlan`'s
+  // interpreter branch would add a `cmd.exe` level to EVERY Drift MCP spawn —
+  // a cost LIF-01's process-tree termination (Phase 8) and UX-04's
+  // console-window count (Phase 10) both pay — in exchange for the single case
+  // of a user whose ONLY node is a shim with no real executable beside it. The
+  // candidate ladder already prefers the real executable when one exists.
   for (const candidate of candidates) {
     if (!(await fileExists(candidate))) continue;
     const result = await spawnAndWait(candidate, ["--version"]);
@@ -2839,10 +2866,11 @@ function applyProviderLimitation(status: ProviderStatus): ProviderStatus {
 // Runs the CLI's own `mcp remove` then `mcp add`, with the ARGV already decided
 // by the pure planner. This function assembles no command line of its own.
 //
-// BOTH spawns go through buildSpawnPlan, not just the add. The pre-clean is a
+// EVERY spawn goes through buildSpawnPlan, not just the add. The pre-clean is a
 // separate spawn on the same binary, so routing only the add would leave a
 // `.cmd`-resolved Gemini or Codex failing the removal with EINVAL on Windows —
-// and 07-04 makes that removal load-bearing rather than best-effort.
+// and that removal is load-bearing rather than best-effort: a failure means a
+// stale entry holding a live Caido session token stayed where it was.
 //
 // windowsVerbatimArguments is passed as a LITERAL key at each call, with its
 // value taken from the plan. Taking the plan's file and args while dropping its
@@ -3191,7 +3219,7 @@ async function cleanupMcpRuntime(
   await unregisterMcpFromCli("gemini", sdk);
   await unregisterMcpFromCli("codex", sdk);
 
-  // LIF-01 / Phase 8 (process lifecycle) owns a requirement that lands HERE: the
+  // LIF-01 SEAM / Phase 8 (process lifecycle) owns a requirement that lands HERE: the
   // provider process tree must be terminated BEFORE the temp-directory removal
   // below, or a surviving MCP child keeps the Caido token in its environment
   // while the files it was reading are deleted underneath it. The seam is marked
@@ -3788,6 +3816,11 @@ async function sendCliMessage(
     // DIAGNOSTICS field: it must report what was actually handed to the OS, not
     // what was requested, or the one artifact a Windows user can send back would
     // describe a spawn that never happened.
+    //
+    // LIF-01 SEAM / Phase 8 (process lifecycle), marked and NOT acted on: on
+    // Windows the interpreter branch inserts a `cmd.exe` level, so the tree
+    // this session must later terminate is one deeper than on POSIX. That is
+    // that phase's requirement to solve; nothing here reorders or terminates.
     const spawnPlan = buildSpawnPlan({
       command: resolved,
       args,
