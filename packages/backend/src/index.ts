@@ -115,6 +115,14 @@ import {
   toMcpConfigDocument,
   type McpServerSpec,
 } from "./mcp-server-spec";
+// The Phase 7 keystone (plan 07-01). Pure, zero-I/O, and the ONLY way a resolved
+// provider binary becomes a spawn: it decides whether the target must be routed
+// through `cmd.exe /d /s /c` (a `.cmd`/`.bat` shim, which Windows refuses to
+// spawn directly) or handed to `spawn` unchanged (a real `.exe`, and every
+// POSIX host). Exercised by spawn-plan.test.ts and, on a real Windows runner,
+// spawn-plan.win32.test.ts — which is the whole point, because index.ts is not
+// importable under vitest and nothing in THIS file is test-reachable.
+import { buildSpawnPlan } from "./spawn-plan";
 import { withFsRetry } from "./fs-retry";
 import { createActivityCursor, readActivityTick } from "./activity-tail";
 import {
@@ -2052,11 +2060,22 @@ async function checkProviderAvailability(
 // type declaration is not one. Spelling it as a member would put a permanent
 // non-value line into the gate's match set, which is the kind of noise that gets
 // a real gate relaxed later.
+//
+// `windowsVerbatimArguments` is REQUIRED, not optional, and that is the whole
+// point of declaring it here (Phase 7, PRV-02). Once buildSpawnPlan escapes a
+// cmd.exe command line itself, the runtime must be told not to re-quote it —
+// omit the flag and the runtime applies its own MSVC-convention quoting on top,
+// cmd sees literal carets, and the argv arrives corrupted while every other
+// assertion still passes. That is 07-RESEARCH.md § Pitfall B exactly, and an
+// OPTIONAL flag is the precise shape it describes: a default that is silently
+// wrong at the one site that forgot it. Required makes forgetting a compile
+// error and forces every call site to state its answer out loud (T-07-03).
 type SpawnWithEnv = (
   command: string,
   args: string[],
   options: Record<"env", Record<string, string>> & {
     stdio: ["pipe", "pipe", "pipe"];
+    windowsVerbatimArguments: boolean;
   },
 ) => ChildProcessWithoutNullStreams;
 const spawnWithEnv = spawn as unknown as SpawnWithEnv;
@@ -2193,6 +2212,14 @@ async function callMcpMethod(
       // Already parent-merged by buildSpawnEnv inside buildMcpServerSpec.
       env: spec.env,
       stdio: ["pipe", "pipe", "pipe"],
+      // False, and it is a statement rather than a placeholder. `spec.command`
+      // is the node executable requireNodeExecutable already validated by
+      // spawning it with `--version`, and `spec.args` is a path this file wrote
+      // — a real executable with a plain argv, so it is never routed through
+      // buildSpawnPlan's interpreter branch and there is no escaped command line
+      // for the runtime to leave alone. The runtime's own quoting is correct
+      // here and must stay enabled.
+      windowsVerbatimArguments: false,
     });
 
     // NOT a BoundedBuffer, and it must not become one. This is a line-DRAIN
@@ -2589,10 +2616,23 @@ async function runMcpSelfTest(
 // spread so that `env: options.env` survives as a greppable object KEY: the phase
 // gate asserts every env handed to a child process is `spec.env`,
 // `buildSpawnEnv(...)` or this forwarded value, and a spread would hide it.
+//
+// `windowsVerbatimArguments` now travels the same way and for the same reason,
+// and it is forwarded into BOTH branches rather than only the env-carrying one
+// (Phase 7, PRV-02). That matters because of which branch the callers actually
+// take: every registration and removal spawn in this file passes NO environment,
+// so the no-env branch below is the only channel they have. A flag wired into
+// the env branch alone would leave those callers unable to deliver it at all —
+// the runtime would re-quote a command line buildSpawnPlan had already escaped,
+// and the argv would arrive corrupted while every call-count assertion still
+// passed. It stays OPTIONAL here, unlike on SpawnWithEnv above, because the ~8
+// pre-existing call sites spawn plain executables with plain argv and the
+// non-verbatim default is correct for them; a caller that routes through
+// buildSpawnPlan passes the plan's answer explicitly.
 function spawnAndWait(
   cmd: string,
   args: string[],
-  options?: { env?: Record<string, string> },
+  options?: { env?: Record<string, string>; windowsVerbatimArguments?: boolean },
 ): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
     // Head retention: every consumer of this stream reads the FIRST line - a
@@ -2646,8 +2686,15 @@ function spawnAndWait(
     try {
       proc =
         options?.env === undefined
-          ? spawn(cmd, args, { stdio: ["pipe", "pipe", "pipe"] })
-          : spawnWithEnv(cmd, args, { stdio: ["pipe", "pipe", "pipe"], env: options.env });
+          ? spawn(cmd, args, {
+              stdio: ["pipe", "pipe", "pipe"],
+              windowsVerbatimArguments: options?.windowsVerbatimArguments ?? false,
+            })
+          : spawnWithEnv(cmd, args, {
+              stdio: ["pipe", "pipe", "pipe"],
+              env: options.env,
+              windowsVerbatimArguments: options.windowsVerbatimArguments ?? false,
+            });
     } catch {
       // The same failure shape the "error" handler below resolves: a non-zero
       // code so a caller can still tell a failed spawn from a successful one,
@@ -3479,7 +3526,25 @@ async function sendCliMessage(
     const injectedDriftVars: Record<string, string> =
       runtimeFiles === undefined ? {} : runtimeEnv;
 
-    lastSpawnArgs = [resolved, ...args];
+    // PRV-01/PRV-02. The single decision about HOW this provider is launched,
+    // taken once here and consumed twice below: by the diagnostics field on the
+    // next line and by the spawn itself inside the promise executor. On darwin,
+    // linux and an undefined platform it is a byte-identical passthrough of
+    // `resolved` and `args` (CMP-01); on Windows a `.cmd`/`.bat` shim becomes
+    // `cmd.exe /d /s /c "<escaped line>"` with verbatim arguments on, while a
+    // real `.exe` still spawns directly.
+    //
+    // It is built HERE rather than beside the spawn because `lastSpawnArgs` is a
+    // DIAGNOSTICS field: it must report what was actually handed to the OS, not
+    // what was requested, or the one artifact a Windows user can send back would
+    // describe a spawn that never happened.
+    const spawnPlan = buildSpawnPlan({
+      command: resolved,
+      args,
+      platform: host?.platform,
+    });
+
+    lastSpawnArgs = [spawnPlan.file, ...spawnPlan.args];
     appendSessionDebugLog(
       sessionDebugLogPath,
       `sendCliMessage start provider=${providerId} mcpAttached=${String(mcpTempDir !== undefined)} timeoutSeconds=${String(currentSettings.processTimeoutSeconds)}`,
@@ -3696,15 +3761,19 @@ async function sendCliMessage(
       // calls are their only deleters.
       //
       // This stopped being unreachable in Phase 6: the resolver now emits
-      // `.cmd` candidates, and the install table this phase added tells Windows
+      // `.cmd` candidates, and the install table Phase 6 added tells Windows
       // users to run the `npm install -g` that produces exactly that file.
       //
-      // What this guard does NOT do, stated plainly: it does not make a `.cmd`
-      // launchable. A refused spawn becomes a Drift error on the session, which
-      // is graceful degradation, not launchability. Making a `.cmd` actually
-      // launch is PRV-02 in Phase 7, which owns the cmd.exe branch. Deliberately
-      // absent here: any shell option, any interpreter wrapper, any extension
-      // check - all three are PRV-02's to design.
+      // Phase 7 (PRV-02) made a `.cmd` actually LAUNCH here: `spawnPlan` above
+      // routes it through `cmd.exe /d /s /c`, so the direct-spawn EINVAL this
+      // guard catches is no longer the expected outcome on this path. The guard
+      // stays anyway and is NOT now dead code - 05-D-04 put it here for
+      // everything else that throws synchronously from `spawn()`, notably a NUL
+      // byte in `resolved` rehydrated from the persisted provider command, and
+      // for a `cmd.exe` that is itself unspawnable. Still deliberately absent:
+      // any `shell` option. Caido's LLRT does zero escaping for it and Node's
+      // does its own, so either way a dynamic argument becomes an injection
+      // site; the escaping is buildSpawnPlan's, explicitly.
       //
       // CMP-01: catching a throw that POSIX never produces changes nothing on
       // macOS or Linux. There the spawn does not throw, so the catch arm is not
@@ -3718,12 +3787,16 @@ async function sendCliMessage(
       // mirror finalize()'s exactly.
       let proc: ChildProcessWithoutNullStreams;
       try {
-        proc = spawnWithEnv(resolved, args, {
+        proc = spawnWithEnv(spawnPlan.file, spawnPlan.args, {
           env: buildSpawnEnv({
             parentEnv: readParentEnv(),
             driftVars: injectedDriftVars,
           }),
           stdio: ["pipe", "pipe", "pipe"],
+          // Taken from the plan, never hardcoded: it is true exactly when the
+          // plan assembled and escaped a cmd.exe command line itself, and false
+          // on every direct spawn (all of POSIX, and a Windows `.exe`).
+          windowsVerbatimArguments: spawnPlan.windowsVerbatimArguments,
         });
       } catch (e) {
         const message = `Spawn error: ${String(e)}`;
