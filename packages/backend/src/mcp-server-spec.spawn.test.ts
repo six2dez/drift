@@ -354,3 +354,59 @@ describe("mcp-server-spec spawn", () => {
     }
   });
 });
+
+// D-05's DRIFT HALF, and only that half — read the vehicle caveat at the top of
+// this file before citing it. Drift can prove that it SUPPLIES the two
+// per-session variables to the CLI child it spawns; whether a specific
+// installed `gemini` then forwards them to the stdio MCP server it starts is
+// the CLI's half, and that is settled by a source CITATION in
+// `packages/shared/src/cli-providers.ts`, never by a test here.
+//
+// Both directions are asserted. The "has runtime files" case alone would pass
+// for a builder that emitted the two keys unconditionally, which is the exact
+// shape D-03 forbids on the registration path — so the "no runtime files" case
+// is what makes the pair discriminate.
+//
+// Built through the SAME production builders `index.ts` calls, per this file's
+// standing rule: a local re-derivation would make the test agree with itself
+// instead of with production.
+describe("mcp-server-spec per-session channel (D-05, Drift's half)", () => {
+  const ACTIVITY_FILE = path.join("/tmp", "drift-mcp-x", "mcp-activity-s1.jsonl");
+  const APPROVALS_FILE = path.join("/tmp", "drift-mcp-x", "mcp-approvals-s1.json");
+
+  function buildSessionSpec(runtimeFiles: boolean) {
+    return buildMcpServerSpec({
+      nodeExecutable: process.execPath,
+      mcpScriptPath: fileURLToPath(
+        new URL("../assets/mcp-server.mjs", import.meta.url),
+      ),
+      driftVars: buildMcpDriftVars({
+        caidoUrl: "http://127.0.0.1:8080",
+        caidoToken: FIXTURE_TOKEN,
+        contextFilePath: "/tmp/drift-mcp-x/mcp-context.json",
+        allowedToolNames: [...MCP_TOOL_NAMES],
+        confirmationRequiredToolNames: [],
+        confirmSensitiveActions: false,
+        ...(runtimeFiles
+          ? {
+              activityFilePath: ACTIVITY_FILE,
+              approvalsFilePath: APPROVALS_FILE,
+            }
+          : {}),
+      }),
+      parentEnv: process.env,
+    });
+  }
+
+  it("puts both per-session file paths in the spawn environment, with their exact values, for a session that HAS runtime files", () => {
+    const spec = buildSessionSpec(true);
+    expect(spec.env.DRIFT_ACTIVITY_FILE).toBe(ACTIVITY_FILE);
+    expect(spec.env.DRIFT_APPROVALS_FILE).toBe(APPROVALS_FILE);
+  });
+
+  it("puts NEITHER per-session file path in the spawn environment for a session that has none", () => {
+    const spec = buildSessionSpec(false);
+    expect(Object.keys(spec.env)).not.toContain("DRIFT_ACTIVITY_FILE");
+    expect(Object.keys(spec.env)).not.toContain("DRIFT_APPROVALS_FILE");
+  });
+});
