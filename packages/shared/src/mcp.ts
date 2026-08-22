@@ -62,6 +62,24 @@ export const MCP_TOOL_DEFINITIONS = [
 export type McpToolDefinition = (typeof MCP_TOOL_DEFINITIONS)[number];
 export type McpToolName = McpToolDefinition["name"];
 
+// DERIVED from the shipped tool definitions above, never restated. This is the
+// single source that both the tool policy and the fail-closed Codex allowlist
+// read; a second hand-written list of sensitive tool names is exactly the
+// failure mode it exists to prevent — the two would drift the first time a tool
+// flips its `sensitive` flag, and the half that went stale would be the one
+// deciding a security posture.
+export const SENSITIVE_MCP_TOOL_NAMES: readonly string[] = MCP_TOOL_DEFINITIONS
+  .filter((tool) => tool.sensitive)
+  .map((tool) => tool.name);
+
+// Returns `names` without any sensitive tool, ORDER AND DUPLICATES PRESERVED.
+// An input of only sensitive names yields an empty array — the deny-all shape
+// the MCP server's `DRIFT_ALLOWLIST_ACTIVE` treats as "offer nothing".
+export function excludeSensitiveToolNames(names: readonly string[]): string[] {
+  const sensitive = new Set<string>(SENSITIVE_MCP_TOOL_NAMES);
+  return names.filter((name) => !sensitive.has(name));
+}
+
 export type McpToolPolicy = {
   enabledGroups: McpPermissionGroups;
   confirmSensitiveActions: boolean;
