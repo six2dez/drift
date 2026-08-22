@@ -371,8 +371,16 @@ describe("mcp-server-spec spawn", () => {
 // standing rule: a local re-derivation would make the test agree with itself
 // instead of with production.
 describe("mcp-server-spec per-session channel (D-05, Drift's half)", () => {
-  const ACTIVITY_FILE = path.join("/tmp", "drift-mcp-x", "mcp-activity-s1.jsonl");
-  const APPROVALS_FILE = path.join("/tmp", "drift-mcp-x", "mcp-approvals-s1.json");
+  const ACTIVITY_FILE = path.join(
+    "/tmp",
+    "drift-mcp-x",
+    "mcp-activity-s1.jsonl",
+  );
+  const APPROVALS_FILE = path.join(
+    "/tmp",
+    "drift-mcp-x",
+    "mcp-approvals-s1.json",
+  );
 
   function buildSessionSpec(runtimeFiles: boolean) {
     return buildMcpServerSpec({

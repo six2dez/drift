@@ -410,9 +410,10 @@ describe("buildMcpCliRegistrationArgv", () => {
         element.startsWith("DRIFT_CONFIRMATION_REQUIRED_TOOLS"),
       ),
     ).toEqual([]);
-    // The flag count matches the number of non-empty keys, for both CLIs.
-    expect(gemini.filter((element) => element === "-e")).toHaveLength(5);
-    expect(codex.filter((element) => element === "--env")).toHaveLength(5);
+    // The flag count matches the number of non-empty keys, for both CLIs: the
+    // seven-key payload minus the one key forced empty.
+    expect(gemini.filter((element) => element === "-e")).toHaveLength(6);
+    expect(codex.filter((element) => element === "--env")).toHaveLength(6);
   });
 
   it("never puts the Caido token BYTES on Gemini's command line", () => {
