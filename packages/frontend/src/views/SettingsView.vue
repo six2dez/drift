@@ -5,7 +5,9 @@ import { useChatStore } from "../stores/chat";
 import { useSDK } from "../plugins/sdk";
 import {
   CliProvider,
+  CLI_PROVIDER_DEFAULT_COMMANDS,
   CLI_PROVIDER_DISPLAY_NAMES,
+  isProviderUsable,
   type McpToolPermissionGroup,
 } from "shared";
 import Card from "primevue/card";
@@ -144,7 +146,28 @@ function isProviderEnabled(pid: string) {
 }
 
 function isProviderAvailable(pid: string) {
-  return getStatus(pid)?.available ?? false;
+  // No private definition of usable lives in this component — a limited
+  // provider is usable, and only the shared predicate gets to say so (PD-01).
+  return isProviderUsable(getStatus(pid));
+}
+
+// Three-way, not two-way. A limitation is neither success nor failure, which is
+// precisely why it cannot ride either existing class: red would tell a user
+// their working provider is broken, green would hide that something is off.
+function getProviderDotClass(pid: string) {
+  const capability = getStatus(pid)?.capability;
+  if (capability === "available") return "text-green-500";
+  if (capability === "limited") return "text-amber-400";
+  return "text-red-500";
+}
+
+// A hint, and ONLY a hint — deliberately no validator, no extension allow-list
+// and no file dialog: the frontend has no filesystem access, cannot know the
+// host platform, and `checkProvider` already returns a precise per-case error
+// that a second weaker check here would contradict (UX-01 / SC-6).
+function getCommandPlaceholder(pid: CliProvider) {
+  const bare = CLI_PROVIDER_DEFAULT_COMMANDS[pid];
+  return `${bare} — or a full path, e.g. C:\\Users\\you\\AppData\\Roaming\\npm\\${bare}.cmd`;
 }
 
 function getSelfTestLabel(pid: string) {
@@ -306,7 +329,7 @@ async function toggleSensitiveConfirmations() {
           <div class="flex items-center gap-3 mb-2">
             <i
               class="fas fa-circle text-xs"
-              :class="getStatus(pid)?.available ? 'text-green-500' : 'text-red-500'"
+              :class="getProviderDotClass(pid)"
             />
             <span class="font-medium text-surface-100">
               {{ CLI_PROVIDER_DISPLAY_NAMES[pid] }}
@@ -321,8 +344,10 @@ async function toggleSensitiveConfirmations() {
           </div>
           <div class="flex items-center gap-2">
             <label class="text-xs text-surface-400 w-16">Command:</label>
+            <!-- placeholder only: no validator here, see getCommandPlaceholder -->
             <InputText
               :modelValue="store.settings.providers[pid]?.command ?? ''"
+              :placeholder="getCommandPlaceholder(pid)"
               class="flex-1 p-inputtext-sm"
               @change="(e: Event) => updateProviderCommand(pid, (e.target as HTMLInputElement).value)"
             />
@@ -332,6 +357,9 @@ async function toggleSensitiveConfirmations() {
           </div>
           <div v-if="getStatus(pid)?.error !== undefined" class="mt-1 text-xs text-red-400">
             {{ getStatus(pid)?.error }}
+          </div>
+          <div v-if="getStatus(pid)?.limitation !== undefined" class="mt-1 text-xs text-amber-400">
+            {{ getStatus(pid)?.limitation }}
           </div>
         </template>
       </Card>

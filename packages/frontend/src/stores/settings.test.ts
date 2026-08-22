@@ -165,14 +165,14 @@ describe("settings store", () => {
       },
     };
     store.providerStatuses = [
-      { id: "claude-cli", available: true, resolvedPath: "/usr/local/bin/claude" },
+      { id: "claude-cli", capability: "available", resolvedPath: "/usr/local/bin/claude" },
       {
         id: "gemini-cli",
-        available: false,
+        capability: "unavailable",
         error: "\"gemini\" not found in PATH or common install locations",
       },
-      { id: "codex-cli", available: false, error: "Disabled" },
-      { id: "copilot-cli", available: false, error: "Disabled" },
+      { id: "codex-cli", capability: "unavailable", error: "Disabled" },
+      { id: "copilot-cli", capability: "unavailable", error: "Disabled" },
     ];
     store.mcpStatus = createMcpStatus();
 
@@ -209,7 +209,7 @@ describe("settings store", () => {
           kind: "Ok" as const,
           value: callCount === 1
             ? []
-            : [{ id: "claude-cli", available: true, resolvedPath: "/Users/test/.local/bin/claude" }],
+            : [{ id: "claude-cli", capability: "available", resolvedPath: "/Users/test/.local/bin/claude" }],
         };
       });
 
@@ -221,7 +221,7 @@ describe("settings store", () => {
       await Promise.resolve();
 
       expect(store.providerStatuses).toEqual([
-        { id: "claude-cli", available: true, resolvedPath: "/Users/test/.local/bin/claude" },
+        { id: "claude-cli", capability: "available", resolvedPath: "/Users/test/.local/bin/claude" },
       ]);
     } finally {
       vi.useRealTimers();
@@ -261,7 +261,7 @@ describe("settings store", () => {
     store.initError = "providers: Error: Checking provider availability timed out after 5000ms";
     mockSdk.backend.getProviderStatuses.mockResolvedValue({
       kind: "Ok",
-      value: [{ id: "claude-cli", available: true, resolvedPath: "/Users/test/.local/bin/claude" }],
+      value: [{ id: "claude-cli", capability: "available", resolvedPath: "/Users/test/.local/bin/claude" }],
     });
 
     await store.refreshProviders();

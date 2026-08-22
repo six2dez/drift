@@ -2,6 +2,7 @@ import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 import {
   DEFAULT_SETTINGS,
+  isProviderUsable,
   type McpToolPermissionGroup,
   type Settings,
   type ProviderStatus,
@@ -457,10 +458,10 @@ export const useSettingsStore = defineStore("settings", () => {
       .filter(([, provider]) => provider.enabled)
       .map(([providerId]) => providerId);
     const availableEnabledProviderIds = enabledProviderIds.filter((providerId) =>
-      providerStatuses.value.find((status) => status.id === providerId)?.available
+      isProviderUsable(providerStatuses.value.find((status) => status.id === providerId))
     );
     const unavailableProviders = enabledProviderIds.filter((providerId) =>
-      !providerStatuses.value.find((status) => status.id === providerId)?.available
+      !isProviderUsable(providerStatuses.value.find((status) => status.id === providerId))
     );
     const providerCheck: ReadinessCheck =
       enabledProviderIds.length === 0
@@ -607,10 +608,9 @@ export const useSettingsStore = defineStore("settings", () => {
   });
 
   function isProviderAvailable(providerId: string): boolean {
-    return (
-      providerStatuses.value.find((p) => p.id === providerId)?.available ??
-      false
-    );
+    // The store has no private definition of usable: a limited provider IS
+    // usable, and only the shared predicate gets to say so (PD-01).
+    return isProviderUsable(providerStatuses.value.find((p) => p.id === providerId));
   }
 
   return {
