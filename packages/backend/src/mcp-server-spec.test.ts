@@ -9,13 +9,19 @@ import {
   CAIDO_TOKEN_REFERENCE,
   MCP_CLI_ENV_FLAG,
   MCP_CLI_REGISTRATION_SCOPES,
+  MCP_CLI_REMOVE_REMEDIATION,
+  MCP_CLI_UNSCOPED,
+  type McpCliRemovalScope,
   buildMcpCliRegistrationArgv,
   buildMcpCliRegistrationEnv,
   buildMcpDriftVars,
   buildMcpServerSpec,
+  classifyMcpRemoveExit,
   findExpandableEnvKeys,
+  formatMcpRemoveFailure,
   formatSpawnDebugLine,
   planMcpCliRegistration,
+  planMcpCliRemoval,
   toMcpConfigDocument,
 } from "./mcp-server-spec";
 
@@ -584,5 +590,230 @@ describe("findExpandableEnvKeys", () => {
         DRIFT_ALLOWLIST_ACTIVE: "1",
       }),
     ).toEqual([]);
+  });
+});
+
+// ── The removal policy and its security line (Phase 7, PRV-03 / SC-3) ──
+//
+// This is the other half of the trade recorded at 07-03's decision checkpoint:
+// a live Caido session token now rests in `~/.codex/config.toml`, outside the
+// temp root Drift sweeps. What bounds that residual is the removal running
+// unconditionally at every start, across every scope, on every platform — and
+// a failure being a SECURITY event the user can see rather than a dropped
+// best-effort call. Every one of those properties is asserted below, because
+// `index.ts`, where the sweep runs, cannot be imported under vitest.
+
+describe("planMcpCliRemoval", () => {
+  it("returns BOTH Gemini scopes, in a stable order, with the user scope first", () => {
+    // Two scopes for a HISTORICAL reason, not a hypothetical one: a Drift from
+    // before this phase passed no `--scope` at all, so its entries landed in
+    // the working-directory scope, while a Drift from this phase onward writes
+    // the user scope. Removing only the user scope would leave every
+    // pre-upgrade entry in place, holding a credential, forever.
+    const entries = planMcpCliRemoval({ cli: "gemini", platform: "linux" });
+    expect(entries.map((entry) => entry.scope)).toEqual(["user", "project"]);
+    // The order is pinned so a log reading is reproducible across runs.
+    expect(entries[0]?.argv).toEqual([
+      "mcp",
+      "remove",
+      "--scope",
+      "user",
+      "drift",
+    ]);
+    expect(entries[1]?.argv).toEqual([
+      "mcp",
+      "remove",
+      "--scope",
+      "project",
+      "drift",
+    ]);
+  });
+
+  it("puts the Gemini scope flag BEFORE the positional, matching that CLI's parser", () => {
+    // Same ordering rule the registration argv obeys: gemini's yargs command is
+    // `remove <name>` under `unknown-options-as-args`, so a flag after the
+    // positional is swallowed as an argument rather than parsed.
+    for (const entry of planMcpCliRemoval({ cli: "gemini", platform: "win32" })) {
+      expect(entry.argv.indexOf("--scope")).toBeLessThan(
+        entry.argv.indexOf("drift"),
+      );
+      expect(entry.argv.at(-1)).toBe("drift");
+    }
+  });
+
+  it("returns exactly ONE unscoped removal for Codex — its config home is global", () => {
+    const entries = planMcpCliRemoval({ cli: "codex", platform: "linux" });
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.scope).toBe(MCP_CLI_UNSCOPED);
+    expect(entries[0]?.argv).toEqual(["mcp", "remove", "drift"]);
+    // No scope flag anywhere: `codex mcp remove` takes none.
+    expect(entries[0]?.argv).not.toContain("--scope");
+  });
+
+  it("removes the scope Drift WRITES — the register and remove paths cannot disagree", () => {
+    // The orphan this whole plan exists to prevent is a scope Drift can write
+    // and cannot remove. Asserted against the registration record rather than
+    // against a literal, so a scope rename moves both or neither.
+    const writtenScope = MCP_CLI_REGISTRATION_SCOPES.gemini.at(-1);
+    expect(
+      planMcpCliRemoval({ cli: "gemini", platform: "linux" }).map(
+        (entry) => entry.scope,
+      ),
+    ).toContain(writtenScope);
+    // Codex writes with no scope, so the unscoped removal is its counterpart.
+    expect(MCP_CLI_REGISTRATION_SCOPES.codex).toEqual([]);
+    expect(
+      planMcpCliRemoval({ cli: "codex", platform: "linux" })[0]?.scope,
+    ).toBe(MCP_CLI_UNSCOPED);
+  });
+
+  it("returns IDENTICAL output for win32, darwin, linux and an undefined platform", () => {
+    // The fail-closed instinct INVERTS here. Every other predicate in this
+    // module skips on an unknown platform; this one must not, because the cost
+    // of skipping a removal is a credential left behind rather than a
+    // capability withheld. The undefined case is asserted explicitly for that
+    // reason — it is the arm `planMcpCliRegistration` deliberately refuses on.
+    for (const cli of ["gemini", "codex"] as const) {
+      const baseline = planMcpCliRemoval({ cli, platform: "linux" });
+      for (const platform of ["win32", "darwin", undefined] as const) {
+        expect(planMcpCliRemoval({ cli, platform })).toEqual(baseline);
+      }
+    }
+  });
+
+  it("returns a FRESH array on each call — mutating one result cannot poison the next", () => {
+    const first = planMcpCliRemoval({ cli: "gemini", platform: "linux" });
+    first[0]?.argv.push("--poisoned");
+    first.pop();
+    const second = planMcpCliRemoval({ cli: "gemini", platform: "linux" });
+    expect(second).toHaveLength(2);
+    expect(second[0]?.argv).not.toContain("--poisoned");
+  });
+});
+
+describe("classifyMcpRemoveExit", () => {
+  it("NEVER returns the failed outcome for a zero exit", () => {
+    // Both CLIs exit zero whether or not an entry existed — source-verified,
+    // and the property that makes an unconditional sweep safe. A classifier
+    // that called a clean start a failure would paint a permanent
+    // credential-may-remain banner on the provider card, which destroys exactly
+    // the signal SC-3 exists to create.
+    for (const cli of ["gemini", "codex"] as const) {
+      expect(classifyMcpRemoveExit({ cli, exitCode: 0 })).not.toBe("failed");
+    }
+  });
+
+  it("ALWAYS returns the failed outcome for a non-zero exit", () => {
+    // The other direction, and it is not optional: a classifier that suppressed
+    // everything would pass the case above while destroying the whole signal.
+    for (const cli of ["gemini", "codex"] as const) {
+      for (const exitCode of [1, 2, 127, -1]) {
+        expect(classifyMcpRemoveExit({ cli, exitCode })).toBe("failed");
+      }
+    }
+  });
+
+  it("reads ONLY the exit code and the CLI — no parameter can carry output text", () => {
+    // The same structural property the failure formatter has. `stdout` and
+    // `stderr` are on every spawn result this classifier is fed, and a CLI
+    // echoing its own configuration back on an error is precisely the case
+    // nobody enumerated (T-07-05).
+    expect(classifyMcpRemoveExit).toHaveLength(1);
+    const input = { cli: "gemini", exitCode: 1 } as const;
+    expect(Object.keys(input).sort()).toEqual(["cli", "exitCode"]);
+    expect(classifyMcpRemoveExit(input)).toBe("failed");
+  });
+});
+
+describe("formatMcpRemoveFailure", () => {
+  // Values shaped to look like a leak IF one were possible. None of them has a
+  // parameter to arrive through, which is the point being asserted.
+  const LEAK_SHAPED_TOKEN = "eyJhbGciOiJIUzI1NiJ9.super-secret-caido-token";
+  const LEAK_SHAPED_PATH = "/Users/someone/.codex/config.toml";
+  const LEAK_SHAPED_STDERR = `error: could not write CAIDO_TOKEN=${LEAK_SHAPED_TOKEN}`;
+
+  it("names the CLI, the scope, the exit code and the exact remediation command", () => {
+    const line = formatMcpRemoveFailure({
+      cli: "gemini",
+      scope: "project",
+      exitCode: 1,
+    });
+    expect(line).toContain("[drift]");
+    expect(line).toContain("SECURITY");
+    expect(line).toContain("gemini");
+    expect(line).toContain("project");
+    expect(line).toContain("1");
+    expect(line).toContain("Caido session token");
+    // The remediation command is asserted against the POLICY's own argv, never
+    // against a hand-written string: a scope rename must not be able to leave
+    // the user with a command that does not work.
+    const entry = planMcpCliRemoval({ cli: "gemini", platform: undefined }).find(
+      (candidate) => candidate.scope === "project",
+    );
+    expect(entry).toBeDefined();
+    const expectedCommand = ["gemini", ...(entry?.argv ?? [])].join(" ");
+    expect(expectedCommand).toBe("gemini mcp remove --scope project drift");
+    expect(line.endsWith(expectedCommand)).toBe(true);
+    expect(MCP_CLI_REMOVE_REMEDIATION.gemini.project).toBe(expectedCommand);
+  });
+
+  it("says the CLI is unscoped for Codex rather than inventing a scope name", () => {
+    const line = formatMcpRemoveFailure({
+      cli: "codex",
+      scope: MCP_CLI_UNSCOPED,
+      exitCode: 2,
+    });
+    expect(line).toContain("codex");
+    expect(line).toContain("unscoped");
+    expect(line).not.toContain("--scope");
+    expect(line.endsWith("codex mcp remove drift")).toBe(true);
+    expect(MCP_CLI_REMOVE_REMEDIATION.codex[MCP_CLI_UNSCOPED]).toBe(
+      "codex mcp remove drift",
+    );
+  });
+
+  it("carries no path, no environment value and no CLI output", () => {
+    for (const cli of ["gemini", "codex"] as const) {
+      for (const scope of ["user", "project", MCP_CLI_UNSCOPED] as const) {
+        const line = formatMcpRemoveFailure({ cli, scope, exitCode: 1 });
+        expect(line).not.toContain(LEAK_SHAPED_TOKEN);
+        expect(line).not.toContain(LEAK_SHAPED_PATH);
+        expect(line).not.toContain(LEAK_SHAPED_STDERR);
+        // Nothing that looks like an absolute path at all — the resolved binary
+        // is deliberately absent, unlike the registration log line.
+        expect(line).not.toMatch(/[/\\]/);
+      }
+    }
+  });
+
+  it("pins the signature to THREE scalars — a fourth member must be a deliberate act", () => {
+    // Arity ONE (a single object parameter), so a positional `stderr` cannot be
+    // bolted on without touching every call site.
+    expect(formatMcpRemoveFailure).toHaveLength(1);
+    const input = {
+      cli: "gemini",
+      scope: "user",
+      exitCode: 1,
+    } satisfies Parameters<typeof formatMcpRemoveFailure>[0];
+    // Exactly three members, named. TypeScript's excess-property check rejects
+    // a fourth supplied here, so "no value can arrive" is enforced by the
+    // compiler rather than by anyone remembering the rule (05-D-11).
+    expect(Object.keys(input).sort()).toEqual(["cli", "exitCode", "scope"]);
+    expect(formatMcpRemoveFailure(input)).toContain("exited 1");
+  });
+
+  it("covers every scope the policy can produce, for both CLIs", () => {
+    // Falsifiability partner for the remediation assertions above: whatever the
+    // policy returns, the remediation record has a command for it. A scope the
+    // policy can emit but the user cannot be told how to clean is the silent
+    // half of this plan's failure mode.
+    for (const cli of ["gemini", "codex"] as const) {
+      for (const entry of planMcpCliRemoval({ cli, platform: undefined })) {
+        const scope: McpCliRemovalScope = entry.scope;
+        expect(MCP_CLI_REMOVE_REMEDIATION[cli][scope]).toBe(
+          [cli, ...entry.argv].join(" "),
+        );
+      }
+    }
   });
 });
