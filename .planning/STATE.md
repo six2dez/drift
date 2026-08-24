@@ -3,11 +3,11 @@ gsd_state_version: 1.0
 milestone: v1.0
 current_phase: 08
 current_phase_name: Process Lifecycle
-status: verifying
+status: needs_review
 stopped_at: Completed 08-05-PLAN.md
 last_updated: "2026-08-24T18:40:40.721Z"
 last_activity: 2026-08-24
-last_activity_desc: Phase 08 execution started
+last_activity_desc: Phase 08 verified — human_needed, no blockers
 state_head: 7155563fc821d0a45bff1dcc892265e9d0f62d9d
 progress:
   total_phases: 13
@@ -28,10 +28,10 @@ See: .planning/PROJECT.md (updated 2026-06-26)
 
 ## Current Position
 
-Phase: 08 (Process Lifecycle) — EXECUTING
+Phase: 08 (Process Lifecycle) — NEEDS REVIEW
 Plan: 5 of 5
-Status: Phase complete — ready for verification
-Last activity: 2026-08-24 — Phase 08 execution started
+Status: Verified human_needed (no blockers) — 2/8 must-haves verified, 3 behaviour-unverified, 3 abstained. See 08-VERIFICATION.md.
+Last activity: 2026-08-24 — Phase 08 verification recorded
 
 Progress: [███░░░░░░░] 30% (3 of 10 milestone phases)
 
