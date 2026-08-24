@@ -90,6 +90,14 @@ import {
   getClaudePrintRecoveryMode,
 } from "./claude-print";
 import { getPersistenceDbHandle, type PersistenceDbHandle } from "./persistence";
+// The Phase 8 keystone (plan 08-02). Pure, zero-I/O, and the ONLY source of the
+// file/args pair for every process-tree termination this file performs. Its own
+// module header carries the A1/A6 verdicts the mechanism rests on.
+import {
+  buildKillTreePlan,
+  shouldDetachProviderSpawn,
+  type KillRung,
+} from "./kill-plan";
 import {
   buildSpawnEnv,
   getSweepRoots,
@@ -2000,12 +2008,24 @@ async function checkProviderAvailability(
 // OPTIONAL flag is the precise shape it describes: a default that is silently
 // wrong at the one site that forgot it. Required makes forgetting a compile
 // error and forces every call site to state its answer out loud (T-07-03).
+//
+// `detached` is REQUIRED for exactly the same reason, one phase later (Phase 8,
+// LIF-02 / T-08-11). It decides whether a spawned child gets its own process
+// group, which is the difference between a cancel that reaches the
+// token-bearing MCP grandchild and one that leaves it running — and, at the two
+// Drift-OWNED leaf spawns, the difference between a helper that dies with Drift
+// and one that outlives it. An optional flag here would be a default that is
+// silently wrong at the one site that forgot it, in either direction. Required
+// makes forgetting a compile error and forces all three call sites to state
+// their answer out loud; index.source.test.ts then asserts that exactly one of
+// them says anything other than false.
 type SpawnWithEnv = (
   command: string,
   args: string[],
   options: Record<"env", Record<string, string>> & {
     stdio: ["pipe", "pipe", "pipe"];
     windowsVerbatimArguments: boolean;
+    detached: boolean;
   },
 ) => ChildProcessWithoutNullStreams;
 const spawnWithEnv = spawn as unknown as SpawnWithEnv;
@@ -2150,6 +2170,13 @@ async function callMcpMethod(
       // for the runtime to leave alone. The runtime's own quoting is correct
       // here and must stay enabled.
       windowsVerbatimArguments: false,
+      // FALSE, and a statement rather than a placeholder (LIF-02 / T-08-11).
+      // This is a Drift-OWNED leaf: a short-lived `node mcp-server.mjs` that
+      // answers one JSON-RPC request for the self-test. It must stay inside
+      // Drift's own process group so it dies with Drift; a detached leaf would
+      // survive a hard-killed Caido holding a live session token, which is the
+      // orphan class this phase exists to remove, reintroduced one layer down.
+      detached: false,
     });
 
     // NOT a BoundedBuffer, and it must not become one. This is a line-DRAIN
@@ -2642,6 +2669,14 @@ function spawnAndWait(
               stdio: ["pipe", "pipe", "pipe"],
               env: options.env,
               windowsVerbatimArguments: options.windowsVerbatimArguments ?? false,
+              // FALSE, and a statement rather than a placeholder (LIF-02 /
+              // T-08-11). Every caller of this helper AWAITS it: a `--version`
+              // probe, a `where.exe` search, an `mcp add`/`mcp remove`. They are
+              // Drift-owned leaves that must die with Drift, and detaching one
+              // would leave it running past a hard-killed Caido. The bare-spawn
+              // arm above deliberately says nothing: `detached` is not in the
+              // vendored SpawnOptions and must not be added there.
+              detached: false,
             });
     } catch {
       // The same failure shape the "error" handler below resolves: a non-zero
@@ -4266,6 +4301,22 @@ async function sendCliMessage(
           // plan assembled and escaped a cmd.exe command line itself, and false
           // on every direct spawn (all of POSIX, and a Windows `.exe`).
           windowsVerbatimArguments: spawnPlan.windowsVerbatimArguments,
+          // LIF-02, and the ONE site in this file that says anything other than
+          // false. The provider CLI spawns `node mcp-server.mjs` as its own
+          // child, and that grandchild carries CAIDO_TOKEN. Giving the CLI its
+          // own process group is what makes the grandchild reachable from a
+          // single group signal when the user clicks Stop; without it the
+          // grandchild survives EVERY cancel, which is the defect LIF-02 names.
+          //
+          // Rated `costly`, not free: on POSIX the CLI stops receiving signals
+          // delivered to Caido's own group, so a terminal Ctrl-C on Caido no
+          // longer takes it down (08-RESEARCH.md § Pitfall 6). Caido ships as a
+          // desktop application rather than a foreground job, and the
+          // counterweight — a token-bearing orphan after every cancel — is
+          // decisive. `shouldDetachProviderSpawn` returns false on win32, where
+          // `taskkill /t` walks parentage instead and LLRT's flag would perturb
+          // the console-attachment contract Phase 7 measured.
+          detached: shouldDetachProviderSpawn(host?.platform),
         });
       } catch (e) {
         const message = `Spawn error: ${String(e)}`;
@@ -4800,13 +4851,173 @@ async function sendCliMessage(
   }
 }
 
+// ── Process lifecycle (LIF-01 / LIF-02) ─────────────────────────────
+//
+// PLACEMENT IS DELIBERATE AND LOAD-BEARING. This section sits BELOW
+// `sendCliMessage`'s absolute-timeout handler — below the closing line of the
+// setTimeout whose delay is currentSettings.processTimeoutSeconds — so that the
+// declaration of `killTree` below can never fall inside a line-scan of that
+// handler. Phase 8's SC-4 ordering gate slices exactly that region and asserts
+// that the kill statement precedes `finalize`; a declaration sitting above it
+// would let the gate match the declaration line and pass without ever measuring
+// the statement order it exists to measure. Do not move this section up.
+//
+// Neither this comment nor any other in this section spells that handler's
+// closing line or the tree-kill call shape verbatim: both are addressed by
+// line-number and occurrence-count gates that a quoted copy would silently
+// shift. Describe them; do not reproduce them.
+
+// A positive-pid signal-0 liveness probe, read through the same guarded
+// `globalThis` shape as `readParentEnv` (:564) and `readVersionBlock` (:316) —
+// never a bare `process.` reference, which is a ReferenceError rather than an
+// `undefined` in a runtime that does not declare the global. Signal `0` sends
+// nothing; it performs the existence and permission checks only.
+//
+// A THROW IS NOT PROOF OF DEATH. On unix an EPERM — the pid exists but belongs
+// to another user — throws exactly as ESRCH does, so `false` here means "not
+// provably alive" rather than "gone". That asymmetry is the safe direction for
+// the only caller: a deferred kill rung skips when this returns `false`, so the
+// worst case is a signal not sent, never a signal sent at an unrelated process
+// (08-RESEARCH.md § Pitfall 2).
+//
+// If the runtime exposes no kill primitive at all the probe cannot run, and this
+// returns `true` — "not proven dead". That keeps the guard strictly subtractive
+// relative to the behaviour that ships today, where the deferred rung fires
+// unconditionally: this function can only ever REMOVE a kill, never add one
+// (CMP-01).
+function isPidAlive(pid: number): boolean {
+  const processRef = globalThis as typeof globalThis & {
+    process?: { kill?: (pid: number, signal: number) => boolean };
+  };
+  try {
+    const killRef = processRef.process?.kill;
+    if (typeof killRef !== "function") return true;
+    killRef.call(processRef.process, pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Bring down a tracked child AND everything it spawned. The one place in this
+// file that terminates a process tree.
+//
+// FIRE-AND-FORGET BY CONSTRUCTION (recorded decision OQ-4, 08-RESEARCH.md §
+// Pitfall 7). It returns `void`, awaits nothing, and no caller's signature
+// changes. Every caller is on a cancel/close/timeout path, and Caido's runtime
+// does not deliver child_process callbacks while an RPC is awaiting — so
+// awaiting a kill inside a cancel would open a new instance of the exact
+// starvation class the whole keep-alive/watchdog apparatus exists to work
+// around, at the worst possible moment. SC-5's "cancellation semantics visible
+// to the user are unchanged" then holds by construction rather than by test. Do
+// not make this async.
+//
+// The killer is spawned through the BARE `spawn`, not `spawnWithEnv`: it
+// inherits the parent block correctly and has no reason to carry a DRIFT
+// variable, and every environment handed to a child process is enumerated by a
+// gate that should not have to carry a row for a spawn that needs none.
+//
+// LOG LINES ARE VALUE-FREE (threat T-08-05, the T-04-04 rendering rule): the
+// plan's kind/reason, an exit code, an error code and the platform — scalars
+// only. No path, no argv, no environment value, and never the pid rendered at
+// this site, because `String(undefined)` is the word "undefined" and a killer
+// invoked with it is a silent no-op nobody reads (§ Pitfall 3). The rendering
+// lives in kill-plan.ts, behind its guard.
+function killTree(
+  sdk: BackendSDK,
+  proc: ChildProcessWithoutNullStreams,
+  rung: KillRung,
+): void {
+  // Captured ONCE, here. Reading `proc.pid` again inside a deferred rung is
+  // Pitfall 2 (pid reuse) — by then the process may have been reaped and the
+  // number reassigned.
+  const pid = proc.pid;
+
+  // THE SINGLE-PID RUNG, FIRST, AND IT IS NOT REDUNDANT. On POSIX this is the
+  // behaviour that ships today, kept deliberately as defence against assumption
+  // A1 — that the Caido LLRT users actually run honours the process-group spawn
+  // option. A1 reads **OPEN — not measured** in 08-SPIKE.md: the Wave-0 probe
+  // that would have closed it was built and then waived without being run. If
+  // `detached` silently does nothing on a real install, the group reference in
+  // the plan below names a group that was never created and NOTHING dies; this
+  // rung turns that total regression into the partial one we have today. It
+  // costs one syscall. Recorded decision OQ-2 — do not delete it as redundant.
+  try {
+    proc.kill(rung === "kill" ? "SIGKILL" : "SIGTERM");
+  } catch {
+    /* already dead */
+  }
+
+  const plan = buildKillTreePlan({
+    pid,
+    platform: host?.platform,
+    env: readParentEnv(),
+    rung,
+  });
+
+  if (plan.kind === "none") {
+    sdk.console.log(`[drift lifecycle] no tree kill: ${plan.reason}`);
+    return;
+  }
+
+  // C-8 / § Pitfall 9: `spawn()` throws SYNCHRONOUSLY for an unspawnable path,
+  // and the realistic case here is a Windows host with no %SystemRoot% at all,
+  // where the plan falls back to a bare name. A throw escaping into a cancel
+  // handler that has no catch would surface as a failed RPC on a Stop button.
+  try {
+    const killer: ChildProcessWithoutNullStreams = spawn(plan.file, plan.args, {
+      stdio: ["pipe", "pipe", "pipe"],
+      windowsVerbatimArguments: plan.windowsVerbatimArguments,
+    });
+    // Drained and discarded so neither pipe can fill and stall the killer. This
+    // process is stored in no map: nothing waits on it and nothing cancels it.
+    killer.stdout?.on("data", () => undefined);
+    killer.stderr?.on("data", () => undefined);
+    // A non-zero exit is the EXPECTED case as often as not — the target
+    // frequently exits between the decision and the spawn. Logged, never
+    // branched on: taskkill's codes are undocumented by Microsoft and unmeasured
+    // by this project, and `kill`'s "no such process" is the normal race.
+    killer.on("close", (code) => {
+      sdk.console.log(`[drift lifecycle] tree kill exited code=${String(code)}`);
+    });
+    killer.on("error", (error: Error & { code?: string }) => {
+      // The errno CODE only. `error.message` embeds the resolved file path
+      // ("spawn taskkill.exe ENOENT"), and a path is one of the things a
+      // lifecycle line must not carry (T-08-05).
+      sdk.console.log(
+        `[drift lifecycle] tree kill spawn error code=${String(error.code ?? "unknown")}`,
+      );
+    });
+  } catch {
+    // Same rule: the thrown value's message carries the path, so only the
+    // platform scalar is rendered.
+    sdk.console.log(
+      `[drift lifecycle] tree kill threw synchronously platform=${String(host?.platform ?? "unknown")}`,
+    );
+  }
+}
+
 function cancelCliMessage(sdk: BackendSDK, sessionId: string): Result<void> {
   const proc = activeProcesses.get(sessionId);
   const snapshot = getSessionSnapshot(sessionId);
   if (proc !== undefined) {
-    try { proc.kill("SIGTERM"); } catch { /* already dead */ }
+    // Captured BEFORE the timer is scheduled, and never re-read from `proc`
+    // inside it (§ Pitfall 2).
+    const pid = proc.pid;
+    // LIF-02. Was a bare `proc.kill("SIGTERM")`, which signals the provider CLI
+    // alone and leaves its `node mcp-server.mjs` child — the process holding
+    // CAIDO_TOKEN — running until it decides to exit. Consent withdrawal that
+    // does not withdraw the credential is not consent withdrawal.
+    killTree(sdk, proc, "term");
     setTimeout(() => {
-      try { proc.kill("SIGKILL"); } catch { /* already dead */ }
+      // GUARDED, and the guard is the point. `activeProcesses.delete` has
+      // already run, the tree may be entirely gone, and the OS is free to
+      // reassign the pid in the meantime — on Windows the same argv would then
+      // take an unrelated process's WHOLE TREE with it (§ Pitfall 2, threat
+      // T-08-04). An unprovable liveness answer resolves toward "alive", so this
+      // guard can only ever skip a kill, never add one.
+      if (pid === undefined || !isPidAlive(pid)) return;
+      killTree(sdk, proc, "kill");
     }, 3000);
     activeProcesses.delete(sessionId);
     if (snapshot !== undefined) {
