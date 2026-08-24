@@ -5018,6 +5018,31 @@ function isPidAlive(pid: number): boolean {
 // this site, because `String(undefined)` is the word "undefined" and a killer
 // invoked with it is a silent no-op nobody reads (§ Pitfall 3). The rendering
 // lives in kill-plan.ts, behind its guard.
+// The win32 LAST RESORT, and only that. `killTree`'s preamble rung is guarded
+// off win32 (review CR-01) because a `TerminateProcess`d pid is invisible to
+// `taskkill /t`'s `ParentProcessId` walk. That leaves one Windows case with no
+// killer at all: `taskkill.exe` could not be SPAWNED — no `%SystemRoot%`, so the
+// plan fell back to a bare name that `%PATH%` does not resolve, or the spawn
+// threw synchronously. Before the guard, the tracked process died anyway on that
+// path; this restores exactly that and nothing more.
+//
+// It is FORCEFUL unconditionally, and the rung is deliberately not threaded in:
+// there is no graceful signal on Windows (`kill-plan.ts` refuses to build one),
+// and by the time this runs the tree killer has already failed, so the only
+// remaining question is whether the tracked process dies at all.
+//
+// Written as a named function rather than inline at both arms so the
+// termination census in `index.source.test.ts` has ONE site to enumerate for
+// this behaviour instead of two identical ones.
+function killWin32Leaf(proc: ChildProcessWithoutNullStreams): void {
+  if (host?.platform !== "win32") return;
+  try {
+    proc.kill("SIGKILL");
+  } catch {
+    /* already dead */
+  }
+}
+
 function killTree(
   sdk: BackendSDK,
   proc: ChildProcessWithoutNullStreams,
@@ -5028,19 +5053,42 @@ function killTree(
   // number reassigned.
   const pid = proc.pid;
 
-  // THE SINGLE-PID RUNG, FIRST, AND IT IS NOT REDUNDANT. On POSIX this is the
-  // behaviour that ships today, kept deliberately as defence against assumption
-  // A1 — that the Caido LLRT users actually run honours the process-group spawn
-  // option. A1 reads **OPEN — not measured** in 08-SPIKE.md: the Wave-0 probe
-  // that would have closed it was built and then waived without being run. If
-  // `detached` silently does nothing on a real install, the group reference in
-  // the plan below names a group that was never created and NOTHING dies; this
-  // rung turns that total regression into the partial one we have today. It
-  // costs one syscall. Recorded decision OQ-2 — do not delete it as redundant.
-  try {
-    proc.kill(rung === "kill" ? "SIGKILL" : "SIGTERM");
-  } catch {
-    /* already dead */
+  // THE SINGLE-PID RUNG, FIRST ON POSIX, AND IT IS NOT REDUNDANT THERE. On
+  // POSIX this is the behaviour that ships today, kept deliberately as defence
+  // against assumption A1 — that the Caido LLRT users actually run honours the
+  // process-group spawn option. A1 reads **OPEN — not measured** in
+  // 08-SPIKE.md: the Wave-0 probe that would have closed it was built and then
+  // waived without being run. If `detached` silently does nothing on a real
+  // install, the group reference in the plan below names a group that was never
+  // created and NOTHING dies; this rung turns that total regression into the
+  // partial one we have today. It costs one syscall. Recorded decision OQ-2 —
+  // do not delete it as redundant.
+  //
+  // WIN32 IS EXCLUDED, AND THE EXCLUSION IS THE FIX FOR WHAT THIS RUNG WAS
+  // DOING THERE (review CR-01). A1 is a POSIX assumption in the first place —
+  // it is about `process_group(0)`, an option the win32 arm never takes — so
+  // this rung was never A1 defence on Windows. What it was instead was a
+  // defeat of the plan below. `proc.kill(...)` on win32 is an unconditional
+  // `TerminateProcess` whatever signal name it is handed; that is the same fact
+  // `kill-plan.ts` relies on when it refuses to build a graceful win32 rung.
+  // So the tracked process left the process table microseconds before
+  // `taskkill /pid <n> /t /f` was spawned to walk its `ParentProcessId`
+  // children — and `taskkill` cannot enumerate a process that is already gone.
+  // The token-bearing `node mcp-server.mjs` grandchild then survived the
+  // cancel: LIF-01/LIF-02 unfixed on the one platform this milestone is about.
+  // The deferred second rung did not rescue it either — it is guarded on the
+  // pid's liveness, and this rung had just made that answer `false`.
+  //
+  // The single-pid signal is KEPT on win32, but as the FALLBACK at the two
+  // spawn-failure arms below rather than as the preamble, so a Windows host
+  // whose `taskkill.exe` cannot be spawned at all still loses the tracked
+  // process — the behaviour that shipped before this rung was guarded.
+  if (host?.platform !== "win32") {
+    try {
+      proc.kill(rung === "kill" ? "SIGKILL" : "SIGTERM");
+    } catch {
+      /* already dead */
+    }
   }
 
   const plan = buildKillTreePlan({
@@ -5082,6 +5130,7 @@ function killTree(
       sdk.console.log(
         `[drift lifecycle] tree kill spawn error code=${String(error.code ?? "unknown")}`,
       );
+      killWin32Leaf(proc);
     });
   } catch {
     // Same rule: the thrown value's message carries the path, so only the
@@ -5089,6 +5138,7 @@ function killTree(
     sdk.console.log(
       `[drift lifecycle] tree kill threw synchronously platform=${String(host?.platform ?? "unknown")}`,
     );
+    killWin32Leaf(proc);
   }
 }
 

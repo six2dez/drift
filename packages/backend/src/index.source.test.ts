@@ -472,6 +472,62 @@ describe("index.ts kills before it finalizes a timed-out turn (SC-4 / Pitfall 10
   });
 });
 
+// ── CR-01: the single-pid rung must not run ahead of the tree killer on win32 ──
+//
+// THE DEFECT THIS PREVENTS, AND WHY NO EXECUTED TEST CAN SEE IT. `proc.kill(...)`
+// on win32 is an unconditional `TerminateProcess` whatever signal name it is
+// given — the fact `kill-plan.ts` already relies on when it refuses to build a
+// graceful win32 rung. Issued BEFORE the tree killer, it removes the target from
+// the process table, and `taskkill /pid <n> /t /f` walks `ParentProcessId` from a
+// pid it can no longer enumerate: the token-bearing grandchild survives the
+// cancel, and the deferred second rung then self-skips because it is guarded on
+// that same pid's liveness. `kill-tree.win32.test.ts` cannot catch it — it calls
+// `buildKillTreePlan` and runs the argv against a LIVE tree, never going through
+// `killTree` — so this ordering has no behavioural vehicle on any platform this
+// project can execute, and a positional source gate is again the only answer.
+//
+// FALSIFIABILITY, stated so the next reader does not have to re-derive it:
+// deleting the platform guard makes assertion 2 red; moving the signal out of the
+// guarded block makes assertion 3 red; adding a second unguarded signal anywhere
+// in `killTree` makes assertion 4 red; deleting the win32 fallback makes the
+// last two red.
+describe("index.ts does not pre-terminate the target on win32 before the tree killer runs (CR-01)", () => {
+  const body = functionBody(code, "killTree");
+  const guard = 'if (host?.platform !== "win32") {';
+
+  it("finds a non-empty killTree body to assert against", () => {
+    // The non-vacuity guard, for the same reason the SC-4 block carries one: an
+    // empty body makes every `indexOf` below -1 and every comparison meaningless.
+    expect(body).not.toBe("");
+    expect(body).toContain("buildKillTreePlan(");
+  });
+
+  it("puts the single-pid rung behind a non-win32 guard", () => {
+    expect(body).toContain(guard);
+    expect(body.indexOf(guard)).toBeLessThan(body.indexOf("proc.kill("));
+  });
+
+  it("carries exactly one direct signal on the handle, the guarded one", () => {
+    // A second one added anywhere in this function — including an "obviously
+    // harmless" win32 re-issue — fails here rather than being absorbed silently.
+    expect(body.match(/proc\.kill\(/g)).toHaveLength(1);
+  });
+
+  it("keeps the win32 signal as the fallback at both spawn-failure arms", () => {
+    // Guarding the preamble off win32 would otherwise leave a Windows host that
+    // cannot spawn `taskkill.exe` at all with no killer whatsoever — worse than
+    // what shipped. Both arms: the async `error` event and the synchronous throw.
+    expect(body.match(/killWin32Leaf\(proc\)/g)).toHaveLength(2);
+  });
+
+  it("scopes that fallback to win32 in its own declaration", () => {
+    const fallback = functionBody(code, "killWin32Leaf");
+
+    expect(fallback).not.toBe("");
+    expect(fallback).toContain('if (host?.platform !== "win32") return;');
+  });
+});
+
 // ── The termination call-site census ──
 //
 // The count is asserted AS WELL AS the per-site content, the same argument the
@@ -493,15 +549,21 @@ describe("index.ts pins every process-termination site to a counted inventory (L
     expect(code.match(/killTree\(/g)).toHaveLength(9);
   });
 
-  it("leaves exactly the three out-of-scope single-pid signals on the child handle", () => {
+  it("leaves exactly the four out-of-scope single-pid signals on the child handle", () => {
     // Two of them are callMcpMethod's own rungs against Drift's self-test child,
     // which is a leaf with no tree. The third is INSIDE killTree: the single-pid
     // rung it issues before spawning the group kill, kept deliberately as defence
     // against assumption A1 (does the shipped Caido LLRT honour the process-group
     // spawn option?), which 08-SPIKE.md still records as OPEN and unmeasured.
     // That rung is load-bearing, not decoration — do not delete it to make this
-    // number smaller.
-    expect(code.match(/proc\.kill\(/g)).toHaveLength(3);
+    // number smaller. The fourth is `killWin32Leaf`, the win32-only last resort
+    // reached from killTree's two spawn-failure arms; it exists because review
+    // CR-01 guarded the third off win32, and without it a Windows host that
+    // cannot spawn `taskkill.exe` at all would lose nothing.
+    //
+    // Was 3 before CR-01. If this number moves again, move the enumeration
+    // above with it — never relax it to a lower bound.
+    expect(code.match(/proc\.kill\(/g)).toHaveLength(4);
 
     // resolveCommand's PATH-search timeout. A `which` invocation is a leaf
     // process with no tree of its own, explicitly excluded from tree termination.
