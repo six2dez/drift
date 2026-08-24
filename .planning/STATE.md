@@ -1,19 +1,19 @@
 ---
 gsd_state_version: 1.0
 milestone: v1.0
-current_phase: 8
+current_phase: 08
 current_phase_name: Process Lifecycle
 status: executing
-stopped_at: Phase 7 planned — 5 plans, verified
-last_updated: "2026-08-24T13:02:26.460Z"
-last_activity: 2026-08-21
-last_activity_desc: Phase 6 complete, transitioned to Phase 2
-state_head: 00832f0fad026b8b2b583b9186e7d9577442e16c
+stopped_at: Completed 08-01-PLAN.md (T-08-02 checkpoint waived — A1/A6 OPEN)
+last_updated: "2026-08-24T15:09:45.483Z"
+last_activity: 2026-08-24
+last_activity_desc: Phase 08 execution started
+state_head: d8ccab834734d4a6841fab887b550b1131e25fcd
 progress:
   total_phases: 13
   completed_phases: 5
   total_plans: 45
-  completed_plans: 35
+  completed_plans: 41
 milestone_name: milestone
 ---
 
@@ -24,14 +24,14 @@ milestone_name: milestone
 See: .planning/PROJECT.md (updated 2026-06-26)
 
 **Core value:** The user's local AI CLI must reliably start, attach to Caido via the MCP server, and run tools against live Caido data — on native Windows as well as macOS/Linux.
-**Current focus:** Phase 06 — Windows Command Resolution
+**Current focus:** Phase 08 — Process Lifecycle
 
 ## Current Position
 
-Phase: 8 (Process Lifecycle) — READY TO EXECUTE
-Plan: Not started
+Phase: 08 (Process Lifecycle) — EXECUTING
+Plan: 2 of 5
 Status: Ready to execute
-Last activity: 2026-08-21 — Phase 6 complete, transitioned to Phase 2
+Last activity: 2026-08-24 — Phase 08 execution started
 
 Progress: [███░░░░░░░] 30% (3 of 10 milestone phases)
 
@@ -68,6 +68,7 @@ Progress: [███░░░░░░░] 30% (3 of 10 milestone phases)
 | Phase 05 P04 | 11 min | 3 tasks | 2 files |
 | Phase 05 P05 | 8 min | 3 tasks | 2 files |
 | Phase 05 P06 | 2h 17min | 4 tasks | 6 files |
+| Phase 08 P01 | 1h 55m | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -182,6 +183,7 @@ Recent decisions affecting current work:
 - [Phase 05]: [05-06]: path.posix is NOT available under Caido LLRT — @caido/quickjs-types path.d.ts declares a flat surface whose only separator affordance is sep. Any platform-independent path decision must be plain string logic, following the platform.ts imports-nothing precedent. Reaching for an API the shipping runtime lacks is the same class of error as trusting a published type that omits a capability (Pitfall 7).
 - [Phase 05]: [05-06]: A cold pnpm store cache is NOT the worst case for the Windows leg. Measured: warm 91s vs cold 87s, so install is ~8s of a ~90s job and the cache is not the dominant term. The first draft of the timeout-minutes rationale asserted the opposite and was corrected in ci.yml rather than left standing. timeout-minutes is 6, ~4x the measured ~90s, with all three run URLs beside the value.
 - [Phase 05]: [05-06]: A human read is recorded WITH ITS PROVENANCE. V-21 has no command that returns it, so its two reads are labelled HUMAN READS and never gate results; and because the approval reached the executor through the orchestrating workflow rather than being observed first-hand, 05-REPORT.md section 7 says so. A relayed human read is still a human read but is a weaker record, and this phase does not round evidence upward.
+- [Phase 08]: Maintainer waived plan 08-01's hardware checkpoint (2026-08-24) without supplying readings; assumptions A1 and A6 remain OPEN — 08-SPIKE.md was written as a not-run record rather than a results record. No A1/A6 value was inferred — a fabricated confirmation would silently invalidate every downstream Phase 8 plan. The phase's POSIX mechanism now rests on source analysis of caido/dependency-llrt@caido a5b021c alone, and plan 08-02's OQ-2 (keep the single-pid signal alongside the group signal) is the only remaining defence.
 
 ### Pending Todos
 
@@ -200,6 +202,7 @@ None yet. Eleven items are parked in the ROADMAP backlog (999.1-999.11): nine fr
 - Gemini-on-Windows MCP reliability has open upstream issues — treat as best-effort, gate Phase 7 on a real-machine check. Codex `${VAR}` expansion in `mcp add` needs CI confirmation.
 - RESOLVED 2026-08-12: the requirement-count discrepancy ("22 v1 requirements" vs 24 enumerated) is reconciled — REQUIREMENTS.md now enumerates and maps 43.
 - RESOLVED 2026-08-13 (quick 260813-dc7): Phase 01 verification gap G1 (SIG-01h) is closed. `readBrowserStorageItem()` was mutation-survivable in the forwarding direction — no test drove a *present* token through it, so a regression killing Caido token pickup would have shipped green. Three append-only cases added to `settings.test.ts` (forwarding, JSON-parse failure, non-string `getItem`). Falsifiability proven, not assumed: with `if (key !== "__never__") return undefined;` at `settings.ts:35` the suite reports **2 failed / 11 passed** (Test C survives by design); mutation reverted and confirmed byte-identical. Suite 131 → **134 tests**, lint still 0/0.
+- A1 OPEN: the shipped Caido LLRT is unverified on any real install — if its fork differs, LIF-02 is not closed and every CI leg stays green because every leg runs Node. A6 OPEN: no provider CLI's MCP child pgid was ever observed. Re-run procedure preserved in 08-SPIKE.md; probe code at commit 68199fa.
 
 ### Quick Tasks Completed
 
@@ -221,9 +224,9 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-21T17:11:07.458Z
-Stopped at: Phase 7 planned — 5 plans, verified
-Resume file: .planning/phases/07-provider-spawn-registration/07-01-PLAN.md
+Last session: 2026-08-24T15:09:45.363Z
+Stopped at: Completed 08-01-PLAN.md (T-08-02 checkpoint waived — A1/A6 OPEN)
+Resume file: None
 
 **Live on the public remote: nothing of ours.** Plan 03-04 tore down all three `scratch/*` branches (`ci-proof-windows-probe`, `ci-proof-windows-probe-negative`, `ci-proof-windows-gate-negative`) locally and remotely. Asserted with a `test -z` discrimination over the captured glob (`scratch-glob-empty=0`) plus the full unfiltered listing, which now shows only `main` at `2d8cf16` and the pre-existing, unrelated `fix/security-hotfixes` at `0cd81f3`. `origin/main` was never pushed by this phase and is still `2d8cf16`; local `main` is 23 commits ahead and deliberately unpushed. **Re-verified 2026-08-13 (plan 03-05):** the remote still lists only `main` `2d8cf16` and the pre-existing `fix/security-hotfixes` `0cd81f3`, and all eight Phase 3 run records (4 probe + 4 `CI` control) still resolve with their recorded conclusions — which is what makes the URLs in `03-FINDINGS.md` valid citations after the branches were deleted. The probe **artifacts** do not survive: they expire 2026-09-12, which is why D-11 required the committed findings document.
 
