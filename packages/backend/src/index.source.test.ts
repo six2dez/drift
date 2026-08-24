@@ -112,3 +112,27 @@ describe("index.ts wires COMSPEC into every buildSpawnPlan call site (CR-01)", (
     expect(helper[0]).toContain("platform: host?.platform");
   });
 });
+
+// WR-01 / WR-02. The registration's `spawnEnvToken` must be the environment the
+// CLI child is given, composed with the production builder — not `spec.env`,
+// which belongs to the MCP server's own node process. The comment that claimed
+// otherwise was the finding; this is the assertion that the code no longer can
+// drift back to it, since index.ts's own comments are stripped before the scan.
+describe("index.ts feeds the registration check the CLI child's environment (WR-01)", () => {
+  const calls = callArgumentTexts(code, "planMcpCliRegistration");
+
+  it("has exactly one registration planner call site", () => {
+    expect(calls).toHaveLength(1);
+  });
+
+  it("composes spawnEnvToken with buildSpawnEnv over the parent environment", () => {
+    const call = calls[0] ?? "";
+    expect(call).toContain("spawnEnvToken: buildSpawnEnv({");
+    expect(call).toContain("parentEnv: readParentEnv()");
+    expect(call).toContain("driftVars: spec.driftVars");
+  });
+
+  it("no longer reads the MCP server's own env block for it", () => {
+    expect(calls[0] ?? "").not.toContain("spec.env.CAIDO_TOKEN");
+  });
+});

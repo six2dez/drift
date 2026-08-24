@@ -3066,10 +3066,41 @@ async function tryRegisterMcpForProviders(spec: McpServerSpec, sdk: BackendSDK):
         nodeExecutable: spec.command,
         mcpScriptPath,
       }),
-      // The loud check's input. `spec.env` is the parent-merged block Drift
-      // hands the CLI child, so this is exactly the value a `${CAIDO_TOKEN}`
-      // reference would expand from at spawn time.
-      spawnEnvToken: spec.env.CAIDO_TOKEN,
+      // The loud check's input, and the environment it names matters more than
+      // the value does.
+      //
+      // This used to pass `spec.env`, described as "the parent-merged block
+      // Drift hands the CLI child". It is not. `spec.env` is built by
+      // buildMcpServerSpec and is the block handed to the MCP SERVER's own node
+      // process (callMcpMethod spawns with it). The CLI child's block is
+      // assembled independently in sendCliMessage, from
+      // `buildSpawnEnv({ parentEnv: readParentEnv(), driftVars:
+      // injectedDriftVars })` - a different object, built at a different time,
+      // and the one gemini's `${CAIDO_TOKEN}` reference actually expands from.
+      // Two environments cannot both be the thing a comment names, and the
+      // comment named the wrong one (WR-02).
+      //
+      // So the value is rebuilt HERE with the same production builder
+      // sendCliMessage uses, over the same parent environment, rather than
+      // borrowed from a block that only looked interchangeable. `spec.driftVars`
+      // is what `runtimeEnv` is derived from, so this is that composition minus
+      // the per-session file keys - which is the correct shape for a
+      // registration that happens once, before any session exists (D-03).
+      //
+      // Stated plainly rather than implied, because the reviewer was right that
+      // a guard which cannot fire is worse than no guard: with a `spec` in hand
+      // this value CANNOT be empty. requireMcpServerSpec returns
+      // NO_CAIDO_TOKEN_MESSAGE before a spec is ever constructed, and
+      // buildSpawnEnv overlays driftVars last. The check is therefore a
+      // STRUCTURAL BACKSTOP against a future caller that builds a spec another
+      // way - the same role classifyMcpRemoveExit's docblock claims for itself -
+      // and NOT a live gate. The reachable fail-closed guard for an absent token
+      // is the one in planMcpCliRegistration that inspects `registrationEnv`,
+      // which is the dict actually written into the CLI's config file (WR-06).
+      spawnEnvToken: buildSpawnEnv({
+        parentEnv: readParentEnv(),
+        driftVars: spec.driftVars,
+      }).CAIDO_TOKEN,
     });
     if (registration.kind === "Skip") {
       skippedMcpCliReasons.set(cli, registration.reason);

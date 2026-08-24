@@ -5,6 +5,8 @@ import {
 } from "shared";
 import { describe, expect, it } from "vitest";
 
+import { buildSpawnEnv } from "./platform";
+
 import {
   CAIDO_TOKEN_REFERENCE,
   MCP_CLI_ENV_FLAG,
@@ -543,6 +545,84 @@ describe("planMcpCliRegistration", () => {
       spawnEnvToken: REGISTRATION_TOKEN,
     });
     expect(result.kind).toBe("Register");
+  });
+});
+
+// WR-01 — the loud check's REACHABILITY, asserted instead of assumed.
+//
+// The cases above prove the predicate by feeding `spawnEnvToken` synthetically.
+// That proves the branch, and nothing at all about whether production can ever
+// reach it. This block composes the value the way index.ts now does — the same
+// production builders, in the same order — and records the answer honestly: with
+// a spec in hand it CANNOT be empty, so the check in planMcpCliRegistration is a
+// structural backstop rather than a live gate.
+//
+// Written down here rather than left implicit because the failure this replaces
+// was a guard that LOOKED load-bearing: the comment at its call site named the
+// wrong environment (WR-02) and the value it read could not vary. If a future
+// refactor makes this composition able to yield an empty string, this test fails
+// and the backstop becomes a gate again — which is the notice a maintainer needs.
+describe("the environment the registration reference expands from (WR-01)", () => {
+  it("always carries the token while a spec exists", () => {
+    const driftVars = buildMcpDriftVars({
+      caidoUrl: "http://127.0.0.1:8080",
+      caidoToken: REGISTRATION_TOKEN,
+      contextFilePath: "/tmp/drift-mcp-x/mcp-context.json",
+      allowedToolNames: FULL_POLICY_TOOL_NAMES,
+      confirmationRequiredToolNames: [],
+      confirmSensitiveActions: false,
+    });
+
+    // index.ts's composition: the parent block, drift's variables overlaid.
+    // requireMcpServerSpec refuses an empty token BEFORE a spec is built, so
+    // driftVars.CAIDO_TOKEN is non-empty by the time any of this runs, and
+    // buildSpawnEnv overlays it last.
+    expect(
+      buildSpawnEnv({ parentEnv: PARENT_ENV, driftVars }).CAIDO_TOKEN,
+    ).toBe(REGISTRATION_TOKEN);
+
+    // The overlay wins even against a parent that carries its own value, which
+    // is what makes the outcome independent of the machine Drift runs on.
+    expect(
+      buildSpawnEnv({
+        parentEnv: { ...PARENT_ENV, CAIDO_TOKEN: "" },
+        driftVars,
+      }).CAIDO_TOKEN,
+    ).toBe(REGISTRATION_TOKEN);
+  });
+
+  it("is NOT the MCP server's own block, which is what the call site used to pass", () => {
+    // The two environments are different compositions built at different times.
+    // `spec.env` belongs to the node process Drift spawns for the MCP server;
+    // the CLI child's block is assembled in sendCliMessage. They agree on
+    // CAIDO_TOKEN today, and that agreement is a coincidence of both overlaying
+    // the same driftVars — not the identity the old comment claimed.
+    const driftVars = buildMcpDriftVars({
+      caidoUrl: "http://127.0.0.1:8080",
+      caidoToken: REGISTRATION_TOKEN,
+      contextFilePath: "/tmp/drift-mcp-x/mcp-context.json",
+      allowedToolNames: FULL_POLICY_TOOL_NAMES,
+      confirmationRequiredToolNames: [],
+      confirmSensitiveActions: false,
+      activityFilePath: "/tmp/drift-mcp-x/mcp-activity-s1.jsonl",
+      approvalsFilePath: "/tmp/drift-mcp-x/mcp-approvals-s1.json",
+    });
+    const spec = buildMcpServerSpec({
+      nodeExecutable: NODE_EXECUTABLE,
+      mcpScriptPath: MCP_SCRIPT_PATH,
+      driftVars,
+      parentEnv: PARENT_ENV,
+    });
+
+    // The CLI child gets NO per-session keys at registration time (D-03): those
+    // files do not exist until sendCliMessage creates them. The MCP server's
+    // block, built from the same driftVars later in a session, does.
+    const registrationTimeChildEnv = buildSpawnEnv({
+      parentEnv: PARENT_ENV,
+      driftVars: spec.driftVars,
+    });
+    expect(registrationTimeChildEnv.CAIDO_TOKEN).toBe(spec.env.CAIDO_TOKEN);
+    expect(registrationTimeChildEnv).not.toBe(spec.env);
   });
 });
 
