@@ -675,7 +675,11 @@ export function planMcpCliRemoval(input: {
 // configuration no longer carries a `drift` entry, and says NOTHING about
 // whether one was deleted or was never there. Distinguishing those would take
 // the CLI's own stdout — the one input this path refuses to accept.
-export type McpRemoveOutcome = "removed-or-absent" | "failed";
+// A THIRD member, added for WR-05. `unusable` is "the removal never ran", and it
+// is a different fact from "the removal ran and failed" in the only way that
+// matters here: the first says nothing about whether a credential remains, and
+// the second says one may.
+export type McpRemoveOutcome = "removed-or-absent" | "failed" | "unusable";
 
 // The structural backstop for the day upstream changes.
 //
@@ -687,13 +691,44 @@ export type McpRemoveOutcome = "removed-or-absent" | "failed";
 // provider card — a warning that fires on every start teaches the user to
 // ignore the one message that matters, which would defeat SC-3's whole point.
 //
-// Its inputs are the exit code and the CLI. No output text, so it inherits the
-// same no-value-parameter property the formatter has, and a future maintainer
-// who wants to match on stderr has to widen the signature to do it.
+// WR-05: the exit code ALONE could not tell those two apart, and the gap was not
+// theoretical. `spawnAndWait` resolves a SYNTHETIC `code: 1` when the spawn threw
+// or emitted `error` - an EINVAL, an ENOENT, a binary deleted between resolve and
+// spawn. Classifying that as `failed` put "a Caido session token may remain" on
+// the provider card and in the console on EVERY start, which is precisely the
+// alarm-fatigue outcome the paragraph above names as the thing to prevent. So the
+// caller now hands over whether the process started at all, and only a removal
+// that genuinely RAN can produce `failed`.
+//
+// `spawnFailed` is REQUIRED rather than optional, deliberately. An optional flag
+// defaulting to false would let a new call site silently reintroduce the defect
+// while every existing assertion stayed green - which is how the missing
+// `comspec` shipped (CR-01).
+//
+// The residual, recorded rather than papered over: a removal that DID run and
+// exited non-zero for a reason that is not a removal failure - a `gemini` old
+// enough to reject `--scope` on `mcp remove`, a CLI with no `mcp remove`
+// subcommand - is still classified `failed`. Separating those needs the CLI's own
+// stderr, and this path refuses to accept output text on purpose (T-07-05): a CLI
+// that echoes its configuration back on an error would put a live token onto the
+// provider card and into the support bundle. A false SECURITY line is the
+// cheaper of the two failures, and it is bounded by the scope entries above being
+// source-verified against each CLI's current implementation.
+//
+// Its inputs are the exit code, the CLI and whether the spawn started. No output
+// text, so it keeps the same no-value-parameter property the formatter has, and a
+// future maintainer who wants to match on stderr has to widen the signature to do
+// it.
+//
+// `cli` is accepted and DELIBERATELY not read, in the same voice planMcpCliRemoval
+// uses for its `platform`: the parameter is here so a per-CLI classification has
+// to be added on purpose, past this comment, rather than slipped in.
 export function classifyMcpRemoveExit(input: {
   cli: McpCliName;
   exitCode: number;
+  spawnFailed: boolean;
 }): McpRemoveOutcome {
+  if (input.spawnFailed) return "unusable";
   return input.exitCode === 0 ? "removed-or-absent" : "failed";
 }
 
@@ -719,6 +754,35 @@ export const MCP_CLI_REMOVE_REMEDIATION: Record<
   gemini: buildMcpCliRemoveRemediation("gemini"),
   codex: buildMcpCliRemoveRemediation("codex"),
 };
+
+// The line for the THIRD outcome (WR-05), and the reason it is a separate
+// function rather than a softer parameter on the one below: the two sentences
+// make opposite claims. `formatMcpRemoveFailure` says a credential MAY REMAIN;
+// this one says only that Drift could not run the removal, which is what the
+// evidence actually supports when no process ever started. A single renderer
+// with a flag would have made it possible to emit the security wording for a
+// spawn that never happened, which is the defect.
+//
+// No "SECURITY" marker and no remediation command. A user cannot act on a
+// removal that failed to start the way they can act on one that ran and failed -
+// the CLI's own binary is what is in question - and putting the paste-able
+// command here would spend the one alarm SC-3 reserves for a real residual.
+//
+// Same three-scalar shape as every other renderer in this module: no parameter
+// through which output text could arrive (T-07-05).
+export function formatMcpRemoveUnusable(input: {
+  cli: McpCliName;
+  scope: McpCliRemovalScope;
+}): string {
+  const where =
+    input.scope === MCP_CLI_UNSCOPED
+      ? `${input.cli} is unscoped`
+      : `scope=${input.scope}`;
+  return (
+    `[drift] ${input.cli} mcp remove (${where}) could not be started, so no ` +
+    `removal ran. This is not a report that anything was left behind.`
+  );
+}
 
 // SC-3's "a failed remove is logged, not dropped", rendered.
 //

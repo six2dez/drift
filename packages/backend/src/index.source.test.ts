@@ -136,3 +136,41 @@ describe("index.ts feeds the registration check the CLI child's environment (WR-
     expect(calls[0] ?? "").not.toContain("spec.env.CAIDO_TOKEN");
   });
 });
+
+// WR-05. `spawnAndWait` resolves a SYNTHETIC `code: 1` when the spawn threw or
+// emitted `error` — an EINVAL or an ENOENT, not a removal outcome. Classifying
+// that as `"failed"` puts the SECURITY line ("a token may remain") on the
+// provider card on every single start, which is the alarm-fatigue outcome
+// `classifyMcpRemoveExit`'s own docblock names as the thing to prevent. The
+// discriminator only helps if every call site threads it.
+describe("index.ts threads the spawn discriminator into every removal classification (WR-05)", () => {
+  const calls = callArgumentTexts(code, "classifyMcpRemoveExit");
+
+  it("has exactly the three removal sites the policy covers", () => {
+    // The pre-clean inside registerMcpWithCli, the session cleanup in
+    // unregisterMcpFromCli, and the unconditional startup sweep.
+    expect(calls).toHaveLength(3);
+  });
+
+  it("passes `spawnFailed` at every one of them", () => {
+    for (const call of calls) {
+      expect(call).toMatch(/spawnFailed: !\w+\.spawned/);
+    }
+  });
+
+  it("drops the unusable outcome at every site instead of formatting a security line", () => {
+    // Only "failed" may reach formatMcpRemoveFailure. Three classification
+    // sites, three early exits, three non-security log lines.
+    expect(code.match(/outcome === "unusable"/g)).toHaveLength(3);
+    expect(callArgumentTexts(code, "formatMcpRemoveUnusable")).toHaveLength(3);
+  });
+
+  it("marks exactly one spawnAndWait resolve path as having started a process", () => {
+    // The close handler is the only place an exit code is a real exit status.
+    // The synchronous-throw catch and the "error" handler both invent `code: 1`,
+    // and reporting either as a started process would put the discriminator
+    // back where it was.
+    expect(code.match(/spawned: true/g)).toHaveLength(1);
+    expect(code.match(/spawned: false/g)).toHaveLength(2);
+  });
+});

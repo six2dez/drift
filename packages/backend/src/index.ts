@@ -117,6 +117,7 @@ import {
   classifyMcpRemoveExit,
   findExpandableEnvKeys,
   formatMcpRemoveFailure,
+  formatMcpRemoveUnusable,
   formatSpawnDebugLine,
   planMcpCliRegistration,
   planMcpCliRemoval,
@@ -2556,11 +2557,19 @@ async function runMcpSelfTest(
 // pre-existing call sites spawn plain executables with plain argv and the
 // non-verbatim default is correct for them; a caller that routes through
 // buildSpawnPlan passes the plan's answer explicitly.
+// `spawned` (WR-05) is the discriminator the exit code cannot carry. This helper
+// resolves a SYNTHETIC `code: 1` for a spawn that threw or emitted `error`, so
+// "the process ran and exited 1" and "there was never a process" arrive at every
+// caller as the same value. That is harmless for the callers that only want a
+// pass/fail, and it was a defect for the MCP removal classifier, which turned a
+// spawn that never started into "a Caido session token may remain" on the
+// provider card at EVERY start. The flag is additive: it is `true` on the close
+// path and `false` on the two failure paths, and no existing caller had to change.
 function spawnAndWait(
   cmd: string,
   args: string[],
   options?: { env?: Record<string, string>; windowsVerbatimArguments?: boolean },
-): Promise<{ code: number; stdout: string; stderr: string }> {
+): Promise<{ code: number; stdout: string; stderr: string; spawned: boolean }> {
   return new Promise((resolve) => {
     // Head retention: every consumer of this stream reads the FIRST line - a
     // `which` path, a `node --version` string, a short `mcp add` acknowledgement.
@@ -2641,6 +2650,10 @@ function spawnAndWait(
         code: 1,
         stdout: renderBoundedBuffer(stdout),
         stderr: renderBoundedBuffer(stderr),
+        // No process exists. The code is this helper's own invention, not an
+        // exit status, and a caller that treats the two alike will draw a
+        // conclusion the OS never supported (WR-05).
+        spawned: false,
       });
       return;
     }
@@ -2653,6 +2666,8 @@ function spawnAndWait(
         code: code ?? 1,
         stdout: renderBoundedBuffer(stdout),
         stderr: renderBoundedBuffer(stderr),
+        // The ONLY path on which the code is a real exit status.
+        spawned: true,
       }),
     );
     proc.on("error", () =>
@@ -2660,6 +2675,8 @@ function spawnAndWait(
         code: 1,
         stdout: renderBoundedBuffer(stdout),
         stderr: renderBoundedBuffer(stderr),
+        // Same synthetic code as the catch arm above, same reason.
+        spawned: false,
       }),
     );
   });
@@ -2925,8 +2942,22 @@ async function registerMcpWithCli(
     const removeResult = await spawnAndWait(removePlan.file, removePlan.args, {
       windowsVerbatimArguments: removePlan.windowsVerbatimArguments,
     });
-    const failed =
-      classifyMcpRemoveExit({ cli, exitCode: removeResult.code }) === "failed";
+    // WR-05. `unusable` is the spawn that never started - an EINVAL, an ENOENT,
+    // a binary deleted between resolve and spawn - and spawnAndWait reports it
+    // with the same synthetic `code: 1` a genuine failure carries. It is logged
+    // and then DROPPED: nothing is recorded, because a removal that did not run
+    // is not evidence either way, and nothing is claimed, because the security
+    // line asserts a credential may remain and no process ever looked.
+    const outcome = classifyMcpRemoveExit({
+      cli,
+      exitCode: removeResult.code,
+      spawnFailed: !removeResult.spawned,
+    });
+    if (outcome === "unusable") {
+      sdk.console.log(formatMcpRemoveUnusable({ cli, scope: removal.scope }));
+      continue;
+    }
+    const failed = outcome === "failed";
     recordMcpCliRemovalOutcome({
       cli,
       scope: removal.scope,
@@ -3152,8 +3183,17 @@ async function unregisterMcpFromCli(cli: "gemini" | "codex", sdk: BackendSDK): P
     const result = await spawnAndWait(removePlan.file, removePlan.args, {
       windowsVerbatimArguments: removePlan.windowsVerbatimArguments,
     });
-    const failed =
-      classifyMcpRemoveExit({ cli, exitCode: result.code }) === "failed";
+    // The same three-way read as the pre-clean, for the same reason (WR-05).
+    const outcome = classifyMcpRemoveExit({
+      cli,
+      exitCode: result.code,
+      spawnFailed: !result.spawned,
+    });
+    if (outcome === "unusable") {
+      sdk.console.log(formatMcpRemoveUnusable({ cli, scope: removal.scope }));
+      continue;
+    }
+    const failed = outcome === "failed";
     recordMcpCliRemovalOutcome({
       cli,
       scope: removal.scope,
@@ -3239,8 +3279,22 @@ async function sweepStaleMcpCliRegistrations(sdk: BackendSDK): Promise<void> {
         const result = await spawnAndWait(removePlan.file, removePlan.args, {
           windowsVerbatimArguments: removePlan.windowsVerbatimArguments,
         });
-        const failed =
-          classifyMcpRemoveExit({ cli, exitCode: result.code }) === "failed";
+        // WR-05, and this is the site where it mattered most: the sweep runs
+        // UNCONDITIONALLY at every MCP start, so a spawn that cannot start -
+        // rather than a removal that failed - used to paint the SECURITY line
+        // on the provider card on every single start. A banner that fires every
+        // time teaches the user to ignore the one that matters, which is the
+        // outcome classifyMcpRemoveExit's own docblock exists to prevent.
+        const outcome = classifyMcpRemoveExit({
+          cli,
+          exitCode: result.code,
+          spawnFailed: !result.spawned,
+        });
+        if (outcome === "unusable") {
+          sdk.console.log(formatMcpRemoveUnusable({ cli, scope: removal.scope }));
+          continue;
+        }
+        const failed = outcome === "failed";
         recordMcpCliRemovalOutcome({
           cli,
           scope: removal.scope,

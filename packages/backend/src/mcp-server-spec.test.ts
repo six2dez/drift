@@ -21,6 +21,7 @@ import {
   classifyMcpRemoveExit,
   findExpandableEnvKeys,
   formatMcpRemoveFailure,
+  formatMcpRemoveUnusable,
   formatSpawnDebugLine,
   planMcpCliRegistration,
   planMcpCliRemoval,
@@ -831,29 +832,92 @@ describe("classifyMcpRemoveExit", () => {
     // credential-may-remain banner on the provider card, which destroys exactly
     // the signal SC-3 exists to create.
     for (const cli of ["gemini", "codex"] as const) {
-      expect(classifyMcpRemoveExit({ cli, exitCode: 0 })).not.toBe("failed");
+      expect(
+        classifyMcpRemoveExit({ cli, exitCode: 0, spawnFailed: false }),
+      ).not.toBe("failed");
     }
   });
 
   it("ALWAYS returns the failed outcome for a non-zero exit", () => {
     // The other direction, and it is not optional: a classifier that suppressed
     // everything would pass the case above while destroying the whole signal.
+    // This is the property WR-05's fix had to preserve — a REAL removal failure
+    // must still reach the security line, whatever else changed around it.
     for (const cli of ["gemini", "codex"] as const) {
       for (const exitCode of [1, 2, 127, -1]) {
-        expect(classifyMcpRemoveExit({ cli, exitCode })).toBe("failed");
+        expect(
+          classifyMcpRemoveExit({ cli, exitCode, spawnFailed: false }),
+        ).toBe("failed");
       }
     }
   });
 
-  it("reads ONLY the exit code and the CLI — no parameter can carry output text", () => {
+  it("returns the unusable outcome when the spawn never started (WR-05)", () => {
+    // spawnAndWait resolves a SYNTHETIC `code: 1` for a spawn that threw or
+    // emitted `error`. Read as an exit status it is indistinguishable from a
+    // real failure, and the sweep that consumes it runs at EVERY MCP start — so
+    // an EINVAL used to mean a permanent "a token may remain" banner. The
+    // discriminator, not the code, is what separates them.
+    for (const cli of ["gemini", "codex"] as const) {
+      for (const exitCode of [0, 1, 2, 127, -1]) {
+        expect(
+          classifyMcpRemoveExit({ cli, exitCode, spawnFailed: true }),
+        ).toBe("unusable");
+      }
+    }
+  });
+
+  it("reads ONLY the exit code, the CLI and the spawn discriminator — no parameter can carry output text", () => {
     // The same structural property the failure formatter has. `stdout` and
     // `stderr` are on every spawn result this classifier is fed, and a CLI
     // echoing its own configuration back on an error is precisely the case
-    // nobody enumerated (T-07-05).
+    // nobody enumerated (T-07-05). The WR-05 widening added a BOOLEAN, which
+    // keeps that property intact.
     expect(classifyMcpRemoveExit).toHaveLength(1);
-    const input = { cli: "gemini", exitCode: 1 } as const;
-    expect(Object.keys(input).sort()).toEqual(["cli", "exitCode"]);
+    const input = { cli: "gemini", exitCode: 1, spawnFailed: false } as const;
+    expect(Object.keys(input).sort()).toEqual([
+      "cli",
+      "exitCode",
+      "spawnFailed",
+    ]);
     expect(classifyMcpRemoveExit(input)).toBe("failed");
+  });
+});
+
+describe("formatMcpRemoveUnusable", () => {
+  it("makes no security claim and offers no remediation command", () => {
+    // The whole point of the third outcome. A removal that never started is not
+    // evidence that anything was left behind, and saying so anyway is what
+    // spends the one alarm SC-3 reserves for a real residual.
+    for (const cli of ["gemini", "codex"] as const) {
+      // Every scope the policy actually removes, read from the policy itself so
+      // a new scope cannot slip past this assertion.
+      for (const { scope } of planMcpCliRemoval({ cli, platform: "linux" })) {
+        const line = formatMcpRemoveUnusable({ cli, scope });
+        expect(line).toContain("[drift]");
+        expect(line).toContain(cli);
+        expect(line).not.toContain("SECURITY");
+        expect(line).not.toContain("may remain");
+        expect(line).not.toContain(MCP_CLI_REMOVE_REMEDIATION[cli][scope]);
+      }
+    }
+  });
+
+  it("names the same scope wording the failure line uses", () => {
+    // One vocabulary across both renderers, so a user reading the log does not
+    // have to learn two ways of naming the same place.
+    expect(formatMcpRemoveUnusable({ cli: "gemini", scope: "project" })).toContain(
+      "scope=project",
+    );
+    expect(
+      formatMcpRemoveUnusable({ cli: "codex", scope: MCP_CLI_UNSCOPED }),
+    ).toContain("codex is unscoped");
+  });
+
+  it("has no parameter through which output text could arrive", () => {
+    expect(formatMcpRemoveUnusable).toHaveLength(1);
+    const input = { cli: "codex", scope: MCP_CLI_UNSCOPED } as const;
+    expect(Object.keys(input).sort()).toEqual(["cli", "scope"]);
   });
 });
 
