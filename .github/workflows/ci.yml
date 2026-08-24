@@ -203,6 +203,54 @@ jobs:
         shell: bash
         run: pnpm exec vitest run
 
+      # WR-08. The step above is the ONLY place spawn-plan.win32.test.ts can run,
+      # and that file is the only evidence for PRV-01/PRV-02's cmd.exe escaping
+      # contract - the maintainer cannot test native Windows, so there is no
+      # second source. It is gated by `describe.skipIf(process.platform !==
+      # "win32")`, which means it goes green by SKIPPING everywhere else. A bare
+      # `vitest run` asserts nothing about which files executed, so a filename
+      # that drifts out of the default include glob, an inverted predicate, or a
+      # move under an excluded path all leave this leg green with ZERO Windows
+      # coverage. That is the most expensive defect class in this project: a
+      # false green on the only platform nobody can check by hand.
+      #
+      # A per-run skip COUNT is not usable as the signal on its own, because the
+      # Linux legs legitimately report these same cases as skipped. The assertion
+      # has to be Windows-side and has to be about execution, which is what
+      # re-running the one file with the JSON reporter buys.
+      #
+      # Re-running the file costs about a second and does not replace the step
+      # above: the full suite still runs, and this step exists only to read a
+      # machine-checkable count out of it.
+      - name: 'Gate: the win32 spawn-plan suite actually ran'
+        shell: bash
+        run: |
+          # Written to the runner temp dir, not the checkout: `pnpm build` runs
+          # after this step and must package exactly what a release does.
+          report="$RUNNER_TEMP/win32-report.json"
+          pnpm exec vitest run packages/backend/src/spawn-plan.win32.test.ts \
+            --reporter=json --outputFile="$report"
+          # Three conditions, and each one fails a different way of going green
+          # with nothing executed: pending>0 is the skipIf still gating; total=0
+          # is the file no longer being collected at all (a glob or path change);
+          # passed<total is a real failure the reporter would otherwise let
+          # through, since this step reads the file rather than the exit status.
+          node -e '
+            const fs = require("fs");
+            const report = JSON.parse(fs.readFileSync(process.argv[1], "utf-8"));
+            const passed = report.numPassedTests ?? 0;
+            const pending = report.numPendingTests ?? 0;
+            const total = report.numTotalTests ?? 0;
+            if (pending > 0 || total === 0 || passed !== total) {
+              console.error(
+                "Gate failed: the win32 spawn-plan suite did not execute cleanly on this host " +
+                  JSON.stringify({ passed, pending, total })
+              );
+              process.exit(1);
+            }
+            console.log("Gate passed: the win32 spawn-plan suite ran " + total + " tests on this host.");
+          ' "$report"
+
       # The one step this whole leg exists for on top of the suite: `pnpm build`
       # is only runnable here because the root build script was reduced to a
       # single cross-platform command in the same plan. pnpm runs script bodies
