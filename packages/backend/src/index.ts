@@ -117,6 +117,7 @@ import {
   classifyMcpRemoveExit,
   findExpandableEnvKeys,
   formatMcpRemoveFailure,
+  formatMcpRemoveFailures,
   formatMcpRemoveUnusable,
   formatMcpSweepBlockedResidual,
   formatSpawnDebugLine,
@@ -3017,16 +3018,12 @@ async function registerMcpWithCli(
     // Deleting the reason unconditionally here would erase the security line
     // written moments earlier in this same function — a silent wipe of the one
     // message SC-3 exists to deliver.
-    if (mcpCliRemovalFailures.has(cli)) {
-      const outstanding = mcpCliRemovalFailures.get(cli);
-      const scope = [...(outstanding?.keys() ?? [])][0];
-      const exitCode = scope === undefined ? undefined : outstanding?.get(scope);
-      if (scope !== undefined && exitCode !== undefined) {
-        skippedMcpCliReasons.set(
-          cli,
-          formatMcpRemoveFailure({ cli, scope, exitCode }),
-        );
-      }
+    const outstanding = formatMcpRemoveFailures({
+      cli,
+      outstanding: mcpCliRemovalFailures.get(cli) ?? new Map(),
+    });
+    if (outstanding !== undefined) {
+      skippedMcpCliReasons.set(cli, outstanding);
     } else {
       skippedMcpCliReasons.delete(cli);
     }
@@ -3034,9 +3031,30 @@ async function registerMcpWithCli(
   }
   // D-08: this sentence renders on the provider card and must disambiguate
   // "never registered" from "registered, but limited" on its own.
+  //
+  // T-07-08. COMPOSED, never overwritten. The success branch above goes to
+  // deliberate length to preserve a removal-failure line, and this branch used
+  // to perform exactly the wipe that comment warns against — an unconditional
+  // `set` three lines later, on the ONE path where both halves went wrong.
+  //
+  // The compound case is the reason: the pre-clean removal failed AND the `mcp
+  // add` failed, so a stale entry holding a live Caido session token is still on
+  // disk and Drift is not attached to overwrite it on the next turn. Reporting
+  // only "could not register" there tells the user the least useful of the two
+  // facts and silently drops the one SC-3 exists to deliver.
+  //
+  // Security line FIRST: on a card that truncates, the credential outranks the
+  // registration status.
+  const outstanding = formatMcpRemoveFailures({
+    cli,
+    outstanding: mcpCliRemovalFailures.get(cli) ?? new Map(),
+  });
+  const registrationFailure = `Drift could not register with this CLI: "mcp add" exited with code ${String(result.code)}.`;
   skippedMcpCliReasons.set(
     cli,
-    `Drift could not register with this CLI: "mcp add" exited with code ${String(result.code)}.`,
+    outstanding === undefined
+      ? registrationFailure
+      : `${outstanding} ${registrationFailure}`,
   );
   return false;
 }

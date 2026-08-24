@@ -866,3 +866,31 @@ export function formatMcpRemoveFailure(input: {
     MCP_CLI_REMOVE_REMEDIATION[input.cli][input.scope]
   );
 }
+
+// T-07-08. Every outstanding scope, not just the first one iteration happened to
+// yield.
+//
+// The single-scope caller this replaces read `[...outstanding.keys()][0]`, so a
+// CLI whose removal failed in BOTH of its scopes named one of them and left the
+// other unmentioned — with a live token behind it. Gemini is the CLI that has
+// two scopes, and a stale `project` entry shadowing a `user` one is exactly the
+// upgrade case the dual-scope sweep exists for, so the truncation landed on the
+// case it was least affordable on.
+//
+// Returns `undefined` rather than an empty string when nothing is outstanding:
+// the caller's two branches are "there is a security line" and "there is not",
+// and an empty string is a value that reads as the first while behaving as the
+// second.
+//
+// Iteration order is the map's insertion order, which `recordMcpRemovalFailure`
+// fills in `MCP_CLI_REMOVAL_SCOPE_VALUES` order — stable, so the rendered text
+// does not reshuffle between two runs that failed identically.
+export function formatMcpRemoveFailures(input: {
+  cli: McpCliName;
+  outstanding: ReadonlyMap<McpCliRemovalScope, number>;
+}): string | undefined {
+  const lines = [...input.outstanding.entries()].map(([scope, exitCode]) =>
+    formatMcpRemoveFailure({ cli: input.cli, scope, exitCode }),
+  );
+  return lines.length === 0 ? undefined : lines.join(" ");
+}

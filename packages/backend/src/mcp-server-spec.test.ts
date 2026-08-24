@@ -21,6 +21,7 @@ import {
   classifyMcpRemoveExit,
   findExpandableEnvKeys,
   formatMcpRemoveFailure,
+  formatMcpRemoveFailures,
   formatMcpRemoveUnusable,
   formatMcpSweepBlockedResidual,
   formatSpawnDebugLine,
@@ -1072,5 +1073,50 @@ describe("formatMcpRemoveFailure", () => {
         );
       }
     }
+  });
+});
+
+describe("formatMcpRemoveFailures", () => {
+  // T-07-08. The caller this replaces read `[...outstanding.keys()][0]`, so a
+  // gemini whose removal failed in BOTH scopes named one and left a live token
+  // behind the other unmentioned.
+  it("names EVERY outstanding scope, not just the first", () => {
+    const line = formatMcpRemoveFailures({
+      cli: "gemini",
+      outstanding: new Map<McpCliRemovalScope, number>([
+        ["user", 1],
+        ["project", 3],
+      ]),
+    });
+
+    expect(line).toBeDefined();
+    // Both scopes, both exit codes, and both remediation commands — the
+    // discriminating assertion is `project`, which the single-scope form
+    // dropped whenever `user` was recorded first.
+    expect(line).toContain("scope=user");
+    expect(line).toContain("scope=project");
+    expect(line).toContain("exited 1");
+    expect(line).toContain("exited 3");
+    expect(line).toContain(MCP_CLI_REMOVE_REMEDIATION.gemini.user);
+    expect(line).toContain(MCP_CLI_REMOVE_REMEDIATION.gemini.project);
+  });
+
+  it("returns undefined — not an empty string — when nothing is outstanding", () => {
+    // The caller branches on "is there a security line". An empty string reads
+    // as one and behaves as none, which is how a wipe gets reintroduced.
+    expect(
+      formatMcpRemoveFailures({ cli: "codex", outstanding: new Map() }),
+    ).toBeUndefined();
+  });
+
+  it("inherits the value-free property from the single-scope formatter", () => {
+    const line = formatMcpRemoveFailures({
+      cli: "gemini",
+      outstanding: new Map<McpCliRemovalScope, number>([["user", 1]]),
+    });
+    expect(line).toBeDefined();
+    // No path separator anywhere: the multi-scope wrapper must not become the
+    // place a path re-enters the message (T-07-05).
+    expect(line).not.toMatch(/[/\\]/);
   });
 });
