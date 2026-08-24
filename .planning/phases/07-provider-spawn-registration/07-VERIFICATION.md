@@ -1,6 +1,6 @@
 ---
 phase: 07-provider-spawn-registration
-verified: 2026-08-24T10:52:00Z
+verified: 2026-08-24T12:50:00Z
 status: human_needed
 score: 4/7 must-haves verified as written
 behavior_unverified: 2
@@ -8,88 +8,124 @@ overrides_applied: 0
 re_verification:
   previous_status: gaps_found
   previous_score: 4/7
-  verified_at_head: 345b4f5
+  verified_at_head: 87291c2
   gaps_closed:
-    - "SC-1 — the Windows CI spawn path, which SC-1 names as its evidence vehicle, covers the tree that ships"
+    - "SC-1 — the Windows CI spawn path, which SC-1 names as its evidence vehicle, covers the tree that ships (closed at 345b4f5)"
+    - "roadmap_gaps — SC-1's reporter confirmation and SC-5's Gemini check had no owner in any phase (closed at 645df99: ROADMAP Phase 10 SC-5 and SC-6)"
+    - "WR-03 — a failed `mcp remove` erased from the provider card when `mcp add` also fails (closed at 0d34f53 + 61df672)"
   gaps_remaining: []
   regressions: []
   note: >-
-    Score is unchanged and SC-1 remains PARTIAL. The closed gap was about evidence
-    STALENESS, not about any criterion flipping. SC-1's evidence-vehicle clause moved
-    from unsatisfied to satisfied; its outcome clause ("a user can run a Claude Code
-    chat end-to-end") is untouched by the new run and remains undemonstrated.
+    Score is unchanged and SC-1 remains PARTIAL. Every gap raised across both passes
+    is now closed. Status stays `human_needed` because two behaviour-dependent truths
+    remain unexercised — blocked on hardware, now formally owned by Phase 10, but
+    unexercised all the same. Ownership transfers responsibility; it does not
+    manufacture evidence.
 gaps: []
 deferred: []
-roadmap_gaps:
-  - item: "SC-1's reporter confirmation — a real Claude Code turn on native Windows"
-    issue: >-
-      07-CONTEXT.md and 07-VALIDATION.md place this in "Phase 9/10", but ROADMAP.md
-      § Phase 9 and § Phase 10 success criteria name neither it nor any equivalent.
-      It is a live residual with no owner in the roadmap — NOT a deferred item.
-    action: "Add explicitly to Phase 9 or Phase 10 success criteria, or accept it as permanently unowned."
-  - item: "SC-5's Gemini real-machine confirmation gate"
-    issue: >-
-      SC-5 gates Gemini's status on a real-machine check by its own text. Same
-      situation: placed in phase-local documents, named by no later phase's success
-      criteria. Verified by reading ROADMAP.md §§ 303-350.
-    action: "Add explicitly to Phase 9 or Phase 10 success criteria."
 behavior_unverified_items:
   - truth: "SC-1 — a user can run a Claude Code chat end-to-end on Windows with the Drift MCP attached"
-    test: "Reporter (@0xMRK0S) runs a chat turn on native Windows against a Drift build from HEAD."
-    expected: "Claude Code launches, the Drift MCP server attaches, and at least one Drift tool returns live Caido data."
+    test: "A human starts a chat on a native Windows desktop; the Drift MCP attaches; a Drift tool returns live Caido data."
+    expected: "Turn completes with MCP attached and live Caido data returned."
     why_human: >-
-      No CLI binary was executed anywhere in this phase and nothing in CI executes
-      `sendCliMessage`. `packages/backend/src/index.ts` declares no `caido:plugin`
-      alias and cannot be imported under vitest, so the wiring between the proven
-      spawn contract and a real turn is asserted by a comment-stripped source scan
-      and the compiler, never by execution. Caido's LLRT honouring
-      `windowsVerbatimArguments` is source-verified in the fork and never run
-      (assumption A2 stays open; every CI leg runs Node, not LLRT). None of this is
-      changed by run 32708029055.
+      UAT 2026-08-24: BLOCKED, blocked_by physical-device — the maintainer has no
+      Windows machine. Now owned by ROADMAP Phase 10 SC-5 (commit 645df99), whose text
+      correctly guards the substitution trap: "what does NOT satisfy it is another
+      green CI run". The underlying limits are unchanged by that ownership — no CLI
+      binary was executed anywhere in this phase, `index.ts` cannot be imported under
+      vitest, and Caido's LLRT is never executed on any CI leg (assumption A2 open).
+    status: blocked
+    owner: "ROADMAP Phase 10 SC-5"
   - truth: "SC-5 — Gemini is usable on Windows (its status is explicitly gated on a real-machine confirmation)"
-    test: "On a real Windows machine, enable Gemini in Drift, start the MCP server, and run a turn that triggers a sensitive tool approval."
-    expected: "`gemini mcp add` writes the drift entry to `~/.gemini/settings.json`, the turn attaches, and the approval prompt reaches the Drift chat (proving env inheritance actually delivered DRIFT_APPROVALS_FILE / DRIFT_ACTIVITY_FILE)."
+    test: "On a real Windows machine, enable Gemini, start the MCP server, and run a turn that triggers a sensitive-tool approval."
+    expected: "`gemini mcp add` writes the drift entry to `~/.gemini/settings.json`, the turn attaches, and the approval prompt reaches the Drift chat."
     why_human: >-
-      SC-5 gates Gemini's status on a real-machine check by its own text. That check
-      has not happened. Gemini's approval channel verdict is source-read out of
-      gemini-cli (`mcp-client.ts`, `environmentSanitization.ts`), and the code itself
-      names an OPEN upstream PR (google-gemini/gemini-cli#28863) moving toward more
-      sanitization. No installed binary was measured.
+      UAT 2026-08-24: BLOCKED, blocked_by physical-device. Now owned by ROADMAP
+      Phase 10 SC-6 (commit 645df99), which correctly allows the outcome to be "still
+      best-effort" provided it is recorded as a measurement rather than an assumption.
+      Gemini's channel verdict remains source-read only, and the code itself names an
+      OPEN upstream PR (google-gemini/gemini-cli#28863) moving toward more sanitization.
+    status: blocked
+    owner: "ROADMAP Phase 10 SC-6"
 human_verification:
-  - test: "Reporter runs a Claude Code chat turn on native Windows with Drift MCP attached (SC-1's 'where possible' clause)."
+  - test: "Reporter or any Windows user runs a Claude Code chat turn on native Windows with Drift MCP attached (SC-1)."
     expected: "Turn completes, MCP attached, a Drift tool returns live Caido data."
     why_human: "No CI vehicle attaches a real CLI; index.ts is unimportable under vitest."
+    status: blocked
+    blocked_by: physical-device
+    owner: "ROADMAP Phase 10 SC-5"
   - test: "Real-machine Gemini confirmation on Windows (SC-5's explicit gate)."
     expected: "Registration lands in ~/.gemini/settings.json and an approval prompt reaches the Drift chat."
     why_human: "SC-5 names this as the gate on Gemini's status. Source citation cannot substitute for it."
+    status: blocked
+    blocked_by: physical-device
+    owner: "ROADMAP Phase 10 SC-6"
+human_verification_completed:
   - test: "Build the plugin, load it in Caido, open Settings → CLI Providers and read the Codex limitation sentence on the rendered card."
-    expected: "Codex shows an amber (not red) dot with the limitation sentence, and it reads as 'registered, but limited' on its own."
-    why_human: >-
-      The 07-05 checkpoint was approved RELAYED — a human signed off on the wording
-      AS TEXT. Nobody is asserting the plugin was built or the rendered card was
-      looked at. The phase's own record (commit c677fe7) says so explicitly. This is
-      the residual that qualifier names.
+    expected: "Codex shows an amber (not red) dot with its resolved path, and a limitation sentence that reads as 'registered, but limited' on its own."
+    result: pass
+    reported: "looks right"
+    verified_strength: >-
+      ACCEPTED. Materially stronger than the relayed text-only approval at c677fe7,
+      which explicitly asserted nobody had built the plugin or looked at the card: a
+      human did build it and did look at the rendered card, which is what this item
+      asked for. Recorded at its own strength and no higher — "looks right" is an
+      UNSTRUCTURED affirmative to a four-point checklist, so it does not evidence which
+      of the four points were independently distinguished. The subtle one is D-08's
+      disambiguation requirement (the sentence must read as "registered, but limited"
+      on its own, distinguishable from "not registered at all"); a global "looks right"
+      is consistent with seeing a plausible amber card without having tested that
+      specific distinction. Sufficient to close the item; not sufficient to claim D-08
+      was independently confirmed clause by clause.
 ---
 
 # Phase 7: Provider Spawn & Registration — Verification Report
 
 **Phase Goal:** Complete the Claude end-to-end critical path (the blocking must-have) and bring up the remaining three CLIs — spawning `.cmd` shims safely, registering external CLIs with token hygiene, and closing the Gemini/Codex approval gap.
 **Verified:** 2026-08-24
-**Verified at:** HEAD = `345b4f5`
-**Status:** human_needed (was `gaps_found` on first pass at `02b403f`)
-**Re-verification:** Yes — after gap closure. One gap raised, one gap closed, no regressions.
+**Verified at:** HEAD = `87291c2`
+**Status:** human_needed (pass 1 at `02b403f`: `gaps_found`; pass 2 at `345b4f5`: `human_needed`)
+**Re-verification:** Yes — third pass, after UAT. All gaps raised across all passes are now closed. Status unchanged.
 
 ## Verdict in one paragraph
 
 The engineering work of this phase is real and is on disk. Four of seven success criteria are met
 as written, verified by reading the shipped code rather than the summaries. One (SC-3) is a
 knowingly-approved deviation from roadmap text the user declined to amend. Two (SC-1, SC-5) are
-partial by their own terms, with the open items named honestly in the phase's own
-07-VALIDATION.md § *Vehicle caveat* — that document is, unusually, more conservative than the
-evidence requires and I found nothing in it overstated. The stale-CI gap raised on the first pass
-is **closed with real evidence** (run `32708029055` @ `345b4f5`, verified independently below).
-**No criterion changed verdict as a result**, and that is the correct outcome: the gap was about
-whether the evidence covered the shipped tree, not about whether any criterion was met.
+partial by their own terms. **Every gap raised across three verification passes is now closed** —
+the stale CI evidence, the two orphaned real-machine confirmations, and WR-03 — each verified
+independently below rather than accepted on report. **No criterion changed verdict as a result**,
+and that is the correct outcome: the gaps were about whether evidence covered the shipped tree and
+whether residuals had owners, not about whether any criterion was met.
+
+## Status ruling — why this is not `passed`
+
+This was raised directly and deserves a direct answer. **Status stays `human_needed`.** Three
+independent reasons, each sufficient on its own:
+
+1. **The score is 4/7.** `passed` requires all truths verified. SC-1 and SC-5 are PARTIAL and SC-3
+   is a DEVIATION carrying no `overrides:` entry (`overrides_applied: 0`). The override mechanism
+   exists precisely so an accepted deviation can count toward a passing score; it was not used, so
+   SC-3 is not verified-as-written. `passed` is structurally unavailable before the human items are
+   even considered.
+
+2. **Blocked is not verified.** A behaviour-dependent truth that no test exercises is never FAILED
+   and never VERIFIED. Hardware unavailability changes *why* the behaviour is unexercised; it does
+   not change *that* it is unexercised. SC-1's outcome clause — "a user can run a Claude Code chat
+   end-to-end" — has been demonstrated by nobody, on no machine, at any point in this milestone.
+
+3. **The human verification section is non-empty.** Two items remain unperformed.
+
+**On the argument for `passed`:** that the two items are blocked on hardware rather than neglected,
+and now have named owners, is a good argument that this is **not a defect** — and I have honoured it
+by closing the roadmap gap, reframing both items as owned-and-blocked, and removing every trace of
+"orphaned" from this report. It is not an argument that the behaviour was verified. Ownership
+transfers responsibility for closing a residual; it does not close it.
+
+**What the status licenses is the whole point.** `passed` would license `phase.complete` on a phase
+whose blocking must-have has never been observed working by any human on any machine. The refusal is
+the gate doing its job. **"Executed, not complete" is the accurate report**, and Phase 10 SC-5/SC-6
+are now the named place where it becomes complete.
 
 ## Goal Achievement — Per-Criterion Verdict
 
@@ -362,12 +398,17 @@ the same register arm as darwin and linux for both Gemini and Codex. Copilot was
 config-document based (`env` dict + node path) and needed no change. `grep -c 'not yet supported' README.md`
 is 0. "Usable on a best-effort basis" is satisfied as far as code can satisfy it.
 
-**Gemini's gate is open, and belongs to nobody.** SC-5 gates Gemini's *status* on a real-machine
-confirmation. That confirmation has not happened, and — this is the part that matters for planning
-— **it is not carried by any later phase's success criteria.** 07-CONTEXT.md and 07-VALIDATION.md
-place it in "Phase 9/10", but I read ROADMAP.md § Phase 9 and § Phase 10 in full and neither names
-a real-machine Gemini check. The same is true of SC-1's reporter confirmation. See the roadmap-gap
-section below — these are **not** deferred items and must not be filed as such.
+**Gemini's gate is open — and, since `645df99`, owned.** SC-5 gates Gemini's *status* on a
+real-machine confirmation. That confirmation has not happened: UAT 2026-08-24 records it `blocked`,
+`blocked_by: physical-device`, because the maintainer has no Windows machine.
+
+On pass 1 this was the more serious finding — the check was placed in "Phase 9/10" by phase-local
+documents and named by no phase's success criteria, so the milestone could have completed with it
+silently unclosed. That is now fixed: **ROADMAP Phase 10 SC-6** owns it, and correctly permits the
+answer to be "still best-effort" provided it is recorded as a measurement rather than an assumption.
+
+SC-5 stays PARTIAL because the check is unperformed, not because it is unowned. Those are different
+problems and only the second one has been solved.
 
 ---
 
@@ -408,25 +449,39 @@ No regressions from the `345b4f5` commit (it touches only `spawn-plan.win32.test
 
 ---
 
-## 🔴 ROADMAP GAP — two confirmed residuals own by no phase
+## ✅ CLOSED — the roadmap gap (both confirmations now owned)
 
-This survives into the final record as a **roadmap gap, not a deferred item.** I verified it by
-reading ROADMAP.md §§ 303-350 (Phases 8, 9, 10) in full.
+Raised on pass 1: SC-1's reporter confirmation and SC-5's Gemini real-machine check were placed in
+"Phase 9/10" by phase-local documents but named by **no** phase's success criteria. Closed at
+`645df99`. I read the diff rather than accepting the report:
 
-| Residual | Where phase docs place it | Where ROADMAP actually places it |
-|---|---|---|
-| SC-1's reporter confirmation — a real Claude turn on native Windows | 07-CONTEXT.md, 07-VALIDATION.md: "Phase 9/10" | **Nowhere.** Phase 9 SCs cover CI pinning, `.gitattributes`, the secret gate, `mcp-server.*.test.ts` on Windows, matrix green. Phase 10 SCs cover install docs, PATH messaging, diagnostics, `windowsHide`. Neither names a real CLI turn. |
-| SC-5's Gemini real-machine confirmation gate | 07-CONTEXT.md, 07-VALIDATION.md: "Phase 9/10" | **Nowhere.** Same reading. |
+- **Phase 10 SC-5** now owns the Claude turn, and its wording closes the substitution trap I was
+  most concerned about: *"Not CI: a CI job proves the spawn contract, and `index.ts` cannot be
+  imported under vitest… what does **not** satisfy it is another green CI run."* It also widens the
+  confirmer from the original reporter to any Windows user, which removes a single-person
+  dependency that could have stalled it indefinitely.
+- **Phase 10 SC-6** now owns the Gemini check, and correctly permits the outcome to be "still
+  best-effort" — provided it is recorded as a measurement rather than an assumption.
+- The Phase 10 research flag was updated to note both are human confirmations depending on a third
+  party, and should be scheduled early so a slow reply does not block the phase.
 
-The distinction matters: a deferred item has an owner and will be verified when that phase is
-verified. These have neither. If they stay as they are, the milestone can complete with both
-silently unclosed — and one of them is the gate on the blocking must-have's only real-world
-confirmation.
+That is a better close than the minimum. The residuals are unchanged in substance — they are simply
+no longer capable of disappearing silently at milestone close, which was the actual risk.
 
-**Action:** add both explicitly to Phase 9 or Phase 10 success criteria, or record a deliberate
-decision to accept them as permanently unowned. Do not file them as deferred.
+## ✅ CLOSED — WR-03 (removal-failure line erased on the compound path)
 
----
+Carried as residual #11 on passes 1 and 2 (accepted out of scope by the fixer). Closed at `0d34f53`
++ `61df672`. Verified in the source:
+
+`formatMcpRemoveFailures` (mcp-server-spec.ts:869-907) composes **every** outstanding scope and
+returns `undefined` — not `""` — when there are none, so the caller's two branches stay honest. Both
+call sites (index.ts:3021, 3048) now compose instead of overwrite, security line **first** on the
+compound path, joined on a newline because each line ends in a paste-able remediation command.
+
+Worth noting: this fixes more than the review asked. The review's own suggested patch kept
+`[...outstanding.keys()][0]`, which would have left a Gemini failure in *both* scopes naming one and
+silently dropping the other — with a live token behind it, on exactly the dual-scope upgrade case
+the sweep exists for. The shipped fix takes all scopes. Three new tests (suite 525 → 528).
 
 ## Required Artifacts
 
@@ -462,7 +517,7 @@ decision to accept them as permanently unowned. Do not file them as deferred.
 
 | Behaviour | Command | Result | Status |
 |---|---|---|---|
-| Full suite green at HEAD (local) | `pnpm exec vitest run` | 525 passed / 6 skipped (531) | ✓ PASS |
+| Full suite green at HEAD (local) | `pnpm exec vitest run` | 528 passed / 6 skipped (534) | ✓ PASS |
 | The 6 skips are the win32 suite only | reporter output | `spawn-plan.win32.test.ts (6 tests \| 6 skipped)` | ✓ PASS — gated by design, nothing else skipped |
 | Typecheck | `pnpm -r typecheck` | exit 0 | ✓ PASS (load-bearing: enforces SC-2's required flag) |
 | Lint | `pnpm lint` | exit 0 | ✓ PASS |
@@ -471,7 +526,10 @@ decision to accept them as permanently unowned. Do not file them as deferred.
 | **win32 suite executed on Windows** | CI log | `✓ spawn-plan.win32.test.ts (6 tests) 496ms`, `531 passed (531)` | ✓ **PASS** |
 | **WR-08 gate executed** | CI log | `Gate passed: the win32 spawn-plan suite ran 6 tests on this host.` | ✓ **PASS — first execution** |
 | Scratch branch cleanup | `git ls-remote --heads origin` | only pre-existing `scratch/ci-06-07-phase-close` remains | ✓ PASS |
-| A real Claude turn on Windows | — | no vehicle exists | ? SKIP → human |
+| Rendered Codex card read by a human | UAT item 3 | maintainer built the plugin and reported "looks right" | ✓ PASS (unstructured — see below) |
+| A real Claude turn on Windows | — | no vehicle exists; UAT `blocked_by: physical-device` | ? BLOCKED → Phase 10 SC-5 |
+| Real-machine Gemini check | — | no vehicle exists; UAT `blocked_by: physical-device` | ? BLOCKED → Phase 10 SC-6 |
+| ⚠️ CI covers HEAD `87291c2` | `gh run list` | newest run is `32708029055` @ `345b4f5` — **2 code commits behind** | ⚠️ WARNING — see below |
 
 ## Anti-Patterns Found
 
@@ -479,7 +537,7 @@ decision to accept them as permanently unowned. Do not file them as deferred.
 |---|---|---|---|---|
 | — | — | `TBD` / `FIXME` / `XXX` across all phase-modified files | — | **none found** |
 | `packages/backend/src/index.ts` | 2707 | `MISSING_COMMAND_PLACEHOLDER` | ℹ️ Info | Named sentinel constant in a comment, not a stub |
-| `packages/backend/src/mcp-server-spec.spawn.test.ts` | 358-373 | Test comment claims more than the assertions prove | ⚠️ Warning | WR-07, unfixed — see SC-4 |
+| `packages/backend/src/mcp-server-spec.spawn.test.ts` | 358-373 | Test comment claims more than the assertions prove | ⚠️ Warning | WR-07, **still unfixed** — see SC-4. The only review finding left open |
 | `packages/backend/src/spawn-plan.ts` | 289 | `comspec ?? ""` → falls back to bare `cmd.exe` when COMSPEC is absent or relative | ℹ️ Info | The CR-01 search-order exposure is narrowed, not eliminated. Deliberate (upstream cross-spawn does the same and `buildSpawnPlan` owns the last-resort name), but worth knowing it is a narrowing. The new leg proves a real Windows host does supply an absolute value |
 
 ## Requirements Coverage
@@ -524,41 +582,73 @@ No orphaned requirements: REQUIREMENTS.md maps exactly PRV-01…05 + UX-01 to Ph
    so this costs nothing today; it will cost a `git bisect` across `f45e033..aa84094` if one is ever
    needed in that range.
 
+## ⚠️ Note — CI staleness recurred, at much lower severity
+
+Recorded because it is the same pattern I raised on pass 1, and it would be inconsistent to flag it
+once and stay quiet the second time. It is **not** a re-raised blocker, and the severity reasoning
+matters more than the fact:
+
+The newest CI run is `32708029055` @ `345b4f5`. HEAD is `87291c2`, two code-bearing commits later
+(`0d34f53`, `61df672`), touching `index.ts` and `mcp-server-spec.ts`.
+
+**Why this is a note and not a gap.** The pass-1 gap was severe because CR-01 changed the `file`
+argument handed to `spawn` on Windows — a platform-shaped change to the exact surface the Windows
+leg exists to measure, in a phase where nobody can test Windows by hand. These two commits are pure
+string composition (`formatMcpRemoveFailures`) plus two call sites. No spawn path, no escaping, no
+path handling, nothing platform-conditional. Their entire behaviour is exercised by the three new
+tests on every Linux leg, and the local gates are green at HEAD (528 passed / 6 skipped, typecheck 0,
+lint 0). The Windows-specific risk is close to nil.
+
+Worth one run before the phase is reported out, since the runner is free and the habit is the thing
+that caught CR-01. Not worth blocking on.
+
 ## Summary
 
-**No gaps remain.** The one gap raised on the first pass is closed with evidence I verified
-independently — the run is at HEAD, all five legs green with zero failed steps, the win32 suite
-executed six cases on a real Windows host, and the WR-08 gate printed its pass line for the first
-time. The added CR-01 leg is correctly constructed and aimed at the argument that was actually
-vulnerable.
+**No gaps remain.** All three gaps raised across three passes are closed, each verified in the
+source or the CI logs rather than accepted on report:
 
-**The phase goal is substantially achieved.** The `.cmd` spawning contract is real, measured on
-real Windows at the shipped commit, and now includes the interpreter path that the Critical fix
-changed. The Gemini/Codex approval gap is closed per-CLI with the Codex floor properly failed-closed
-and stated in three places. The POSIX wrapper is genuinely deleted against every literal gate.
+| Gap | Raised | Closed at | Verified how |
+|---|---|---|---|
+| Stale Windows CI evidence | pass 1 | `345b4f5` | Run `32708029055` read directly: sha = HEAD, 5/5 legs green, 0 failed steps, `Gate passed: … ran 6 tests on this host.` |
+| Two real-machine confirmations owned by no phase | pass 1 | `645df99` | ROADMAP diff read: Phase 10 SC-5 + SC-6, with the "another green CI run does not satisfy it" guard |
+| WR-03 removal-failure line erased | pass 1 (as residual) | `0d34f53`, `61df672` | `formatMcpRemoveFailures` + both call sites read in source; fixes more than the review asked |
+
+**The phase goal is substantially achieved.** The `.cmd` spawning contract is real, measured on real
+Windows at the commit that carried it, and includes the interpreter path the Critical fix changed.
+The Gemini/Codex approval gap is closed per-CLI with the Codex floor properly failed-closed and
+stated in three places, and one of those three has now been read on a rendered card by a human. The
+POSIX wrapper is genuinely deleted against every literal gate.
 
 **What is still not achieved is the phase goal's first clause — "complete the Claude end-to-end
-critical path".** That path is complete in code and unexercised end-to-end by anything. Report
-PRV-01 at that strength and no higher, exactly as 07-VALIDATION.md § *Vehicle caveat* instructs.
+critical path".** That path is complete in code and has been exercised end-to-end by nobody. It is
+now owned by Phase 10 SC-5, which is the right outcome and is not the same as being done. Report
+PRV-01 at that strength and no higher.
 
-**Residual list (explicit, updated):**
+**Residual list (final, updated after UAT):**
 
-1. ~~No Windows CI run covers HEAD~~ — **CLOSED** by run `32708029055` @ `345b4f5`.
-2. ~~`spawn-plan.win32.test.ts` never passes `comspec`~~ — **CLOSED** by commit `345b4f5`.
-3. No CLI binary executed anywhere in this phase; no Claude turn on Windows. **(SC-1 residual, reporter-owned, unowned in roadmap)**
-4. `index.ts` unimportable under vitest; all its wiring is source-scan + compiler asserted. This
-   also bounds the CR-01 closure: `getComspec()`'s own composition (`readParentEnv()` +
-   `host?.platform`) is still unexecuted; the *selector* it calls is now measured. **(structural; Phase 9 owns the `caido:plugin` alias)**
+1. ~~No Windows CI run covers HEAD~~ — **CLOSED** at `345b4f5` by run `32708029055`.
+2. ~~`spawn-plan.win32.test.ts` never passes `comspec`~~ — **CLOSED** at `345b4f5`.
+3. No CLI binary executed anywhere in this phase; no Claude turn on Windows. **(UAT: blocked, physical-device — owned by Phase 10 SC-5)**
+4. `index.ts` unimportable under vitest; all its wiring is source-scan + compiler asserted. Also
+   bounds the CR-01 closure: `getComspec()`'s own composition is still unexecuted; the selector it
+   calls is measured. **(structural; Phase 9 owns the `caido:plugin` alias)**
 5. Caido's LLRT never executed — `windowsVerbatimArguments` source-verified only; assumption A2 open. **(structural)**
-6. Gemini's SC-5 real-machine gate open, **and owned by no later phase's success criteria**. **(roadmap gap)**
-7. SC-1's reporter confirmation likewise owned by no later phase's success criteria. **(roadmap gap)**
-8. SC-3 deviation: literal Caido token at rest in `~/.codex/config.toml` and on the `codex mcp add` argv. Approved; roadmap text unamended by choice. **(accepted trade)**
+6. Gemini's real-machine gate open. **(UAT: blocked, physical-device — owned by Phase 10 SC-6)**
+7. ~~Both confirmations owned by no phase~~ — **CLOSED** at `645df99`.
+8. SC-3 deviation: literal Caido token at rest in `~/.codex/config.toml` and on the `codex mcp add`
+   argv. Approved; roadmap text unamended by choice; no `overrides:` entry recorded, which is why it
+   does not count toward the score. **(accepted trade)**
 9. Crash residual unbounded in practice between a hard kill and the next start. **(source-verified idempotence only)**
-10. WR-07 unfixed: D-05's "Drift's half" test asserts on a proxy object and its comment overstates it. **(warning)**
-11. WR-03 unfixed: a failed `mcp remove` is erased from the provider card when `mcp add` also fails. **(warning — accepted out of scope by the fixer)**
-12. 07-05 checkpoint approved as a relayed text read; no rendered card was observed. **(human item)**
+10. **WR-07 unfixed — the only review finding still open.** D-05's "Drift's half" test asserts on
+    `buildMcpServerSpec(...).env` while its comment claims it proves delivery to the CLI child. Even
+    the review's one-line minimum fix (narrow the title) was not applied. **(warning)**
+11. ~~WR-03~~ — **CLOSED** at `0d34f53` + `61df672`.
+12. Codex card confirmed first-hand (UAT item 3), superseding the `c677fe7` text-only relay. Recorded
+    at its own strength: an unstructured "looks right" against a four-point checklist, which closes
+    the item but does not evidence that D-08's disambiguation clause was independently distinguished.
+13. ⚠️ CI is two platform-neutral commits behind HEAD. **(note, not a gap — see above)**
 
 ---
 
-_Verified: 2026-08-24 (initial pass at `02b403f`; re-verified after gap closure at `345b4f5`)_
+_Verified: 2026-08-24 — pass 1 at `02b403f` (gaps_found), pass 2 at `345b4f5` (human_needed), pass 3 at `87291c2` after UAT (human_needed)_
 _Verifier: Claude (gsd-verifier)_
