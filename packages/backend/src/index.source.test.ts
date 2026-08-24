@@ -296,7 +296,35 @@ const killPlanSource = readFileSync(
   "utf-8",
 );
 const lifecycleCode = `${code}\n${stripCommentLines(killPlanSource)}`;
-const LLRT_NEGATIVE_PID_SIGNAL = /process\s*\.\s*kill\s*\(\s*-/g;
+// THE NEEDLE IS ANCHORED ON THE PROPERTY, NOT ON THE RECEIVER, and that widening
+// is review finding WR-02 (`08-REVIEW.md`). The original spelling matched
+// `process . kill ( -` and nothing else, so it could not see the indirection
+// THIS PHASE introduced twenty lines above `killTree`:
+//
+//     const killRef = processRef.process?.kill;
+//     killRef.call(processRef.process, pid, 0);
+//
+// which is now the ESTABLISHED LOCAL IDIOM for reaching the runtime's kill
+// primitive in `index.ts`, sitting immediately beside the code the gate exists to
+// protect. A future edit written in its neighbour's idiom —
+// `killRef.call(processRef.process, -pid, "SIGTERM")` — would have reintroduced
+// the `Underflow` defect while this gate stayed green on all five CI legs: L-4
+// recurring for the third time. Two alternations now:
+//
+//   1. `.kill( -…` — ANY receiver, so a rename of `process` or a new handle
+//      variable cannot slip past it.
+//   2. `kill*.call(…, -…)` / `.apply(…, -…)` — the reflective form, matched on a
+//      `kill`-prefixed callee so the receiver name is irrelevant there too.
+//
+// WHAT IT STILL CANNOT SEE, stated rather than implied, because a gate whose
+// limits are unwritten gets trusted past them. A negative pid bound to a variable
+// first (`const target = -pid; proc.kill(target)`), a computed member access
+// (`proc["kill"](-pid)`), `Reflect.apply`, or a callee not named `kill*` all pass
+// this regex. The census below is the answer to that class: reaching the
+// primitive reflectively at all requires first taking it as a VALUE, and every
+// such reference in `index.ts` is counted.
+const LLRT_NEGATIVE_PID_SIGNAL =
+  /\.\s*kill\s*\(\s*-|kill\w*\s*\.\s*(?:call|apply)\s*\(\s*[^,()]*,\s*-/g;
 
 describe("the LLRT-incompatible group-signalling spelling cannot re-enter as code (Pitfall 1)", () => {
   it("does not appear in index.ts or kill-plan.ts once whole-line comments are stripped", () => {
@@ -308,6 +336,46 @@ describe("the LLRT-incompatible group-signalling spelling cannot re-enter as cod
     // removes the whole mechanism — a gate that passes hardest when there is
     // nothing left to guard.
     expect(lifecycleCode).toContain("buildKillTreePlan(");
+  });
+
+  it("catches both spellings when they are present, so the widening is not decorative", () => {
+    // The falsifying partner, run against synthetic text rather than against the
+    // repository: a needle asserted only to be absent is a needle that can rot
+    // into one matching nothing at all, and nobody would notice. Both arms are
+    // exercised — the bare receiver-agnostic form and the reflective one the
+    // original needle was blind to.
+    expect("someHandle.kill(-pid, 9)".match(LLRT_NEGATIVE_PID_SIGNAL)).not.toBeNull();
+    expect(
+      'killRef.call(processRef.process, -pid, "SIGTERM")'.match(
+        LLRT_NEGATIVE_PID_SIGNAL,
+      ),
+    ).not.toBeNull();
+    // And it must NOT fire on the positive-pid idiom that legitimately ships.
+    expect(
+      "killRef.call(processRef.process, pid, 0)".match(LLRT_NEGATIVE_PID_SIGNAL),
+    ).toBeNull();
+  });
+
+  it("counts every reference that takes the kill primitive as a VALUE", () => {
+    // The generalisation the regex cannot make. Any NEW indirection — a variable
+    // holding a negative pid, a computed member access, `Reflect.apply`, a
+    // differently-named alias — has to reach the primitive somehow, and reaching
+    // it reflectively means first binding it as a value rather than calling it.
+    // `index.ts` contains exactly ONE such reference, `isPidAlive`'s `killRef`.
+    // A second one is a new route to a syscall this project spent a phase
+    // fencing, and it should be read by a human rather than absorbed by a
+    // passing suite. If this number ever legitimately moves, name the new site
+    // here in the same edit.
+    expect(code.match(/\.\s*kill\b(?!\s*\()/g)).toHaveLength(1);
+  });
+
+  it("passes a positive pid at that one reflective site", () => {
+    // The positive companion to the negative gate: the site the widened needle
+    // was written for is asserted to be correct, not merely absent from a
+    // blacklist.
+    expect(functionBody(code, "isPidAlive")).toContain(
+      "killRef.call(processRef.process, pid, 0)",
+    );
   });
 });
 
