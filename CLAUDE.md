@@ -130,6 +130,9 @@ Drift is a Caido plugin that turns the user's own local AI CLIs (Claude Code / G
 | `packages/backend/src/command-resolution.ts` | Candidate path lists for NVM/fnm/volta/asdf | calling `which`, checking file existence |
 | `packages/backend/src/claude-print.ts` | Claude `--print` stream state machine | buffering stdin chunks from child process |
 | `packages/backend/src/persistence.ts` | Duck-typed DB handle validator | SQL execution |
+| `packages/backend/src/kill-plan.ts` | The platform-branched termination argv, the refusal cases and the `detached` decision | Spawning the killer, ordering kill-before-sweep, and reading `activeProcesses` |
+
+**Known incomplete.** This table also omits `platform.ts`, `spawn-plan.ts`, `mcp-server-spec.ts` and `fs-retry.ts`, which `.planning/phases/08-process-lifecycle/08-RESEARCH.md` § *The module split* lists as pure helpers already shipping. A full refresh belongs to `/gsd-docs-update`, not to Phase 8 — expanding this generated block beyond a phase's own scope is how these files drift from their sources.
 ## Import Organization
 ## Error Handling
 ## Shell Security
