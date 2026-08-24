@@ -101,6 +101,7 @@ import {
   isAbsolutePath,
   isNvmWindowsInstalled,
   normalizePlatform,
+  selectComspec,
   type Platform,
 } from "./platform";
 // The Phase 5 keystone (plan 05-01). Pure, zero-I/O, and the ONLY source of the
@@ -566,6 +567,26 @@ function readParentEnv(): Record<string, string | undefined> {
   } catch {
     return {};
   }
+}
+
+// The absolute Windows interpreter that EVERY buildSpawnPlan call site passes.
+//
+// The split is the one getNodeExecutable already uses for `roots` and
+// `nvmWindowsInstalled`: the environment is read HERE, at the I/O boundary, and
+// the choice is made by a pure function in platform.ts that can be asserted from
+// literal inputs. spawn-plan.ts's header states the environment read is the
+// caller's job; this is the caller doing it.
+//
+// Not optional, and not a tidy-up. Without it `buildSpawnPlan` falls back to the
+// bare name "cmd.exe", which Windows resolves through a search order that
+// includes the working directory Caido's plugin host chose - on the one branch
+// that carries a live Caido session token into a spawn (CR-01). Every new
+// buildSpawnPlan call site must pass this; index.source.test.ts counts them.
+//
+// The value is handed to a spawn and never rendered: readParentEnv's contract
+// forbids logging an environment value, and an interpreter path is one.
+function getComspec(): string | undefined {
+  return selectComspec({ env: readParentEnv(), platform: host?.platform });
 }
 
 // RUN-05. The single `os` read of the whole backend, and the only place
@@ -2899,6 +2920,7 @@ async function registerMcpWithCli(
       command: cliBinary,
       args: removal.argv,
       platform: host?.platform,
+      comspec: getComspec(),
     });
     const removeResult = await spawnAndWait(removePlan.file, removePlan.args, {
       windowsVerbatimArguments: removePlan.windowsVerbatimArguments,
@@ -2926,6 +2948,7 @@ async function registerMcpWithCli(
     command: cliBinary,
     args: argv,
     platform: host?.platform,
+    comspec: getComspec(),
   });
   const result = await spawnAndWait(addPlan.file, addPlan.args, {
     windowsVerbatimArguments: addPlan.windowsVerbatimArguments,
@@ -3086,6 +3109,7 @@ async function unregisterMcpFromCli(cli: "gemini" | "codex", sdk: BackendSDK): P
       command: storedPath,
       args: removal.argv,
       platform: host?.platform,
+      comspec: getComspec(),
     });
     // windowsVerbatimArguments is a LITERAL key here, with its value taken from
     // the plan. These spawns pass no environment, so they take spawnAndWait's
@@ -3175,6 +3199,7 @@ async function sweepStaleMcpCliRegistrations(sdk: BackendSDK): Promise<void> {
           command: resolved,
           args: removal.argv,
           platform: host?.platform,
+          comspec: getComspec(),
         });
         // The literal key again, value from the plan — see the identical note
         // at unregisterMcpFromCli. This is the removal that runs on the machine
@@ -3825,6 +3850,7 @@ async function sendCliMessage(
       command: resolved,
       args,
       platform: host?.platform,
+      comspec: getComspec(),
     });
 
     lastSpawnArgs = [spawnPlan.file, ...spawnPlan.args];

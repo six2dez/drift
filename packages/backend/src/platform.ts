@@ -591,6 +591,65 @@ export function isNvmWindowsInstalled(input: {
   return false;
 }
 
+// The Windows command interpreter, chosen from the parent environment.
+//
+// WHY THIS EXISTS AT ALL. `buildSpawnPlan`'s cmd.exe arm falls back to the BARE
+// name "cmd.exe" — upstream cross-spawn's `process.env.comspec || 'cmd.exe'`,
+// with the fallback kept and the environment read left to the caller. A bare
+// application name is resolved by `CreateProcess` through a search order that
+// includes the CURRENT WORKING DIRECTORY, and Caido's plugin host chooses that
+// directory, not Drift. That arm is the one that spawns the provider CLI with
+// `buildSpawnEnv(...)` in its environment and `codex mcp add ... --env
+// CAIDO_TOKEN=<literal>` on its argv, so a `cmd.exe` planted in the working
+// directory would be handed a live Caido session token. This function is what
+// lets every call site pass the ABSOLUTE interpreter instead of relying on that
+// search order.
+//
+// BOTH SPELLINGS, and this is not defensive noise. `process.env` is
+// case-INsensitive on Windows only; cmd.exe itself exports the variable as
+// `ComSpec`; and Caido's backend runtime is LLRT rather than Node, so a
+// `.COMSPEC` property access against whatever object that runtime hands back is
+// not guaranteed to reach a `ComSpec` key. Reading the names explicitly is the
+// same rule getWindowsNamedRoots and isNvmWindowsInstalled already apply, for
+// the same reason, and it keeps the answer assertable from literal inputs on the
+// Linux runner.
+//
+// `env` is an INPUT, never a `process.env` read — the read belongs at index.ts's
+// I/O boundary. The returned path is DATA for a spawn and must never be rendered
+// into a log or diagnostic (T-04-04).
+export function selectComspec(input: {
+  env: Record<string, string | undefined>;
+  platform: Platform | undefined;
+}): string | undefined {
+  // Only win32. `undefined` (pre-probe, or a platform normalizePlatform refused)
+  // and the POSIX platforms never reach buildSpawnPlan's interpreter arm, so an
+  // interpreter chosen for them could only ever be wrong — and a POSIX host that
+  // happens to export COMSPEC (Wine, an msys shell) must not be able to push a
+  // value into a plan that is a byte-identical passthrough there (CMP-01).
+  if (input.platform !== "win32") return undefined;
+
+  for (const name of ["COMSPEC", "ComSpec", "comspec"]) {
+    const value = input.env[name]?.trim();
+    // Empty and whitespace-only count as ABSENT, the same present-but-empty rule
+    // the roots reader applies.
+    if (value === undefined || value === "") continue;
+    // FAIL CLOSED on the first spelling that carries a value: a RELATIVE
+    // %COMSPEC% re-opens the exact search-order hole this function exists to
+    // close, so it is refused here rather than passed on to the spawn. Falling
+    // through to the next spelling instead would let a relative value be
+    // "corrected" by another casing of the same variable, which is a rule nobody
+    // could predict from the outside.
+    return isAbsolutePath({ value, platform: input.platform })
+      ? value
+      : undefined;
+  }
+
+  // No spelling carried a value. `undefined` rather than a literal, because
+  // buildSpawnPlan owns the last-resort bare name and there is exactly one place
+  // that decision should be written.
+  return undefined;
+}
+
 // The environment block for a spawned child: the parent block first, drift's own
 // variables overlaid on top.
 //

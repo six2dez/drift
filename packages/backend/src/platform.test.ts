@@ -13,6 +13,7 @@ import {
   joinPath,
   normalizePlatform,
   rankPathSearchHits,
+  selectComspec,
 } from "./platform";
 
 // Every Windows branch below is exercised with `platform` passed as a literal,
@@ -753,6 +754,94 @@ describe("isNvmWindowsInstalled", () => {
         },
       }),
     ).toBe(false);
+  });
+});
+
+// CR-01 — the interpreter buildSpawnPlan is handed instead of the bare name.
+//
+// The hole this closes is not hypothetical arithmetic: `CreateProcess` resolves
+// an unqualified application name through a search order that includes the
+// CURRENT WORKING DIRECTORY, Caido's plugin host chooses that directory, and the
+// cmd.exe arm is the one that carries `codex mcp add ... --env
+// CAIDO_TOKEN=<literal>` on its argv. Every case below is driven with `platform`
+// as a literal, so the win32 answers are proven on the Linux runner.
+describe("selectComspec", () => {
+  const windowsComspec = "C:\\WINDOWS\\system32\\cmd.exe";
+
+  it("returns the absolute COMSPEC verbatim on win32", () => {
+    expect(selectComspec({ env: { COMSPEC: windowsComspec }, platform: "win32" })).toBe(
+      windowsComspec,
+    );
+  });
+
+  it("accepts cmd.exe's own `ComSpec` spelling", () => {
+    // The spelling cmd.exe actually exports. `process.env` is case-INsensitive
+    // on Windows only, and Caido's backend runtime is LLRT rather than Node, so
+    // a single-cased property access is not guaranteed to reach it.
+    expect(selectComspec({ env: { ComSpec: windowsComspec }, platform: "win32" })).toBe(
+      windowsComspec,
+    );
+  });
+
+  it("accepts the all-lowercase spelling upstream cross-spawn reads", () => {
+    // Upstream's literal is `process.env.comspec`.
+    expect(selectComspec({ env: { comspec: windowsComspec }, platform: "win32" })).toBe(
+      windowsComspec,
+    );
+  });
+
+  it("trims surrounding whitespace off the value it returns", () => {
+    expect(
+      selectComspec({ env: { COMSPEC: `  ${windowsComspec}  ` }, platform: "win32" }),
+    ).toBe(windowsComspec);
+  });
+
+  it("returns undefined for an environment that declares no spelling", () => {
+    expect(
+      selectComspec({
+        env: { PATH: "C:\\WINDOWS\\system32", USERPROFILE: "C:\\Users\\six" },
+        platform: "win32",
+      }),
+    ).toBeUndefined();
+  });
+
+  it("treats an empty or whitespace-only value as ABSENT", () => {
+    expect(selectComspec({ env: { COMSPEC: "" }, platform: "win32" })).toBeUndefined();
+    expect(selectComspec({ env: { COMSPEC: "   " }, platform: "win32" })).toBeUndefined();
+  });
+
+  it("REFUSES a relative COMSPEC rather than passing it to a spawn", () => {
+    // The whole point. A relative interpreter is resolved through the same
+    // search order the absolute path exists to bypass, so accepting one would
+    // close nothing. "C:cmd.exe" is drive-RELATIVE and belongs in this list.
+    for (const relative of ["cmd.exe", ".\\cmd.exe", "system32\\cmd.exe", "C:cmd.exe"]) {
+      expect(
+        selectComspec({ env: { COMSPEC: relative }, platform: "win32" }),
+      ).toBeUndefined();
+    }
+  });
+
+  it("does not let a later spelling rescue a relative earlier one", () => {
+    // Fail closed on the first spelling that carries a value. A rule where a
+    // second casing of the same variable silently corrects the first is one no
+    // caller could predict from the outside.
+    expect(
+      selectComspec({
+        env: { COMSPEC: "cmd.exe", ComSpec: windowsComspec },
+        platform: "win32",
+      }),
+    ).toBeUndefined();
+  });
+
+  it("CMP-01: returns undefined on darwin, linux and an undefined platform", () => {
+    // Those platforms take buildSpawnPlan's passthrough arm, which spawns no
+    // interpreter at all. A COMSPEC exported by Wine or an msys shell must not
+    // reach a plan that will never use one.
+    for (const platform of ["darwin", "linux", undefined] as const) {
+      expect(
+        selectComspec({ env: { COMSPEC: windowsComspec }, platform }),
+      ).toBeUndefined();
+    }
   });
 });
 
