@@ -66,8 +66,8 @@ Requirements for the hardening + native-Windows milestone. Each maps to exactly 
 
 ### Lifecycle (LIF)
 
-- [ ] **LIF-01**: On Windows, cancelling or timing out a turn terminates the whole process tree (`taskkill /pid <pid> /T /F`), leaving no orphaned token-bearing process
-- [ ] **LIF-02**: On POSIX, cancelling or timing out a turn also terminates the CLI's MCP child (which carries `CAIDO_TOKEN`), via process-group signalling rather than a single-pid signal *(added 2026-08-12)*
+- [x] **LIF-01**: On Windows, cancelling or timing out a turn terminates the whole process tree (`taskkill /pid <pid> /T /F`), leaving no orphaned token-bearing process
+- [x] **LIF-02**: On POSIX, cancelling or timing out a turn also terminates the CLI's MCP child (which carries `CAIDO_TOKEN`), via process-group signalling rather than a single-pid signal *(added 2026-08-12)*
 
 ### Validation (CI)
 
@@ -171,8 +171,8 @@ Which phases cover which requirements. Every v1 requirement maps to exactly one 
 | PRV-04 | Phase 7 | Pending |
 | PRV-05 | Phase 7 | Pending |
 | UX-01 | Phase 7 | Pending |
-| LIF-01 | Phase 8 | Pending |
-| LIF-02 | Phase 8 | Pending |
+| LIF-01 | Phase 8 | Complete |
+| LIF-02 | Phase 8 | Complete |
 | CI-01 | Phase 5 | Complete |
 | CI-03 | Phase 5 | Complete |
 | UX-03 | Phase 10 | Pending |
