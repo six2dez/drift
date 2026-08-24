@@ -192,6 +192,18 @@ Both rungs check identity first and liveness second. `isPidAlive` is kept rather
 LLRT it is the only answer left. Every arm is strictly subtractive — the guard can skip a kill on
 evidence, never on ignorance, so it can never *add* a kill and never *disable* the rung.
 
+**A second correction to the same row, from review WR-03: `isPidAlive` was inert under LLRT.** The
+probe returned `true` unless the kill primitive **threw**. Node's `process.kill(pid, 0)` throws ESRCH
+for a missing pid; Caido's LLRT does not — `llrt_utils/src/signals.rs` `kill` converts that case to
+`Ok(false)`, a RETURN VALUE. So the shipped probe reported **every** pid as alive on every real
+install, and the guard citing it as T-08-04's evidence never skipped anything there, while behaving
+correctly on all five CI legs. The body now reads the result as well as catching, calibrates against
+a pid known to be alive (`process.pid` on Node, `process.id` on LLRT — neither runtime has both),
+and resolves every unknown toward "alive" so it stays strictly subtractive. Measured under Node and
+against an LLRT-shaped stub: self `true`, unallocatable pid `false`, reaped child `false`,
+LLRT-stub dead pid `false` (the old body: `true`), unusable probe `true`, no self-pid `true`. The
+`isPidAlive(` = 3 census is now an assertion in `index.source.test.ts` rather than a one-time grep.
+
 **The residual this leaves, stated rather than papered over.** On POSIX a process group outlives its
 leader, so a handle that has exited while group members survive skips a deferred group kill that
 would still have worked. That was already true of the `isPidAlive` guard as shipped — a dead leader

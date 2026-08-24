@@ -369,13 +369,15 @@ describe("the LLRT-incompatible group-signalling spelling cannot re-enter as cod
     expect(code.match(/\.\s*kill\b(?!\s*\()/g)).toHaveLength(1);
   });
 
-  it("passes a positive pid at that one reflective site", () => {
-    // The positive companion to the negative gate: the site the widened needle
-    // was written for is asserted to be correct, not merely absent from a
-    // blacklist.
-    expect(functionBody(code, "isPidAlive")).toContain(
-      "killRef.call(processRef.process, pid, 0)",
-    );
+  it("passes a positive pid at both reflective calls", () => {
+    // The positive companion to the negative gate: the sites the widened needle
+    // was written for are asserted to be correct, not merely absent from a
+    // blacklist. Two of them — the calibration and the target probe.
+    const body = functionBody(code, "isPidAlive");
+
+    expect(body).toContain("killRef.call(processRef.process, selfPid, 0)");
+    expect(body).toContain("killRef.call(processRef.process, pid, 0)");
+    expect(body.match(/killRef\.call\(/g)).toHaveLength(2);
   });
 });
 
@@ -734,6 +736,28 @@ describe("index.ts pins every process-termination site to a counted inventory (L
     // requestGracefulShutdown 2, cancelCliMessage 2, closeCliSession 1,
     // cleanupMcpRuntime 1 — eight calls, plus the declaration itself.
     expect(code.match(/killTree\(/g)).toHaveLength(9);
+  });
+
+  it("keeps the liveness probe at its declaration plus both deferred rungs", () => {
+    // `08-SECURITY.md` cites this count as T-08-04's evidence, but at phase
+    // close it was a one-time grep with no standing control — deleting either
+    // guard left the suite green (review WR-03). It is an assertion now.
+    expect(code.match(/isPidAlive\(/g)).toHaveLength(3);
+  });
+
+  it("reads the probe's RESULT, not only whether it threw (WR-03)", () => {
+    // The runtime difference no CI leg can observe. Caido's LLRT converts the
+    // missing-pid case to a RETURN VALUE (`Ok(false)`) where Node throws ESRCH,
+    // so a try/catch that ignores the result reports every pid as alive there
+    // and the T-08-04 guard is silently inert on every real install. Both
+    // spellings of the self-pid are read for the same class of reason: Node has
+    // `process.pid`, LLRT sets `id` and declares no `pid`.
+    const body = functionBody(code, "isPidAlive");
+
+    expect(body).not.toBe("");
+    expect(body).toContain("=== false");
+    expect(body).toContain("!== false");
+    expect(body).toContain("processRef.process?.pid ?? processRef.process?.id");
   });
 
   it("leaves exactly the four out-of-scope single-pid signals on the child handle", () => {

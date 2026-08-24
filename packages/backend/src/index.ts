@@ -5080,6 +5080,41 @@ async function sendCliMessage(
 // relative to the behaviour that ships today, where the deferred rung fires
 // unconditionally: this function can only ever REMOVE a kill, never add one
 // (CMP-01).
+//
+// ── THE TWO RUNTIME FACTS THIS BODY EXISTS TO SURVIVE (review WR-03) ──
+//
+// The version this replaces reasoned only about "the runtime exposes no kill
+// primitive at all". Both of the failures that actually apply are about a
+// primitive that EXISTS and answers differently, and neither is observable from
+// any CI leg, because every leg runs Node.
+//
+// FACT 1 — LLRT ANSWERS `false` WHERE NODE THROWS. Source-verified:
+// `caido/dependency-llrt` branch `caido`, `modules/llrt_utils/src/signals.rs`
+// (`kill`) maps a signal-0 call at a missing pid to `Ok(false)` — the ESRCH /
+// failed-OpenProcess case is explicitly converted to a RETURN VALUE rather than
+// an exception. Node's `process.kill(pid, 0)` throws ESRCH instead. So a
+// try/catch that ignores the return value reads "alive" for EVERY pid under
+// Caido, and the T-08-04 guard it feeds is silently inert on every real install
+// while behaving correctly in CI. The result is therefore read as well as
+// caught: `false` from the primitive is a NEGATIVE answer, not a success.
+//
+// FACT 2 — THE SELF-PID IS SPELLED DIFFERENTLY ON EACH RUNTIME. Node exposes
+// `process.pid`; LLRT's process module sets `id` (`llrt_process`: `process.set(
+// "id", std::process::id())`) and declares no `pid` at all. Both are read, in
+// that order. This matters because of the calibration below, which is useless if
+// it cannot name a pid that is certainly alive.
+//
+// THE CALIBRATION, and why it resolves toward "alive". Signalling OURSELVES with
+// `0` must succeed on any runtime whose kill primitive accepts this call shape.
+// If that throws, or answers `false`, the PROBE is unusable — it says nothing
+// about the target — so the answer is `true` ("not proven dead") and the
+// deferred rung keeps the unconditional behaviour that shipped in 0.1.0. Without
+// it, a primitive that rejects this shape would return `false` for every pid
+// forever and disable the forceful rung on every install: a CMP-01 POSIX
+// regression no CI leg can observe.
+//
+// Every arm above resolves an UNKNOWN toward "alive". That direction is the
+// safety property, and it is what lets this guard be added at all.
 // The I/O boundary for `hasTrackedProcessExited` (kill-plan.ts): two property
 // reads off the child handle, and nothing else.
 //
@@ -5108,13 +5143,31 @@ function readHandleExitState(proc: ChildProcessWithoutNullStreams): {
 
 function isPidAlive(pid: number): boolean {
   const processRef = globalThis as typeof globalThis & {
-    process?: { kill?: (pid: number, signal: number) => boolean };
+    process?: {
+      pid?: number;
+      id?: number;
+      kill?: (pid: number, signal: number) => boolean;
+    };
   };
+  const killRef = processRef.process?.kill;
+  if (typeof killRef !== "function") return true;
+
+  // `pid` is Node's spelling, `id` is LLRT's. Neither runtime has both.
+  const selfPid = processRef.process?.pid ?? processRef.process?.id;
+  if (typeof selfPid !== "number") return true;
+
   try {
-    const killRef = processRef.process?.kill;
-    if (typeof killRef !== "function") return true;
-    killRef.call(processRef.process, pid, 0);
+    // Calibration. A throw OR a `false` here means the probe cannot answer, not
+    // that anything is dead.
+    if (killRef.call(processRef.process, selfPid, 0) === false) return true;
+  } catch {
     return true;
+  }
+
+  try {
+    // `!== false` rather than a bare `true`: Node returns `true` or throws,
+    // LLRT returns a boolean. Both are handled by reading the value.
+    return killRef.call(processRef.process, pid, 0) !== false;
   } catch {
     return false;
   }
