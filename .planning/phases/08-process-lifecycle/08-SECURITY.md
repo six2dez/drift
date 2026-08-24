@@ -95,7 +95,7 @@ disposition as authored at plan time.
 | **T-08-09** (01) | DoS | the spike's fixture parent + grandchild | low | mitigate | Both fixtures self-exit after 30 s and both captured pids are signalled individually on every path including the inconclusive and error arms. Moot in the shipped tree: the probe was removed at `d8ccab8` | closed |
 | **T-08-10** (01) | Tampering | temporary diagnostics code surviving into the shipped tree | medium | mitigate | Two ASCII marker lines fenced the section; T-08-03's criteria greped **0** occurrences of every temporary symbol (`runLifecycleSpike`, `SPIKE_*`, `spike*`, `SpawnDetached`) and a 4-insertion net diff. `index.ts` is byte-equivalent to pre-spike apart from a 3-line breadcrumb | closed |
 | **T-08-11** (02) | DoS | `detached: true` reaching Drift-owned leaf spawns | medium | mitigate | `detached` is a **required** member of `SpawnWithEnv`, so the compiler forces all three call sites to state an answer; a source assertion pins that exactly one says `true`. A leaf spawn that escaped Drift's group would survive Drift's own exit | closed |
-| **T-08-12** (03) | InfoDisc → EoP | the `startMcpServer` failure path reaching `cleanupMcpRuntime` | **high** | mitigate | The kill loop lives in `cleanupMcpRuntime` itself rather than at the Stop button, so the failure path is covered by the same fix. Named explicitly so a later narrowing to the user-facing path is visibly a regression | closed |
+| **T-08-12** (03) | InfoDisc → EoP | the `startMcpServer` failure path reaching `cleanupMcpRuntime` | **high** | mitigate | The kill loop lives in `cleanupMcpRuntime` itself rather than at the Stop button, so the failure path is covered by the same fix. Named explicitly so a later narrowing to the user-facing path is visibly a regression. **The loop reaches twelve callers, not two** — see § *T-08-12 — the caller enumeration was wrong*; it is kept wide (SC-4 requires it) and now publishes a `stopped` state and drops the watchdog for every session it kills, gated in `index.source.test.ts` | closed — **corrected 2026-08-24** |
 | **T-08-13** (03) | DoS | an awaited kill inside teardown | medium | mitigate | `spawnAndWait` has no timer, so a stuck killer would hold the promise forever and cleanup would never complete. `killTree` returns `void`; `grep -c 'await killTree'` = **0** | closed |
 | **T-08-14** (03) | Repudiation | a silently-deleted `LIF-01` marker — either of the two Phase 7 left | low | mitigate | Both seams resolved, neither deleted. Measured: `LIF-01 SEAM` = **0** (baseline 2), `NOT acted on` = **0** (baseline 2), `LIF-01` = **8** (floor 5), `ParentProcessId` = **1**, `AR-01` = **1** (both baseline 0). A deletion without a resolution fails the floor; a resolution without the mechanism named fails the two literals | closed |
 | **T-08-15** (04) | Repudiation (false-green evidence) | the `windows-latest` leg | **high** | mitigate | The `--reporter=json` gate step with three independent arms (`pending > 0`, `total === 0`, `passed !== total`), an every-platform gate test that the step still exists and points at a real, still-gated file, and the D-P2 distinct anchors. Measured bidirectionally by deleting each step in turn: with Phase 8's step deleted, the three-arm case stayed **GREEN** on Phase 7's step alone — which is the measurement proving the collision was real and the distinct anchors are what close it | closed (control shipped and proven falsifiable; **never fired on a runner** — see § *Evidence gaps*) |
@@ -108,6 +108,39 @@ disposition as authored at plan time.
 
 *Status: open · closed · closed (accepted) — an accepted residual is recorded in the Accepted Risks
 Log below, never silently closed.*
+
+### T-08-12 — the caller enumeration was wrong
+
+**Recorded as a correction rather than silently overwritten.** Applied by the `--fix` pass over
+`08-REVIEW.md` finding **WR-01**.
+
+**What the row claimed.** That the kill loop in `cleanupMcpRuntime` covers two entry points — the
+Stop button and `startMcpServer`'s own failure path — which is what the source comment said too.
+
+**Measured.** `cleanupMcpRuntime` has **twelve** call sites (`index.ts:1847, 1873, 1888, 1894, 1900,
+3545, 3639, 3658, 3671, 3682, 3688, 3715`). Two of the unnamed ones fire during **normal operation**,
+not teardown:
+
+- `updateSettings:1847` — any settings save carrying `caidoApi` while MCP is up, if
+  `refreshActiveMcpRuntime` throws.
+- `refreshActiveMcpRuntime:1873/1888/1894/1900` — four error branches (empty token, spec failure,
+  context-file write failure, auth validation failure), reached from `syncCaidoSessionToken`, which
+  **the frontend keep-alive drives** whenever the effective Caido token changes. A token rotation
+  mid-turn, or one momentarily-empty `CAIDO_AUTHENTICATION` read, force-kills the in-flight provider
+  turn. Before this phase the same sequence tore down the MCP runtime and left the turn running.
+
+**Why the loop was NOT narrowed.** Narrowing to the teardown callers would re-open SC-4 on the other
+ten: every one of those paths continues into the temp-directory removal below the loop, so a path
+that removes the env-source documents carrying `CAIDO_TOKEN` without first killing the child that
+read them is exactly the case SC-4 forbids. Deleting a token-bearing file is not revocation.
+
+**What changed instead.** The loop is kept wide and made honest. Each session it kills now gets a
+`stopped` session-state event and its `sessionWatchdogs` entry removed, mirroring `closeCliSession`.
+The silent failure this closes: `activeProcesses.delete` had already run, so a later
+`cancelCliMessage` for that session found `proc === undefined` and returned `ok` **without**
+publishing any state — the user's Stop button became a no-op for a session still visible in the UI,
+with recovery depending entirely on the child's `close` handler reaching `finalize`. Three
+assertions in `index.source.test.ts` now pin the loop, the published state and the watchdog delete.
 
 ### T-08-04 — the correction
 

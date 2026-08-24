@@ -428,6 +428,43 @@ describe("index.ts kills every tracked tree before it removes the files that car
   });
 });
 
+// ── WR-01: cleanupMcpRuntime's kill loop reports what it killed ──
+//
+// WHY THE LOOP IS WIDE, AND WHY THAT MAKES REPORTING MANDATORY. `cleanupMcpRuntime`
+// has TWELVE call sites, not the two its comment and `08-SECURITY.md` T-08-12
+// originally named, and two of them fire during normal operation: a settings save
+// that carries `caidoApi`, and the token-refresh path the frontend keep-alive
+// drives. Narrowing the loop to the teardown callers is NOT the fix, because every
+// one of those paths continues into the temp-directory removal — killing on some
+// and not others would remove the env-source documents that carried CAIDO_TOKEN
+// while a child that read them is still running, which is SC-4 inverted.
+//
+// So the loop stays wide and has to be honest. Without the two statements asserted
+// here, `activeProcesses.delete` ran with no `stopped` event and no watchdog
+// cleanup — and a later `cancelCliMessage` for that session then found
+// `proc === undefined` and returned `ok` while publishing nothing, so the user's
+// Stop button was a silent no-op for a session still on their screen.
+describe("index.ts publishes and de-registers every session its cleanup loop kills (WR-01)", () => {
+  const body = functionBody(code, "cleanupMcpRuntime");
+
+  it("finds a non-empty body carrying the kill loop", () => {
+    expect(body).not.toBe("");
+    expect(body).toContain("activeProcesses.entries()");
+    expect(body).toContain("killTree(");
+  });
+
+  it("publishes a stopped state for each killed session", () => {
+    expect(body).toContain("publishSessionState(");
+    expect(body).toContain('state: "stopped"');
+  });
+
+  it("drops the watchdog alongside the process it pumps", () => {
+    // A watchdog left behind is polled by the frontend keep-alive against a
+    // session whose child no longer exists.
+    expect(body).toContain("sessionWatchdogs.delete(sessionId)");
+  });
+});
+
 // ── SC-4: the absolute-timeout handler kills before it finalizes ──
 //
 // Pitfall 10. The kill moved UP; `finalize` did NOT move and must not: it is a

@@ -3457,17 +3457,63 @@ async function cleanupMcpRuntime(
   // token-bearing file is not revocation; killing the process that read it is.
   // The removal below must NOT be moved above this loop.
   //
-  // This is load-bearing on more than the Stop button: startMcpServer's own
-  // failure path reaches this function too, so a fix written at the Stop button
-  // instead of here would have left that path exposed (threat T-08-12).
+  // WHO ACTUALLY REACHES THIS LOOP — the full list, because the comment that
+  // stood here named two callers and there are TWELVE (review WR-01, and
+  // T-08-12's enumeration is corrected to match). `startMcpServer`'s own failure
+  // path is the one T-08-12 was written for and it is still covered. But so are
+  // these, and two of them fire during NORMAL OPERATION rather than teardown:
+  //
+  //   * `updateSettings:1847` — any settings save carrying `caidoApi` while MCP
+  //     is up, if `refreshActiveMcpRuntime` throws.
+  //   * `refreshActiveMcpRuntime:1873/1888/1894/1900` — four error branches
+  //     (empty token, spec failure, context-file write failure, auth validation
+  //     failure), reached from `syncCaidoSessionToken`, which the FRONTEND
+  //     KEEP-ALIVE drives whenever the effective Caido token changes. A token
+  //     rotation mid-turn, or one momentarily-empty `CAIDO_AUTHENTICATION` read,
+  //     lands here.
+  //   * `startMcpServer:3545/3639/3658/3671/3682/3688` and `stopMcpServer:3715`
+  //     — the teardown and start-failure paths.
+  //
+  // THE LOOP IS NOT NARROWED TO THE TEARDOWN CALLERS, and the reason is SC-4
+  // rather than convenience: every one of these paths continues into the
+  // temp-directory removal below. Killing on some of them and not others would
+  // mean removing the env-source documents that carried CAIDO_TOKEN while a
+  // child that read them is still running — the precise thing SC-4 forbids, and
+  // deleting a token-bearing file is not revocation. So the loop stays wide and
+  // is made HONEST instead: a session force-stopped here gets the same
+  // `stopped` event and watchdog cleanup a Stop button would have given it.
+  //
+  // Without that, the collateral was silent: `activeProcesses.delete` had
+  // already run, so a later `cancelCliMessage` for the session found
+  // `proc === undefined` and returned `ok` WITHOUT publishing any state — the
+  // user's Stop button becoming a no-op for a session still on their screen.
   //
   // The FORCEFUL rung, deliberately: MCP is being torn down, so there is no turn
   // left for anyone to read partial output from, and on the failure path nothing
   // is in flight at all. Nothing here is awaited — spawnAndWait carries no
-  // timeout, so an awaited kill could hold cleanup open indefinitely (Pitfall 8).
+  // timeout, so an awaited kill could hold cleanup open indefinitely (Pitfall 8),
+  // and `publishSessionState` is synchronous.
   for (const [sessionId, proc] of activeProcesses.entries()) {
     killTree(sdk, proc, "kill");
     activeProcesses.delete(sessionId);
+    // Dropped with the process it pumps. A watchdog left behind is polled by the
+    // frontend keep-alive against a session whose child is gone.
+    sessionWatchdogs.delete(sessionId);
+    const snapshot = getSessionSnapshot(sessionId);
+    if (snapshot !== undefined) {
+      publishSessionState(sdk, {
+        sessionId,
+        chatId: snapshot.chatId,
+        providerId: snapshot.providerId,
+        state: "stopped",
+        reason:
+          "The MCP runtime was torn down, so this provider turn was stopped.",
+        reasonCode: "closed",
+        // FALSE, and it is a statement: the temp directory holding every MCP
+        // runtime file is removed immediately below.
+        mcpAttached: false,
+      });
+    }
   }
 
   if (mcpTempDir !== undefined) {
