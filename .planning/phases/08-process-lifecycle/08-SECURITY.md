@@ -3,11 +3,14 @@ phase: 8
 slug: process-lifecycle
 status: secured
 # threats_open = count of OPEN threats at or above workflow.security_block_on severity (the blocking gate)
-threats_open: 1
+threats_open: 0
+# threats_open moved 1 → 0 on 2026-08-24 when T-08-01 closed. The closer was a maintainer
+# ATTESTATION, not a recorded measurement — see § "T-08-01 — closed by attestation" before
+# treating this zero as equivalent to Phase 7's.
 asvs_level: 1
 block_on: high
 created: 2026-08-24
-audited_at_head: 1f3b486
+audited_at_head: d2d502b
 register_authored_at_plan_time: true
 ---
 
@@ -81,7 +84,7 @@ disposition as authored at plan time.
 
 | Threat ID | Category | Component | Sev | Disposition | Mitigation (verified) | Status |
 |---|---|---|---|---|---|---|
-| **T-08-01** (02/03/05) | InfoDisc → EoP | the orphaned `mcp-server.mjs` child holding `CAIDO_TOKEN` after a cancel | **high** | mitigate | `detached: true` on the provider spawn + the group-kill spawn in `killTree`, wired at all 8 in-scope sites; proven behaviourally by `kill-tree.posix.test.ts`'s control-plus-proof pair (the control asserts the grandchild **surviving** without the mechanism, and was verified falsifiable by hand) | **open** — see note below |
+| **T-08-01** (02/03/05) | InfoDisc → EoP | the orphaned `mcp-server.mjs` child holding `CAIDO_TOKEN` after a cancel | **high** | mitigate | `detached: true` on the provider spawn + the group-kill spawn in `killTree`, wired at all 8 in-scope sites; proven behaviourally by `kill-tree.posix.test.ts`'s control-plus-proof pair (the control asserts the grandchild **surviving** without the mechanism, and was verified falsifiable by hand) | **closed by attestation** — see note below |
 | **T-08-02** (02/04) | Tampering / EoP | the pid rendered into the killer's argv | medium | mitigate | `buildKillTreePlan` owns both the guard (`Number.isInteger` && `> 0`) and the rendering; `index.ts` passes `proc.pid` through untouched and switches on `plan.kind`. 5 bad-pid inputs asserted (`undefined`, `NaN`, `0`, `-1`, `1.5`). Every argv in the win32 suite comes from the production builder — `grep -c '"/pid"'` in that file = **0** | closed |
 | **T-08-03** (02/04) | Spoofing / EoP | resolution of `taskkill.exe` | medium | mitigate | Resolved as `<SystemRoot>\System32\taskkill.exe` by absolute path (both env casings, trailing separators stripped, bare-drive roots), per the shipped `getWhichCommand` precedent; bare name only when neither casing is set. Never `shell: true` | closed (unit); the runner-side measurement (A7) is unrun |
 | **T-08-04** (02/03) | DoS | the deferred rungs in `cancelCliMessage` and `requestGracefulShutdown` | medium | mitigate | Pid captured into a `const` **before** the timer is scheduled, plus an `isPidAlive` re-check inside the callback (`isPidAlive(` = 3: declaration + both rungs). The guard runs **before** its debug-log line, so the log cannot claim a signal that was never sent. On Windows the argv is `/t /f`, so acting on a reassigned pid would take an unrelated process's entire tree | closed |
@@ -106,35 +109,59 @@ disposition as authored at plan time.
 *Status: open · closed · closed (accepted) — an accepted residual is recorded in the Accepted Risks
 Log below, never silently closed.*
 
-### Why `threats_open: 1` — T-08-01
+### T-08-01 — closed by attestation, and exactly what that is worth
 
-T-08-01 is the threat this phase exists to close, and its mitigation is fully implemented and
-proven **under Node**. It is nonetheless recorded **open**, because the POSIX arm's correctness on
-the runtime users actually run rests on two assumptions that were never measured:
+T-08-01 is the threat this phase exists to close. Its mitigation is fully implemented, and it is
+proven behaviourally **under Node** by `kill-tree.posix.test.ts`'s control-plus-proof pair. What Node
+cannot supply is evidence about Caido's LLRT, which no CI leg executes.
+
+**What closed it.** Plan 08-05 **T-08-14**, the phase's designated gating manual verification: the
+maintainer ran a real Claude turn in a real Caido on their own macOS machine, clicked Stop, and
+confirmed on 2026-08-24 that `pgrep -f mcp-server.mjs` returned **zero** afterwards against a
+**non-zero** count during the turn.
+
+**The basis, stated so a later reader can re-evaluate it rather than inherit a bare number.** This is
+a **maintainer attestation, not a recorded measurement.** The maintainer replied `approved` — which
+under the checkpoint's stated contract means exactly the two facts above — but **did not supply the
+numeric counts**, and they were therefore not written down. Three consequences follow, and none of
+them is rhetorical:
+
+1. **The reading is not reproducible or auditable.** There is no before-count, no after-count and no
+   Caido version string attached to this closure. A future regression cannot be diffed against it.
+2. **One specific confounder is unexcluded: the CLI's own cleanup.** A zero after-count proves the
+   orphan is gone; it does **not** prove *this phase's mechanism* is what removed it. Claude Code may
+   terminate its own MCP child on shutdown. The thing that would have excluded this is the pre-fix
+   control — the same procedure against the *old* code, showing a non-zero after-count — and
+   `08-SPIKE.md` § *Control* records that as **not recorded either**, because the Wave-0 checkpoint
+   was waived on 2026-08-24 without readings. So there is **no measured before/after pair on this
+   machine** for the phase's POSIX claim; there is one attested after-state.
+3. **The scope is one machine, one Caido build, one provider CLI, one path.** The **timeout path was
+   not reported** and is recorded as **not exercised** — the cancel-path attestation does not carry
+   to it.
+
+**What this does and does not close.** It closes the *outcome* claim T-08-01 actually states — after
+a cancel, no token-bearing MCP child survives — on the runtime users run. It does **not** close A1 or
+A6 as *mechanism* claims, for the confounder in (2):
 
 - **A1 — OPEN, not measured.** Whether the shipped Caido LLRT honours the process-group spawn option.
-  It rests entirely on source analysis of `caido/dependency-llrt@caido` at the pinned commit
-  `a5b021c`, and on nothing that was ever executed.
+  It rests on source analysis of `caido/dependency-llrt@caido` at the pinned commit `a5b021c`, and on
+  nothing that was ever executed.
 - **A6 — OPEN, not measured.** Whether a real provider CLI keeps its MCP child inside its own group.
   If any CLI calls `setsid()` on that child, the group signal misses it.
 
-The Wave-0 spike existed to close both on the maintainer's own hardware for the cost of one build.
-It was built, type-checked, linted and bundled — then the hardware checkpoint was **waived on
-2026-08-24 without readings**, a recorded maintainer decision (`08-SPIKE.md`).
+Both stay open as broken-windows ledger entry **11** (`unmet-truth`), untouched by this reading. The
+consequence they carry is unchanged: plan 08-03 took the number of sites depending on A1 from **two
+to nine**, so if the shipped LLRT does not honour the option, the group operand names a group that
+was never created — a **nine-site POSIX regression** — and **every CI leg stays green through it**,
+because every leg runs Node and Node honours the option. Phase 5 finding L-4 recurring verbatim.
+OQ-2's single-pid rung, which fires first inside `killTree` at all nine sites (`proc.kill(` = 3 in
+the census, deliberately, with a source comment naming A1 and forbidding its deletion), degrades a
+total regression into a partial one; it does not prevent one.
 
-**The consequence, stated plainly.** Plan 08-03 took the number of sites depending on A1 from **two
-to nine**. If the shipped LLRT does not honour the option, the group operand names a group that was
-never created — a **nine-site POSIX regression** — and **every CI leg stays green through it**,
-because every leg runs Node and Node honours the option. That is Phase 5 finding L-4 recurring
-verbatim: green CI is not evidence about a runtime CI never exercises.
-
-**The only mitigation is OQ-2's single-pid rung**, which fires first inside `killTree` at all nine
-sites, with a source comment naming A1 as the reason and instructing future readers not to delete
-it (`proc.kill(` = 3 in the census, deliberately). It **degrades a total regression into the partial
-one shipping today; it does not prevent one.**
-
-T-08-01 closes when the real-hardware confirmation is taken — plan 08-05 **T-08-14**, whose result is
-recorded in `08-05-SUMMARY.md`. Broken-windows ledger entry **11** (`unmet-truth`).
+**What would re-open or strengthen this.** Re-open: any report of a surviving `mcp-server.mjs` after
+a cancel. Strengthen to a measurement: run `08-SPIKE.md`'s four-step procedure — the probe is
+recoverable at commit `68199fa` — which yields the A1 verdict, the A6 pgid/pid pair and a recorded
+before/after pair in one sitting, and would settle the confounder outright.
 
 ---
 
@@ -186,6 +213,7 @@ restated — a restatement is where a caveat gets softened. Its five items, **by
 | Audit Date | Threats Total | Closed | Open | Run By |
 |------------|---------------|--------|------|--------|
 | 2026-08-24 (register roll-up at `1f3b486`) | 21 | 20 | 1 (T-08-01, high — pending the T-08-14 real-hardware confirmation) | plan 08-05 T-08-13 |
+| 2026-08-24 (T-08-14 close at `d2d502b`) | 21 | **21** | **0** — T-08-01 closed by maintainer **attestation** (counts not captured; confounder unexcluded — see § *T-08-01 — closed by attestation*) | plan 08-05 T-08-14 |
 
 **Note on this phase's dominant defect class**, recorded because it recurred across three plans: a
 **control that is green for the wrong reason**. The LLRT trap itself (green on every CI vehicle,
@@ -207,5 +235,12 @@ if the mechanism were absent* — never by the gate itself.
       and the pointer now resolves
 - [x] OQ-3 recorded as a deferred residual (AR-02) in the security artifact, where the maintainer's
       decision placed it
-- [ ] `threats_open: 0` — **not reached.** T-08-01 stays open until the T-08-14 real-hardware
-      confirmation is taken; see § *Why `threats_open: 1`*
+- [x] `threats_open` reaches **0** — T-08-01 closed 2026-08-24 by the T-08-14 real-hardware
+      confirmation. **Qualified:** the closer is a maintainer *attestation*, not a recorded
+      measurement — no counts captured, no pre-fix control on the same machine, timeout path not
+      exercised. Read § *T-08-01 — closed by attestation* before treating this zero as equivalent to
+      Phase 7's
+- [ ] A1 and A6 closed as mechanism claims — **not reached, and not touched by the T-08-14 reading.**
+      Ledger entry **11** stays open; `08-SPIKE.md` holds the runnable procedure
+- [ ] The `windows-latest` leg has executed — **not reached.** Ledger entry **12** stays open; two
+      rows in `08-VALIDATION.md` are ⚠️ on it
