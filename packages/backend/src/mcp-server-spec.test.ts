@@ -1099,6 +1099,13 @@ describe("formatMcpRemoveFailures", () => {
     expect(line).toContain("exited 3");
     expect(line).toContain(MCP_CLI_REMOVE_REMEDIATION.gemini.user);
     expect(line).toContain(MCP_CLI_REMOVE_REMEDIATION.gemini.project);
+    // The separator is part of the contract, not cosmetics: each line ENDS with
+    // a paste-able remediation command, so joining on a bare space would run
+    // that command straight into the next line's `[drift] SECURITY:` and leave
+    // the user finding the boundary by eye. `toContain` above passes under any
+    // separator, so without this the fix would be unguarded.
+    expect(line).toContain(`${MCP_CLI_REMOVE_REMEDIATION.gemini.user}\n`);
+    expect(line?.split("\n")).toHaveLength(2);
   });
 
   it("returns undefined — not an empty string — when nothing is outstanding", () => {

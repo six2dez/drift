@@ -882,9 +882,18 @@ export function formatMcpRemoveFailure(input: {
 // and an empty string is a value that reads as the first while behaving as the
 // second.
 //
-// Iteration order is the map's insertion order, which `recordMcpRemovalFailure`
-// fills in `MCP_CLI_REMOVAL_SCOPE_VALUES` order — stable, so the rendered text
+// Iteration order is the map's insertion order, which
+// `recordMcpCliRemovalOutcome` fills in the order `planMcpCliRemoval` yields —
+// `MCP_CLI_REMOVAL_SCOPE_NAMES[cli]` — so it is stable and the rendered text
 // does not reshuffle between two runs that failed identically.
+//
+// Joined on a SENTENCE BOUNDARY, not a bare space. Each line ends with a
+// paste-able remediation command, and running that command straight into the
+// next line's `[drift] SECURITY:` leaves the user selecting where one command
+// stops by eye. The whole point of carrying the command is that it can be
+// copied without thought.
+const REMOVE_FAILURE_SEPARATOR = "\n";
+
 export function formatMcpRemoveFailures(input: {
   cli: McpCliName;
   outstanding: ReadonlyMap<McpCliRemovalScope, number>;
@@ -892,5 +901,7 @@ export function formatMcpRemoveFailures(input: {
   const lines = [...input.outstanding.entries()].map(([scope, exitCode]) =>
     formatMcpRemoveFailure({ cli: input.cli, scope, exitCode }),
   );
-  return lines.length === 0 ? undefined : lines.join(" ");
+  return lines.length === 0
+    ? undefined
+    : lines.join(REMOVE_FAILURE_SEPARATOR);
 }

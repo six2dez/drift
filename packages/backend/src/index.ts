@@ -3054,7 +3054,10 @@ async function registerMcpWithCli(
     cli,
     outstanding === undefined
       ? registrationFailure
-      : `${outstanding} ${registrationFailure}`,
+      : // Newline, not a space: `outstanding` ends with a paste-able
+        // remediation command, and butting the next sentence against it leaves
+        // the user working out by eye where the command stops.
+        `${outstanding}\n${registrationFailure}`,
   );
   return false;
 }
