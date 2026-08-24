@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 2
+open_count: 3
 waived_count: 0
 fixed_count: 9
-total_count: 11
-last_updated: 2026-08-24T15:24:21.284Z
+total_count: 12
+last_updated: 2026-08-24T15:54:03.743Z
 ---
 
 # Broken Windows Ledger
@@ -26,6 +26,7 @@ last_updated: 2026-08-24T15:24:21.284Z
 | 9 | 06 | deviation | packages/backend/src/index.ts |  | CR-01/WR-01 (06-REVIEW): the provider spawn in sendCliMessage and the PATH-search spawn in resolveCommand were unguarded Promise-executor spawns, so a synchronous throw rejected the RPC instead of resolving. CLOSED in Phase 6 per 06-VERIFICATION human item 5: both now carry the same try/catch shape spawnAndWait already had. Provider site publishes spawn_error and cleans up runtimeFiles + the token-bearing mcp-<chatId>.json inline (finalize is in its TDZ at that point); PATH-search site resolves undefined, identical to its untouched error handler. Graceful degradation only - .cmd launchability stays PRV-02/Phase 7. | fixed |  | 2026-08-21T13:16:47.639Z | 2026-08-21T13:17:01.634Z |
 | 10 | 06 | deviation | packages/backend/src/command-resolution.ts |  | CR-02 (06-REVIEW): two catalogue rows were non-administrator-writable on default Windows ACLs, and a binary resolved from either is spawned with CAIDO_TOKEN in its environment. CLOSED in Phase 6 per 06-VERIFICATION human item 4, option (a): %ProgramData%\\scoop\\shims dropped entirely; C:\\nvm4w\\nodejs now gated on nvm-windows' own NVM_HOME/NVM_SYMLINK contract via the new pure isNvmWindowsInstalled (platform.ts), threaded in as the injected nvmWindowsInstalled input so the three builders stay I/O-free and never read process.env. Both removals recorded as in-code non-claims naming the token exposure. | fixed |  | 2026-08-21T13:16:56.847Z | 2026-08-21T13:17:01.729Z |
 | 11 | 08 | unmet-truth | packages/backend/src/kill-plan.ts |  | LIF-02's POSIX mechanism rests on assumptions A1 and A6, both recorded OPEN - not measured in 08-SPIKE.md after the Wave-0 hardware checkpoint was waived. kill-tree.posix.test.ts proves the group-kill argv under NODE; no CI leg executes Caido's LLRT and none spawns a real provider CLI. Closes only on a real-hardware run of 08-SPIKE.md's four-step procedure (probe recoverable at 68199fa). | open |  | 2026-08-24T15:24:21.284Z |  |
+| 12 | 08 | unrun-verify | packages/backend/src/kill-tree.win32.test.ts |  | The three win32 kill-tree cases have never executed: they are skipIf-gated and no windows-latest run exists for them yet. The reserved dead-pid exit-code block is empty and the run URL is unfilled. | open |  | 2026-08-24T15:54:03.743Z |  |
 
 ````json
 [
@@ -159,6 +160,18 @@ last_updated: 2026-08-24T15:24:21.284Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-08-24T15:24:21.284Z",
+    "resolved_at": null
+  },
+  {
+    "id": 12,
+    "kind": "unrun-verify",
+    "phase": "08",
+    "file": "packages/backend/src/kill-tree.win32.test.ts",
+    "line": null,
+    "description": "The three win32 kill-tree cases have never executed: they are skipIf-gated and no windows-latest run exists for them yet. The reserved dead-pid exit-code block is empty and the run URL is unfilled.",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-08-24T15:54:03.743Z",
     "resolved_at": null
   }
 ]

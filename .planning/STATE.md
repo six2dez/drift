@@ -4,16 +4,16 @@ milestone: v1.0
 current_phase: 08
 current_phase_name: Process Lifecycle
 status: executing
-stopped_at: Completed 08-03-PLAN.md
-last_updated: "2026-08-24T15:41:59.589Z"
+stopped_at: Completed 08-04-PLAN.md
+last_updated: "2026-08-24T15:56:09.893Z"
 last_activity: 2026-08-24
 last_activity_desc: Phase 08 execution started
-state_head: 6e14e9f7138b5a145021a898e2d4f508037e0f18
+state_head: 0df5e8df67f34b8b71e13e9a1bdcc7f469f0e80b
 progress:
   total_phases: 13
   completed_phases: 5
   total_plans: 45
-  completed_plans: 43
+  completed_plans: 44
 milestone_name: milestone
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-06-26)
 ## Current Position
 
 Phase: 08 (Process Lifecycle) — EXECUTING
-Plan: 4 of 5
+Plan: 5 of 5
 Status: Ready to execute
 Last activity: 2026-08-24 — Phase 08 execution started
 
@@ -71,6 +71,7 @@ Progress: [███░░░░░░░] 30% (3 of 10 milestone phases)
 | Phase 08 P01 | 1h 55m | 2 tasks | 3 files |
 | Phase 08 P02 | 15 min | 3 tasks | 5 files |
 | Phase 08 P03 | 12 min | 3 tasks | 2 files |
+| Phase 08 P04 | 20 min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -194,6 +195,8 @@ Recent decisions affecting current work:
 - [Phase 08]: The functionBody scanner balances the PARAMETER LIST before looking for the body brace - without it closeCliSession returns a 19-character type-literal body under which every ordering assertion passes vacuously
 - [Phase 08]: Both Phase 7 LIF-01 SEAM markers resolved rather than deleted: cleanupMcpRuntime by an activeProcesses kill loop, sendCliMessage by a resolution note naming the taskkill /t ParentProcessId walk and the accepted AR-01 residual
 - [Phase 08]: Pitfall 4 recorded in source: the second kill rung stays on both platforms - different signals to the group on POSIX, a deliberate re-issue of the identical forceful plan on win32
+- [Phase 08]: D-P2: the two Windows gate steps are made mutually non-satisfiable by distinct step names and report filenames, verified falsifiable in both deletion directions — Measured: with the Phase 8 step deleted, the shared three-arm assertion stayed GREEN — satisfied entirely by Phase 7's step. Only the distinct-anchor cases went red. Reusing Phase 7's anchors would have left a deleted gate fully green.
+- [Phase 08]: D-P4b: taskkill's undocumented exit code is recorded as a [measurement] log line, never asserted and never branched on; RunResult.code is typed number|null so the one assertion is falsifiable — Microsoft Learn documents no exit codes for taskkill. 08-RESEARCH assumption A2 is rated low BECAUSE nothing branches on it; a numeric-literal comparison would turn a low risk into a high one.
 
 ### Pending Todos
 
@@ -213,6 +216,7 @@ None yet. Eleven items are parked in the ROADMAP backlog (999.1-999.11): nine fr
 - RESOLVED 2026-08-12: the requirement-count discrepancy ("22 v1 requirements" vs 24 enumerated) is reconciled — REQUIREMENTS.md now enumerates and maps 43.
 - RESOLVED 2026-08-13 (quick 260813-dc7): Phase 01 verification gap G1 (SIG-01h) is closed. `readBrowserStorageItem()` was mutation-survivable in the forwarding direction — no test drove a *present* token through it, so a regression killing Caido token pickup would have shipped green. Three append-only cases added to `settings.test.ts` (forwarding, JSON-parse failure, non-string `getItem`). Falsifiability proven, not assumed: with `if (key !== "__never__") return undefined;` at `settings.ts:35` the suite reports **2 failed / 11 passed** (Test C survives by design); mutation reverted and confirmed byte-identical. Suite 131 → **134 tests**, lint still 0/0.
 - A1 OPEN: the shipped Caido LLRT is unverified on any real install — if its fork differs, LIF-02 is not closed and every CI leg stays green because every leg runs Node. A6 OPEN: no provider CLI's MCP child pgid was ever observed. Re-run procedure preserved in 08-SPIKE.md; probe code at commit 68199fa.
+- 08-04 built the Windows vehicle but took NO reading: the three win32 kill-tree cases have never executed and the reserved dead-pid exit-code block in kill-tree.win32.test.ts is empty. A windows-latest run must fill the measured code, its first stderr line and the run URL (broken-windows ledger entry 12).
 
 ### Quick Tasks Completed
 
@@ -234,8 +238,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-24T15:41:47.678Z
-Stopped at: Completed 08-03-PLAN.md
+Last session: 2026-08-24T15:55:57.937Z
+Stopped at: Completed 08-04-PLAN.md
 Resume file: None
 
 **Live on the public remote: nothing of ours.** Plan 03-04 tore down all three `scratch/*` branches (`ci-proof-windows-probe`, `ci-proof-windows-probe-negative`, `ci-proof-windows-gate-negative`) locally and remotely. Asserted with a `test -z` discrimination over the captured glob (`scratch-glob-empty=0`) plus the full unfiltered listing, which now shows only `main` at `2d8cf16` and the pre-existing, unrelated `fix/security-hotfixes` at `0cd81f3`. `origin/main` was never pushed by this phase and is still `2d8cf16`; local `main` is 23 commits ahead and deliberately unpushed. **Re-verified 2026-08-13 (plan 03-05):** the remote still lists only `main` `2d8cf16` and the pre-existing `fix/security-hotfixes` `0cd81f3`, and all eight Phase 3 run records (4 probe + 4 `CI` control) still resolve with their recorded conclusions — which is what makes the URLs in `03-FINDINGS.md` valid citations after the branches were deleted. The probe **artifacts** do not survive: they expire 2026-09-12, which is why D-11 required the committed findings document.
