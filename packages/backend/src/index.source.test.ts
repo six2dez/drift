@@ -528,6 +528,88 @@ describe("index.ts does not pre-terminate the target on win32 before the tree ki
   });
 });
 
+// ── CR-02: the deferred rungs guard on HANDLE IDENTITY, not on pid liveness ──
+//
+// WHAT T-08-04 ACTUALLY REQUIRES. The threat is a deferred rung acting on a pid
+// the OS has REASSIGNED — on Windows that takes an unrelated process's whole
+// tree, because the argv is `/t /f`. `isPidAlive` sends signal 0, and signal 0
+// answers "does *a* process with this number exist", which is precisely `true`
+// for a reassigned pid: its only discriminating power was over pids that are
+// dead AND not yet reused, i.e. the harmless case. The capture-before-schedule
+// control does not close the gap either — the callback calls `killTree`, which
+// re-reads `proc.pid`, and Node does not clear `pid` after reaping.
+//
+// The answer has to come from the HANDLE, and `hasTrackedProcessExited`
+// (kill-plan.ts) is where that decision lives, reachable from literal inputs.
+// This block asserts only what the pure module cannot: that both rungs call it,
+// that they call it BEFORE the liveness probe, and that they feed it the
+// handle's own answers rather than something a stranger holding the pid could
+// also produce. Put the identity check after the liveness probe and the
+// dangerous case is decided before it ever runs.
+//
+// No behavioural vehicle exists for the ordering: reproducing pid reassignment
+// inside a 3-second window is not a test this project can write, and `index.ts`
+// cannot be imported in any case. Positional source assertions again.
+describe("index.ts guards both deferred rungs on handle identity before liveness (CR-02)", () => {
+  const sendBody = functionBody(code, "sendCliMessage");
+  const shutdownStart = sendBody.indexOf("const requestGracefulShutdown = () => {");
+  const shutdownEnd = sendBody.indexOf(
+    "const scheduleClaudePostToolShutdown = () => {",
+    shutdownStart,
+  );
+  const shutdownSlice = sendBody.slice(shutdownStart, shutdownEnd);
+  const cancelBody = functionBody(code, "cancelCliMessage");
+  const identity = "hasTrackedProcessExited({";
+
+  it("finds a non-empty, correctly-ordered slice for each rung", () => {
+    // The same non-vacuity discipline as the SC-4 blocks: an anchor that missed
+    // would make every `indexOf` below -1 and every comparison meaningless.
+    expect(shutdownStart).not.toBe(-1);
+    expect(shutdownEnd).toBeGreaterThan(shutdownStart);
+    expect(shutdownSlice).toContain("isPidAlive(");
+    expect(cancelBody).not.toBe("");
+    expect(cancelBody).toContain("isPidAlive(");
+  });
+
+  it("checks the handle before the pid at requestGracefulShutdown's rung", () => {
+    expect(shutdownSlice).toContain(identity);
+    expect(shutdownSlice.indexOf(identity)).toBeLessThan(
+      shutdownSlice.indexOf("isPidAlive("),
+    );
+  });
+
+  it("checks the handle before the pid at cancelCliMessage's rung", () => {
+    expect(cancelBody).toContain(identity);
+    expect(cancelBody.indexOf(identity)).toBeLessThan(
+      cancelBody.indexOf("isPidAlive("),
+    );
+  });
+
+  it("feeds it the handle's own exit event at both rungs", () => {
+    // `observedExitEvent` is the ONLY identity source that survives on Caido's
+    // LLRT, whose ChildProcess exposes no exit state — so a call site that
+    // passed a literal `false` here would leave the real runtime with liveness
+    // only. Each rung must name a flag its own handler sets.
+    expect(shutdownSlice).toContain("observedExitEvent: providerProcessExited");
+    expect(cancelBody).toContain("observedExitEvent: cancelledProcessExited");
+  });
+
+  it("reads the handle's exit state through the guarded boundary, not inline", () => {
+    // The D-P4 shape again: the property reads live at one cast-carrying
+    // boundary and the DECISION is a pure function reachable from literals. An
+    // inline `proc.exitCode !== null` at a call site would be neither — and is
+    // the exact spelling that reads `undefined !== null` as "exited" under LLRT.
+    const calls = callArgumentTexts(code, "hasTrackedProcessExited");
+
+    expect(calls).toHaveLength(2);
+    for (const call of calls) {
+      expect(call).toContain("...readHandleExitState(proc)");
+    }
+    expect(code).not.toContain("proc.exitCode !==");
+    expect(code).not.toContain("proc.signalCode !==");
+  });
+});
+
 // ── The termination call-site census ──
 //
 // The count is asserted AS WELL AS the per-site content, the same argument the

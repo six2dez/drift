@@ -1,7 +1,11 @@
 // The termination plan: given a pid, the host platform and the parent
 // environment, decide WHAT file to hand `spawn`, WITH which argument array, to
 // bring down a whole process TREE — or refuse, explicitly, when there is
-// nothing to kill. Three properties are load-bearing here and all three are
+// nothing to kill. The two smaller decisions on the same subject live here for
+// the same reason: whether the provider spawn takes its own process group
+// (`shouldDetachProviderSpawn`) and whether a deferred rung's target is still
+// the process we spawned (`hasTrackedProcessExited`). Three properties are
+// load-bearing here and all three are
 // mechanically checkable. This module performs ZERO I/O; it reads no module
 // state; and it carries exactly ONE import statement — `grep -cE '^import'`
 // over this file returns 1, which is the machine form of both claims at once.
@@ -219,6 +223,57 @@ export function buildKillTreePlan(input: {
     // states it.
     windowsVerbatimArguments: false,
   };
+}
+
+// Has the process WE SPAWNED finished? The deferred forceful rung's IDENTITY
+// guard, and the reason it has to exist at all: `isPidAlive` (`index.ts`) proves
+// LIVENESS, and a pid the OS has REASSIGNED is alive. Signal 0 answers "does a
+// process with this number exist and may I signal it", which is `true` for a
+// stranger holding the number — so a liveness probe discriminated only the
+// harmless dead-and-not-yet-reused case and passed in the dangerous one. On
+// win32 the `/t /f` argv would then take an unrelated process's WHOLE TREE
+// (threat T-08-04, review CR-02).
+//
+// Identity cannot come from the number, so it comes from the HANDLE — and the
+// handle's answers arrive here as INJECTED scalars for exactly the reason
+// `buildKillTreePlan` takes `platform` and `env` rather than reading them: the
+// decision is then reachable from literal inputs, and `index.ts`, which no test
+// in this project can import, keeps only the property reads.
+//
+// THREE INPUTS, BECAUSE NO SINGLE ONE COVERS BOTH RUNTIMES. This is the part
+// that must not be "simplified" back to a bare `exitCode !== null`:
+//
+//   * NODE's `ChildProcess` carries `exitCode` (a number once the process has
+//     exited, `null` while it runs) and `signalCode` (the signal name once it
+//     was killed by one, else `null`). Authoritative and immediate — and Node
+//     is the only vehicle any CI leg in this repository runs.
+//   * CAIDO'S LLRT `ChildProcess` carries NEITHER. Source-verified twice over:
+//     `caido/dependency-llrt` branch `caido`, `modules/llrt_child_process/src/
+//     lib.rs` defines `pid` and `kill` on the class and nothing else, and
+//     `@caido/quickjs-types`'s `child_process.d.ts` declares that same surface —
+//     which is why `tsc --noEmit` REJECTS `proc.exitCode` in this codebase.
+//     There both reads are `undefined`, and `undefined !== null` is TRUE: an
+//     `exitCode !== null` guard would return early for every pid on every real
+//     install, silently disabling the forceful rung while staying green on all
+//     five CI legs. That is finding L-4's failure shape verbatim, and it is the
+//     same trap `kill-plan.ts`'s POSIX arm documents for the negative-pid form.
+//   * `observedExitEvent` is what LLRT DOES supply: the `exit` event it emits on
+//     the handle (`lib.rs`'s `emit_str(..., "exit", ...)`). Only the process we
+//     spawned can fire it, so it is identity in the same sense. The caller
+//     records it; best-effort under Caido, whose runtime does not reliably
+//     deliver child_process callbacks while an RPC is awaiting.
+//
+// `undefined` therefore resolves toward NOT EXITED at both scalar reads, which
+// keeps this strictly subtractive relative to the rung that ships today
+// (CMP-01): it can skip a kill on evidence, never on ignorance.
+export function hasTrackedProcessExited(input: {
+  observedExitEvent: boolean;
+  exitCode: number | null | undefined;
+  signalCode: string | null | undefined;
+}): boolean {
+  if (input.observedExitEvent) return true;
+  if (typeof input.exitCode === "number") return true;
+  return typeof input.signalCode === "string";
 }
 
 // Whether the provider CLI spawn should be given its own process group.

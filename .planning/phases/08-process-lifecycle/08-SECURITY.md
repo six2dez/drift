@@ -87,7 +87,7 @@ disposition as authored at plan time.
 | **T-08-01** (02/03/05) | InfoDisc → EoP | the orphaned `mcp-server.mjs` child holding `CAIDO_TOKEN` after a cancel | **high** | mitigate | `detached: true` on the provider spawn + the group-kill spawn in `killTree`, wired at all 8 in-scope sites; proven behaviourally by `kill-tree.posix.test.ts`'s control-plus-proof pair (the control asserts the grandchild **surviving** without the mechanism, and was verified falsifiable by hand) | **closed by attestation** — see note below |
 | **T-08-02** (02/04) | Tampering / EoP | the pid rendered into the killer's argv | medium | mitigate | `buildKillTreePlan` owns both the guard (`Number.isInteger` && `> 0`) and the rendering; `index.ts` passes `proc.pid` through untouched and switches on `plan.kind`. 5 bad-pid inputs asserted (`undefined`, `NaN`, `0`, `-1`, `1.5`). Every argv in the win32 suite comes from the production builder — `grep -c '"/pid"'` in that file = **0** | closed |
 | **T-08-03** (02/04) | Spoofing / EoP | resolution of `taskkill.exe` | medium | mitigate | Resolved as `<SystemRoot>\System32\taskkill.exe` by absolute path (both env casings, trailing separators stripped, bare-drive roots), per the shipped `getWhichCommand` precedent; bare name only when neither casing is set. Never `shell: true` | closed (unit); the runner-side measurement (A7) is unrun |
-| **T-08-04** (02/03) | DoS | the deferred rungs in `cancelCliMessage` and `requestGracefulShutdown` | medium | mitigate | Pid captured into a `const` **before** the timer is scheduled, plus an `isPidAlive` re-check inside the callback (`isPidAlive(` = 3: declaration + both rungs). The guard runs **before** its debug-log line, so the log cannot claim a signal that was never sent. On Windows the argv is `/t /f`, so acting on a reassigned pid would take an unrelated process's entire tree | closed |
+| **T-08-04** (02/03) | DoS | the deferred rungs in `cancelCliMessage` and `requestGracefulShutdown` | medium | mitigate | A **handle-identity** check FIRST at both rungs — `hasTrackedProcessExited` (`kill-plan.ts`), a pure decision over the handle's own `exit` event plus Node's `exitCode`/`signalCode` — then the `isPidAlive` liveness probe, then the kill. Identity discriminates a reassigned pid; liveness does not. Gated in two places: 6 literal-input cases in `kill-plan.test.ts` including the LLRT no-exit-state arm, and positional/census assertions in `index.source.test.ts` (2 call sites, both before `isPidAlive`, both fed the handle's own flag; the inline `proc.exitCode !==` spelling banned outright). The guards run **before** the debug-log line, so the log cannot claim a signal that was never sent. On Windows the argv is `/t /f`, so acting on a reassigned pid would take an unrelated process's entire tree | closed — **corrected 2026-08-24, see § *T-08-04 — the correction*** |
 | **T-08-05** (01/02) | InfoDisc | `killTree`'s and the spike's log lines | medium | mitigate | Value-free by construction: plan `kind`/`reason`, exit code, platform. The `error` handler renders the errno **`code`**, never `error.message` — a Node spawn error message embeds the resolved file path. Follows `formatMcpRemoveFailure`'s "three scalars" precedent | closed |
 | **T-08-06** (01/02/05) | Repudiation (a security control that fails green) | the group-signalling spelling, and ROADMAP SC-2's unamended mechanism clause | **high** | mitigate | Two halves. **Code:** the comment-stripped static gate in `index.source.test.ts` over `index.ts` **and** `kill-plan.ts`, with a positive companion so it cannot pass by the mechanism having been deleted; verified falsifiable in three directions. The banned form passes on all five CI legs and throws only under Caido's LLRT, so no executed test can catch it. **Intent:** T-08-12 amended SC-2 in place with the shipped mechanism, the source-verified `Underflow` reason and the pinned commit `a5b021c`. The gate stops the code; the amendment stops the intent | closed |
 | **T-08-07** (04/05) | InfoDisc | `/T`'s dead-intermediate-parent hole on the three-level `.cmd` shape | low | **accept** | Not mitigable without a Windows Job Object — see **AR-01** | closed (accepted) |
@@ -108,6 +108,62 @@ disposition as authored at plan time.
 
 *Status: open · closed · closed (accepted) — an accepted residual is recorded in the Accepted Risks
 Log below, never silently closed.*
+
+### T-08-04 — the correction
+
+**Recorded as a correction rather than silently overwritten**, per the `07-VALIDATION.md`
+convention. Applied by the `--fix` pass over `08-REVIEW.md` finding **CR-02**.
+
+**What this row claimed at phase close.** That T-08-04 was closed by two controls: the pid captured
+into a `const` before the timer is scheduled, and an `isPidAlive` re-check inside the callback.
+
+**Why neither closed it.** `isPidAlive` sends signal `0`, and signal `0` answers *"does a process
+with this number exist and may I signal it"* — which is exactly `true` for a pid the OS has handed
+to an **unrelated** process. Its only discriminating power was over pids that are dead *and not yet
+reused*: the harmless case. In the dangerous case — the one this row is about — it passed. The
+capture-before-schedule control did not save it either: the callback calls `killTree`, whose first
+statement re-reads `proc.pid`, and Node does **not** clear `pid` after reaping (measured by the
+reviewer: `after exit, proc.pid = 99641`). So the reachable win32 sequence was cancel at T0 → tree
+gone by T0+ε → pid reassigned before T0+3s → `isPidAlive` returns `true` → `taskkill /pid <n> /t /f`
+against an unrelated process **and its whole child tree**.
+
+**The fix the review proposed does not compile here, and that is worth recording.** `08-REVIEW.md`
+CR-02 suggests `if (proc.exitCode !== null || proc.signalCode !== null) return;`. `pnpm -r typecheck`
+**rejects it**: `error TS2339: Property 'exitCode' does not exist on type
+'ChildProcessWithoutNullStreams'`. The ambient type this package compiles against is Caido's
+`@caido/quickjs-types` `child_process.d.ts`, which declares `stdin`/`stdout`/`stderr`/`pid`/`kill`
+and the emitter surface — **no exit state at all** — and that matches LLRT's own class definition
+(`caido/dependency-llrt` branch `caido`, `modules/llrt_child_process/src/lib.rs`: a `#[qjs(get)] pid`
+getter and a `kill` method, nothing else; the exit code and signal are delivered only as `exit`/
+`close` event arguments).
+
+Had the ambient type been widened to make it compile, the spelling would have shipped a **second**
+instance of the exact defect class this phase exists to prevent. Under LLRT both reads are
+`undefined`, and `undefined !== null` is **`true`** — so the guard would have returned early for
+every pid on every real install, silently disabling the deferred forceful rung on **both** platforms
+while staying green on all five CI legs. That is finding L-4's shape verbatim, and a CMP-01 POSIX
+regression on top of it.
+
+**What closes it now.** `hasTrackedProcessExited` in `kill-plan.ts` — a pure decision over three
+injected scalars, in the same D-P4 shape as `buildKillTreePlan`:
+
+- `observedExitEvent` — the `exit` event the handle itself emitted, recorded by the caller. Only the
+  process **we** spawned can fire it, so it is identity in the strict sense, and it is the only
+  identity source that survives under LLRT. Best-effort there, because Caido's runtime does not
+  reliably deliver `child_process` callbacks while an RPC is awaiting.
+- `exitCode` / `signalCode` — Node's handle properties, read at one cast-carrying boundary
+  (`readHandleExitState`) and treated as **`undefined` ⇒ not proven exited**, which is what makes the
+  LLRT arm safe rather than catastrophic.
+
+Both rungs check identity first and liveness second. `isPidAlive` is kept rather than replaced: under
+LLRT it is the only answer left. Every arm is strictly subtractive — the guard can skip a kill on
+evidence, never on ignorance, so it can never *add* a kill and never *disable* the rung.
+
+**The residual this leaves, stated rather than papered over.** On POSIX a process group outlives its
+leader, so a handle that has exited while group members survive skips a deferred group kill that
+would still have worked. That was already true of the `isPidAlive` guard as shipped — a dead leader
+answers signal 0 with `false` — so this correction does not widen it. Closing it needs an
+identity-bearing group reference that neither Node nor LLRT exposes.
 
 ### T-08-01 — closed by attestation, and exactly what that is worth
 

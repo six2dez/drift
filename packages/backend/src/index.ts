@@ -95,6 +95,7 @@ import { getPersistenceDbHandle, type PersistenceDbHandle } from "./persistence"
 // module header carries the A1/A6 verdicts the mechanism rests on.
 import {
   buildKillTreePlan,
+  hasTrackedProcessExited,
   shouldDetachProviderSpawn,
   type KillRung,
 } from "./kill-plan";
@@ -4452,6 +4453,16 @@ async function sendCliMessage(
       let stderrBytes = Buffer.alloc(0);
       let claudePrintState = createClaudePrintState();
       let settled = false;
+      // HANDLE IDENTITY for the deferred forceful rung (review CR-02). Set from
+      // the handle's OWN `close`/`exit` handlers below — only the process this
+      // turn spawned can flip it, which is what distinguishes it from the pid,
+      // a number the OS is free to hand to a stranger. It is a closure flag
+      // rather than a `once("exit")` registered at scheduling time on purpose:
+      // `requestGracefulShutdown` is reachable from four call sites and can fire
+      // repeatedly within one turn, so a listener per schedule would accumulate
+      // on the emitter. Deliberately NOT reset anywhere — a process that has
+      // exited does not un-exit.
+      let providerProcessExited = false;
       let claudeRecoveryTimeout: ReturnType<typeof setTimeout> | undefined;
       let claudePostToolDeadlineTimeout: ReturnType<typeof setTimeout> | undefined;
       let claudePostToolShutdownRequested = false;
@@ -4652,9 +4663,16 @@ async function sendCliMessage(
 
       const requestGracefulShutdown = () => {
         appendSessionDebugLog(sessionDebugLogPath, "requestGracefulShutdown(): SIGTERM");
-        // Captured BEFORE the timer is scheduled and never re-read from `proc`
-        // inside it (§ Pitfall 2): by the time the deferred rung runs the child
-        // may have been reaped and the number reassigned.
+        // Captured BEFORE the timer is scheduled, for the GUARD below (§
+        // Pitfall 2): by the time the deferred rung runs the child may have been
+        // reaped and the number reassigned. This comment used to claim the pid
+        // was "never re-read from `proc` inside it", and that was false as
+        // written — the callback calls `killTree`, whose first statement reads
+        // `proc.pid` again, and Node does not clear `pid` after reaping
+        // (measured: the original number is still returned after `exit`). The
+        // capture is therefore worth nothing against reassignment on its own,
+        // which is why the guard below leads with a HANDLE-identity check
+        // (review CR-02) rather than with this number.
         const shutdownPid = proc.pid;
         // PITFALL 4 — THE SECOND RUNG STAYS, ON BOTH PLATFORMS, AND FOR
         // DIFFERENT REASONS ON EACH. On POSIX the two rungs are genuinely
@@ -4671,10 +4689,40 @@ async function sendCliMessage(
         killTree(sdk, proc, "term");
         setTimeout(() => {
           // GUARDED FIRST, so the debug line below cannot claim a signal that
-          // was never sent. An unprovable liveness answer resolves toward
-          // "alive", so this can only ever skip a kill, never add one — and on
-          // Windows the forceful plan would take an unrelated process's WHOLE
-          // tree if the pid had been reassigned (threat T-08-04).
+          // was never sent. Two checks, in this order, and the ORDER is the
+          // fix (review CR-02).
+          //
+          // IDENTITY BEFORE LIVENESS. `hasTrackedProcessExited` reads the
+          // HANDLE — the `exit` event it emitted, plus Node's exit-state
+          // properties where the runtime has them — so it answers "has the
+          // process WE spawned finished", which is the question T-08-04 actually
+          // needs. `isPidAlive` alone cannot answer it: signal 0 reports a
+          // REASSIGNED pid as alive, so the only case it discriminated was the
+          // harmless dead-and-not-yet-reused one, and it passed in exactly the
+          // dangerous one. On Windows the forceful plan would then take an
+          // unrelated process's WHOLE tree.
+          //
+          // `isPidAlive` is kept as the secondary check, not deleted: under
+          // Caido's LLRT the handle carries no exit state at all and the `exit`
+          // event may not have been delivered yet, so liveness is the only
+          // answer left there. An unprovable liveness answer resolves toward
+          // "alive", so neither check can ever ADD a kill.
+          //
+          // ACCEPTED RESIDUAL, stated rather than papered over: on POSIX a
+          // process group outlives its leader, so a handle that has exited while
+          // group members survive skips a group kill that would still have
+          // worked. That was already true of the `isPidAlive` guard this phase
+          // shipped — a dead leader answers signal 0 with `false` — so this does
+          // not widen it. Closing it needs an identity-bearing group reference
+          // the runtime does not expose.
+          if (
+            hasTrackedProcessExited({
+              observedExitEvent: providerProcessExited,
+              ...readHandleExitState(proc),
+            })
+          ) {
+            return;
+          }
           if (shutdownPid === undefined || !isPidAlive(shutdownPid)) return;
           appendSessionDebugLog(sessionDebugLogPath, "requestGracefulShutdown(): SIGKILL");
           killTree(sdk, proc, "kill");
@@ -4889,12 +4937,18 @@ async function sendCliMessage(
       proc.stdin?.end();
 
       proc.on("close", (code) => {
+        providerProcessExited = true;
         sdk.console.log(`[drift watchdog] proc.close fired sessionId=${input.sessionId} code=${String(code)}`);
         appendSessionDebugLog(sessionDebugLogPath, `process close code=${String(code)}`);
         finalizeFromProcessEnd(code, "close");
       });
 
       proc.on("exit", (code, signal) => {
+        // BEFORE the `settled` early-return below, and that ordering is the
+        // whole value of the flag: a turn that has already settled is exactly
+        // when a deferred forceful rung is still pending against a pid the OS
+        // may have reassigned (review CR-02).
+        providerProcessExited = true;
         sdk.console.log(`[drift watchdog] proc.exit fired sessionId=${input.sessionId} code=${String(code)} signal=${String(signal ?? "")}`);
         appendSessionDebugLog(
           sessionDebugLogPath,
@@ -4980,6 +5034,32 @@ async function sendCliMessage(
 // relative to the behaviour that ships today, where the deferred rung fires
 // unconditionally: this function can only ever REMOVE a kill, never add one
 // (CMP-01).
+// The I/O boundary for `hasTrackedProcessExited` (kill-plan.ts): two property
+// reads off the child handle, and nothing else.
+//
+// THE CAST IS THE POINT, not a nuisance to be tidied away. `tsc --noEmit`
+// REJECTS `proc.exitCode` in this package, because the ambient type this
+// codebase compiles against is Caido's `@caido/quickjs-types`
+// `child_process.d.ts`, which declares `pid`, `kill` and the stream/emitter
+// surface and no exit state at all — matching LLRT's own class definition. That
+// rejection is the compiler reporting a real runtime fact: the property is
+// absent on the runtime users actually run, so the read yields `undefined`
+// there, and the pure decision treats `undefined` as "not proven exited" for
+// exactly that reason. Do NOT "fix" this by widening the ambient declaration:
+// widen it and the next reader believes the property exists, writes
+// `exitCode !== null`, and silently disables the forceful rung on every real
+// install while every CI leg stays green (review CR-02).
+function readHandleExitState(proc: ChildProcessWithoutNullStreams): {
+  exitCode: number | null | undefined;
+  signalCode: string | null | undefined;
+} {
+  const handle = proc as unknown as {
+    exitCode?: number | null;
+    signalCode?: string | null;
+  };
+  return { exitCode: handle.exitCode, signalCode: handle.signalCode };
+}
+
 function isPidAlive(pid: number): boolean {
   const processRef = globalThis as typeof globalThis & {
     process?: { kill?: (pid: number, signal: number) => boolean };
@@ -5146,9 +5226,21 @@ function cancelCliMessage(sdk: BackendSDK, sessionId: string): Result<void> {
   const proc = activeProcesses.get(sessionId);
   const snapshot = getSessionSnapshot(sessionId);
   if (proc !== undefined) {
-    // Captured BEFORE the timer is scheduled, and never re-read from `proc`
-    // inside it (§ Pitfall 2).
+    // Captured BEFORE the timer is scheduled, for the GUARD below (§ Pitfall
+    // 2). This comment used to claim the pid was "never re-read from `proc`
+    // inside it"; that was false as written, because the callback calls
+    // `killTree`, whose first statement reads `proc.pid` again, and Node does
+    // not clear `pid` after reaping. See the identity check in the callback
+    // (review CR-02) for what actually carries the guarantee.
     const pid = proc.pid;
+    // HANDLE IDENTITY, the counterpart of `sendCliMessage`'s closure flag: this
+    // function only has the handle, not that turn's closure. Exactly ONE
+    // listener is registered per session because `activeProcesses.delete` runs
+    // below, so a second Stop for the same session never reaches here.
+    let cancelledProcessExited = false;
+    proc.once("exit", () => {
+      cancelledProcessExited = true;
+    });
     // LIF-02. Was a bare `proc.kill("SIGTERM")`, which signals the provider CLI
     // alone and leaves its `node mcp-server.mjs` child — the process holding
     // CAIDO_TOKEN — running until it decides to exit. Consent withdrawal that
@@ -5159,8 +5251,23 @@ function cancelCliMessage(sdk: BackendSDK, sessionId: string): Result<void> {
       // already run, the tree may be entirely gone, and the OS is free to
       // reassign the pid in the meantime — on Windows the same argv would then
       // take an unrelated process's WHOLE TREE with it (§ Pitfall 2, threat
-      // T-08-04). An unprovable liveness answer resolves toward "alive", so this
-      // guard can only ever skip a kill, never add one.
+      // T-08-04).
+      //
+      // IDENTITY BEFORE LIVENESS, the same order and for the same reason as
+      // `requestGracefulShutdown`'s rung, which carries the full argument:
+      // signal 0 reports a REASSIGNED pid as alive, so `isPidAlive` on its own
+      // discriminated only the harmless case and passed in the dangerous one
+      // (review CR-02). The handle's `exit` event and Node's exit-state
+      // properties cannot be answered by a stranger holding the same number.
+      // Neither check can ever add a kill, only skip one.
+      if (
+        hasTrackedProcessExited({
+          observedExitEvent: cancelledProcessExited,
+          ...readHandleExitState(proc),
+        })
+      ) {
+        return;
+      }
       if (pid === undefined || !isPidAlive(pid)) return;
       killTree(sdk, proc, "kill");
     }, 3000);

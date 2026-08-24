@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildKillTreePlan,
   DEFAULT_TASKKILL,
+  hasTrackedProcessExited,
   type KillTreePlan,
   shouldDetachProviderSpawn,
 } from "./kill-plan";
@@ -307,6 +308,98 @@ describe("shouldDetachProviderSpawn — only the provider spawn gets its own gro
   it("returns true on darwin, linux and an undefined platform (CMP-01)", () => {
     for (const platform of ["darwin", "linux", undefined] as const) {
       expect(shouldDetachProviderSpawn(platform)).toBe(true);
+    }
+  });
+});
+
+// THE T-08-04 IDENTITY DECISION, and the one arm that matters most is the LLRT
+// one. `isPidAlive` proves liveness, and a reassigned pid is alive — so the
+// deferred forceful rung needs an answer about the HANDLE, not about the number.
+// This is that answer, reachable from literals because the handle's two scalars
+// are injected rather than read (review CR-02).
+describe("hasTrackedProcessExited — handle identity, on both runtimes (T-08-04)", () => {
+  it("reports NOT exited for a running Node handle", () => {
+    // Node while the child runs: both properties are null, no event yet.
+    expect(
+      hasTrackedProcessExited({
+        observedExitEvent: false,
+        exitCode: null,
+        signalCode: null,
+      }),
+    ).toBe(false);
+  });
+
+  it("reports exited on a Node exit code, including the falsy zero", () => {
+    // `0` is the ordinary success exit and is FALSY. A truthiness test here
+    // would report the commonest exit of all as "still running".
+    expect(
+      hasTrackedProcessExited({
+        observedExitEvent: false,
+        exitCode: 0,
+        signalCode: null,
+      }),
+    ).toBe(true);
+    expect(
+      hasTrackedProcessExited({
+        observedExitEvent: false,
+        exitCode: 1,
+        signalCode: null,
+      }),
+    ).toBe(true);
+  });
+
+  it("reports exited on a Node signal code", () => {
+    // A SIGKILLed child leaves `exitCode` null and `signalCode` set. Reading
+    // only `exitCode` would miss every process this phase's own rungs kill.
+    expect(
+      hasTrackedProcessExited({
+        observedExitEvent: false,
+        exitCode: null,
+        signalCode: "SIGKILL",
+      }),
+    ).toBe(true);
+  });
+
+  it("reports NOT exited when the runtime carries no exit state at all", () => {
+    // THE LLRT ARM, AND THE REASON THIS FUNCTION EXISTS AS A FUNCTION. Caido's
+    // `ChildProcess` defines `pid` and `kill` and nothing else, so both reads
+    // are `undefined` on every real install. `undefined !== null` is TRUE, so
+    // the obvious `exitCode !== null` spelling would return "exited" for EVERY
+    // pid there and silently disable the deferred forceful rung — green on all
+    // five CI legs, broken on every machine a user runs. Delete this case and
+    // that regression can walk back in unobserved.
+    expect(
+      hasTrackedProcessExited({
+        observedExitEvent: false,
+        exitCode: undefined,
+        signalCode: undefined,
+      }),
+    ).toBe(false);
+  });
+
+  it("reports exited on the handle's own exit event, whatever the runtime", () => {
+    // The LLRT-side identity source: it emits `exit` on the handle even though
+    // it exposes no exit state. Only the process we spawned can fire it.
+    expect(
+      hasTrackedProcessExited({
+        observedExitEvent: true,
+        exitCode: undefined,
+        signalCode: undefined,
+      }),
+    ).toBe(true);
+  });
+
+  it("never reports exited on ignorance, only on evidence (CMP-01)", () => {
+    // The direction is the safety property: this guard may only ever SKIP a
+    // kill, never add one. Every combination that carries no positive evidence
+    // of exit must answer false, so an unanswerable runtime keeps the rung that
+    // ships today rather than losing it.
+    for (const exitCode of [null, undefined] as const) {
+      for (const signalCode of [null, undefined] as const) {
+        expect(
+          hasTrackedProcessExited({ observedExitEvent: false, exitCode, signalCode }),
+        ).toBe(false);
+      }
     }
   });
 });
