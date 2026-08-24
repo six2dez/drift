@@ -314,7 +314,7 @@ Plans:
   4. Session finalize / `stopMcpServer` kills all tracked pids before sweeping the temp dir, so token-bearing processes die before their env-source files are removed.
   5. macOS/Linux cancellation and timeout semantics visible to the user are unchanged and existing tests stay green.
 
-**Plans**: 1/5 plans executed
+**Plans**: 2/5 plans executed
 
 Plans:
 **Wave 1**
@@ -323,7 +323,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 08-02-PLAN.md — Tracer: a POSIX cancel takes the token-bearing grandchild with it — `kill-plan.ts`, `killTree`, `detached` at the provider spawn, and the behavioural proof with its falsifying control (LIF-01, LIF-02)
+- [x] 08-02-PLAN.md — Tracer: a POSIX cancel takes the token-bearing grandchild with it — `kill-plan.ts`, `killTree`, `detached` at the provider spawn, and the behavioural proof with its falsifying control (LIF-01, LIF-02)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
@@ -459,7 +459,7 @@ Parallelism opportunities: Phase 2 may run alongside Phase 3 (both depend only o
 | 5. Kill Shell Wrappers | 6/6 | Complete   | 2026-08-20 |
 | 6. Windows Command Resolution | 7/7 | Complete    | 2026-08-21 |
 | 7. Provider Spawn & Registration | 0/3 | Not started | - |
-| 8. Process Lifecycle | 1/5 | In Progress|  |
+| 8. Process Lifecycle | 2/5 | In Progress|  |
 | 9. CI Hardening | 0/1 | Not started | - |
 | 10. Windows Polish | 0/1 | Not started | - |
 | 11. Plugin Capability Discovery | 0/3 | Not started | - |

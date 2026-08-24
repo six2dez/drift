@@ -4,16 +4,16 @@ milestone: v1.0
 current_phase: 08
 current_phase_name: Process Lifecycle
 status: executing
-stopped_at: Completed 08-01-PLAN.md (T-08-02 checkpoint waived — A1/A6 OPEN)
-last_updated: "2026-08-24T15:09:45.483Z"
+stopped_at: Completed 08-02-PLAN.md
+last_updated: "2026-08-24T15:26:24.989Z"
 last_activity: 2026-08-24
 last_activity_desc: Phase 08 execution started
-state_head: d8ccab834734d4a6841fab887b550b1131e25fcd
+state_head: ead2770e36100ff33edb6bc72a478935d7447c90
 progress:
   total_phases: 13
   completed_phases: 5
   total_plans: 45
-  completed_plans: 41
+  completed_plans: 42
 milestone_name: milestone
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-06-26)
 ## Current Position
 
 Phase: 08 (Process Lifecycle) — EXECUTING
-Plan: 2 of 5
+Plan: 3 of 5
 Status: Ready to execute
 Last activity: 2026-08-24 — Phase 08 execution started
 
@@ -69,6 +69,7 @@ Progress: [███░░░░░░░] 30% (3 of 10 milestone phases)
 | Phase 05 P05 | 8 min | 3 tasks | 2 files |
 | Phase 05 P06 | 2h 17min | 4 tasks | 6 files |
 | Phase 08 P01 | 1h 55m | 2 tasks | 3 files |
+| Phase 08 P02 | 15 min | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -184,6 +185,10 @@ Recent decisions affecting current work:
 - [Phase 05]: [05-06]: A cold pnpm store cache is NOT the worst case for the Windows leg. Measured: warm 91s vs cold 87s, so install is ~8s of a ~90s job and the cache is not the dominant term. The first draft of the timeout-minutes rationale asserted the opposite and was corrected in ci.yml rather than left standing. timeout-minutes is 6, ~4x the measured ~90s, with all three run URLs beside the value.
 - [Phase 05]: [05-06]: A human read is recorded WITH ITS PROVENANCE. V-21 has no command that returns it, so its two reads are labelled HUMAN READS and never gate results; and because the approval reached the executor through the orchestrating workflow rather than being observed first-hand, 05-REPORT.md section 7 says so. A relayed human read is still a human read but is a weaker record, and this phase does not round evidence upward.
 - [Phase 08]: Maintainer waived plan 08-01's hardware checkpoint (2026-08-24) without supplying readings; assumptions A1 and A6 remain OPEN — 08-SPIKE.md was written as a not-run record rather than a results record. No A1/A6 value was inferred — a fabricated confirmation would silently invalidate every downstream Phase 8 plan. The phase's POSIX mechanism now rests on source analysis of caido/dependency-llrt@caido a5b021c alone, and plan 08-02's OQ-2 (keep the single-pid signal alongside the group signal) is the only remaining defence.
+- [Phase 08]: The group kill is a SPAWN of the OS kill utility, never the runtime's negative-pid signalling form (D-01) — Caido's LLRT types that pid parameter as a Rust u32 and rquickjs range-checks it through f64, so it raises Underflow there while passing on every Node CI leg — and every kill site wraps its call in a swallowing catch
+- [Phase 08]: killTree keeps the single-pid signal alongside the group spawn (OQ-2), explicitly as defence against the unmeasured A1
+- [Phase 08]: buildKillTreePlan takes an env record, not a systemRoot scalar (D-P4), so the SystemRoot/SYSTEMROOT casing fallback is assertable on the Linux runner
+- [Phase 08]: killTree takes sdk as its first parameter — index.ts holds no module-level SDK reference, so the planned two-argument shape had no logging channel
 
 ### Pending Todos
 
@@ -224,8 +229,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-24T15:09:45.363Z
-Stopped at: Completed 08-01-PLAN.md (T-08-02 checkpoint waived — A1/A6 OPEN)
+Last session: 2026-08-24T15:26:24.871Z
+Stopped at: Completed 08-02-PLAN.md
 Resume file: None
 
 **Live on the public remote: nothing of ours.** Plan 03-04 tore down all three `scratch/*` branches (`ci-proof-windows-probe`, `ci-proof-windows-probe-negative`, `ci-proof-windows-gate-negative`) locally and remotely. Asserted with a `test -z` discrimination over the captured glob (`scratch-glob-empty=0`) plus the full unfiltered listing, which now shows only `main` at `2d8cf16` and the pre-existing, unrelated `fix/security-hotfixes` at `0cd81f3`. `origin/main` was never pushed by this phase and is still `2d8cf16`; local `main` is 23 commits ahead and deliberately unpushed. **Re-verified 2026-08-13 (plan 03-05):** the remote still lists only `main` `2d8cf16` and the pre-existing `fix/security-hotfixes` `0cd81f3`, and all eight Phase 3 run records (4 probe + 4 `CI` control) still resolve with their recorded conclusions — which is what makes the URLs in `03-FINDINGS.md` valid citations after the branches were deleted. The probe **artifacts** do not survive: they expire 2026-09-12, which is why D-11 required the committed findings document.

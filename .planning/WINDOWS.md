@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 1
+open_count: 2
 waived_count: 0
 fixed_count: 9
-total_count: 10
-last_updated: 2026-08-21T13:17:01.729Z
+total_count: 11
+last_updated: 2026-08-24T15:24:21.284Z
 ---
 
 # Broken Windows Ledger
@@ -25,6 +25,7 @@ last_updated: 2026-08-21T13:17:01.729Z
 | 8 | 06 | unrun-verify | packages/backend/src/index.ts |  | WIN32_PATH_SEARCH_TIMEOUT_MS = 5000 is a headroom estimate, not a measurement; closes on the Phase 9/10 real-machine report | open |  | 2026-08-21T11:55:43.210Z |  |
 | 9 | 06 | deviation | packages/backend/src/index.ts |  | CR-01/WR-01 (06-REVIEW): the provider spawn in sendCliMessage and the PATH-search spawn in resolveCommand were unguarded Promise-executor spawns, so a synchronous throw rejected the RPC instead of resolving. CLOSED in Phase 6 per 06-VERIFICATION human item 5: both now carry the same try/catch shape spawnAndWait already had. Provider site publishes spawn_error and cleans up runtimeFiles + the token-bearing mcp-<chatId>.json inline (finalize is in its TDZ at that point); PATH-search site resolves undefined, identical to its untouched error handler. Graceful degradation only - .cmd launchability stays PRV-02/Phase 7. | fixed |  | 2026-08-21T13:16:47.639Z | 2026-08-21T13:17:01.634Z |
 | 10 | 06 | deviation | packages/backend/src/command-resolution.ts |  | CR-02 (06-REVIEW): two catalogue rows were non-administrator-writable on default Windows ACLs, and a binary resolved from either is spawned with CAIDO_TOKEN in its environment. CLOSED in Phase 6 per 06-VERIFICATION human item 4, option (a): %ProgramData%\\scoop\\shims dropped entirely; C:\\nvm4w\\nodejs now gated on nvm-windows' own NVM_HOME/NVM_SYMLINK contract via the new pure isNvmWindowsInstalled (platform.ts), threaded in as the injected nvmWindowsInstalled input so the three builders stay I/O-free and never read process.env. Both removals recorded as in-code non-claims naming the token exposure. | fixed |  | 2026-08-21T13:16:56.847Z | 2026-08-21T13:17:01.729Z |
+| 11 | 08 | unmet-truth | packages/backend/src/kill-plan.ts |  | LIF-02's POSIX mechanism rests on assumptions A1 and A6, both recorded OPEN - not measured in 08-SPIKE.md after the Wave-0 hardware checkpoint was waived. kill-tree.posix.test.ts proves the group-kill argv under NODE; no CI leg executes Caido's LLRT and none spawns a real provider CLI. Closes only on a real-hardware run of 08-SPIKE.md's four-step procedure (probe recoverable at 68199fa). | open |  | 2026-08-24T15:24:21.284Z |  |
 
 ````json
 [
@@ -147,6 +148,18 @@ last_updated: 2026-08-21T13:17:01.729Z
     "reason": "",
     "recorded_at": "2026-08-21T13:16:56.847Z",
     "resolved_at": "2026-08-21T13:17:01.729Z"
+  },
+  {
+    "id": 11,
+    "kind": "unmet-truth",
+    "phase": "08",
+    "file": "packages/backend/src/kill-plan.ts",
+    "line": null,
+    "description": "LIF-02's POSIX mechanism rests on assumptions A1 and A6, both recorded OPEN - not measured in 08-SPIKE.md after the Wave-0 hardware checkpoint was waived. kill-tree.posix.test.ts proves the group-kill argv under NODE; no CI leg executes Caido's LLRT and none spawns a real provider CLI. Closes only on a real-hardware run of 08-SPIKE.md's four-step procedure (probe recoverable at 68199fa).",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-08-24T15:24:21.284Z",
+    "resolved_at": null
   }
 ]
 ````
