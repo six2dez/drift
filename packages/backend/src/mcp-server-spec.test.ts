@@ -536,6 +536,58 @@ describe("planMcpCliRegistration", () => {
     }
   });
 
+  it("refuses Codex when an empty token would produce an argv with no CAIDO_TOKEN (WR-06)", () => {
+    // The reachable guard. buildMcpCliRegistrationArgv DROPS a pair whose value
+    // is "" rather than emitting `KEY=`, so an empty token yields a
+    // `codex mcp add` argv with no CAIDO_TOKEN flag at all, mcp-server.mjs
+    // defaults it to "", and the server starts SILENTLY UNAUTHENTICATED inside
+    // the user's own ~/.codex/config.toml. The Gemini arm cannot catch this: it
+    // is gated on MCP_CLI_EXPANDS_ENV_REFERENCES, which is false for Codex.
+    for (const caidoToken of ["", "   "]) {
+      const result = planFor({ platform: "linux", cli: "codex", caidoToken });
+      expect(result.kind).toBe("Skip");
+      const reason = result.kind === "Skip" ? result.reason : "";
+      expect(reason).toContain("Codex");
+      expect(reason).toContain("CAIDO_TOKEN");
+      expect(reason).toContain("authenticated as nobody");
+    }
+  });
+
+  it("the same guard is CLI-INDEPENDENT — it fires for Gemini on an empty payload too", () => {
+    // Gemini's payload carries the REFERENCE literal, so an empty caidoToken
+    // never reaches its CAIDO_TOKEN value and the case above cannot express
+    // this. The guard reads `registrationEnv` — the dict actually written into
+    // the CLI's configuration — so it is driven directly here rather than
+    // through a builder that cannot produce the input.
+    const registrationEnv = { ...makeGeminiEnv(), CAIDO_TOKEN: "" };
+    const result = planMcpCliRegistration({
+      platform: "linux",
+      cli: "gemini",
+      registrationEnv,
+      argv: buildMcpCliRegistrationArgv({
+        cli: "gemini",
+        registrationEnv,
+        nodeExecutable: NODE_EXECUTABLE,
+        mcpScriptPath: MCP_SCRIPT_PATH,
+      }),
+      spawnEnvToken: REGISTRATION_TOKEN,
+    });
+    expect(result.kind).toBe("Skip");
+    const reason = result.kind === "Skip" ? result.reason : "";
+    expect(reason).toContain("Gemini");
+    expect(reason).toContain("authenticated as nobody");
+  });
+
+  it("still registers BOTH CLIs when the payload carries a token", () => {
+    // The falsifiability partner: a planner that refused everything would pass
+    // the two cases above just as well.
+    for (const cli of ["gemini", "codex"] as const) {
+      expect(
+        planFor({ platform: "linux", cli, spawnEnvToken: REGISTRATION_TOKEN }).kind,
+      ).toBe("Register");
+    }
+  });
+
   it("registers Gemini when the reference is used and the spawn environment carries a non-empty token", () => {
     // Both directions, deliberately: the negative case above would pass just as
     // well for a planner that never registers anything at all.

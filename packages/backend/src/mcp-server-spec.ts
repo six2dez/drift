@@ -264,6 +264,43 @@ export function planMcpCliRegistration(input: {
     };
   }
 
+  // WR-06. The FAIL-CLOSED guard, and the only one on this path that can
+  // actually fire in production.
+  //
+  // `buildMcpCliRegistrationArgv` DROPS any pair whose value is "" — deliberately,
+  // because gemini's own parser discards `KEY=` anyway and an argv that claims to
+  // deliver something it does not is worse than one that says nothing. The
+  // consequence nobody had written down: an empty CAIDO_TOKEN produces a
+  // `codex mcp add` argv with NO CAIDO_TOKEN flag at all, `mcp-server.mjs`
+  // defaults the variable to "", and the server starts SILENTLY UNAUTHENTICATED
+  // in the user's own `~/.codex/config.toml`. That is exactly the failure mode
+  // 05-D-10 rejected `${VAR}` indirection to avoid, arrived at by a different
+  // road.
+  //
+  // The Gemini arm above cannot catch it: it is gated on
+  // MCP_CLI_EXPANDS_ENV_REFERENCES, which is false for Codex. So this check is
+  // deliberately CLI-INDEPENDENT and reads `registrationEnv` — the dict that is
+  // actually written into the CLI's configuration file — rather than any
+  // environment a caller composed on the side. Gemini's payload carries the
+  // reference literal, which is non-empty, so this is a no-op there and the
+  // symmetry costs nothing.
+  //
+  // Why it lives HERE and not at the call site: today the case is unreachable
+  // only because requireMcpServerSpec refuses an empty token, and that function
+  // is in `index.ts` — a file no test this project can run is able to import. A
+  // safety property whose only proof is an invariant in an unassertable file is
+  // not a proven property. Moving the refusal into the pure layer is what makes
+  // it one, and it is the same argument the whole module rests on.
+  //
+  // Value-free by construction, like every other reason in this module: the
+  // sentence names the KEY and never the bytes (05-D-11).
+  if ((input.registrationEnv[CAIDO_TOKEN_KEY] ?? "").trim() === "") {
+    return {
+      kind: "Skip",
+      reason: `Drift did not register with ${MCP_CLI_DISPLAY_NAMES[input.cli]} CLI: the registration would carry no ${CAIDO_TOKEN_KEY}, so the MCP server would start authenticated as nobody.`,
+    };
+  }
+
   return { kind: "Register", argv: input.argv };
 }
 
