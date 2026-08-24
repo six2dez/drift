@@ -197,3 +197,112 @@ describe("index.ts reports the residual the sweep cannot remove (WR-04)", () => 
     expect(code).toMatch(/if \(!mcpCliBlockedSweepNotices\.has\(noticeKey\)\)/);
   });
 });
+
+// ── Phase 8 (LIF-01 / LIF-02) ───────────────────────────────────────
+
+// THE LLRT TRAP GATE. This is the phase's single most important control and the
+// only one that is independent of the test vehicle.
+//
+// The defect it prevents: signalling a process group by handing a NEGATIVE pid
+// to the runtime's own kill primitive. Caido's LLRT types that parameter as a
+// Rust `u32` and rquickjs range-checks it through `f64`, so it raises an
+// `Underflow` conversion error there — while working perfectly under Node, which
+// is the only vehicle any CI leg in this repository runs. Worse, every kill site
+// in `index.ts` wraps its call in `catch { /* already dead */ }`, so the throw is
+// swallowed and the orphan the phase exists to prevent survives in silence. A
+// control that fails green on every runner the project has is exactly finding
+// L-4 of `05-RESEARCH.md` recurring, and a source gate is the only answer
+// available (08-RESEARCH.md § Pitfall 1).
+//
+// COMMENT-STRIPPING IS LOAD-BEARING HERE, not tidy. `08-VALIDATION.md` seeded
+// this row as a raw `grep`, and that spelling is WRONG: `kill-plan.ts`'s POSIX
+// branch and `index.ts`'s tree-kill comment both quote the banned form verbatim,
+// by house rule, precisely so a future reader does not reintroduce it. A raw grep
+// would go red against the very comments that prevent the defect. The shell
+// alternative the seed offered (`sed 's://.*::'`) is worse still: it strips `//`
+// inside string literals, which `stripCommentLines` above deliberately never
+// does. The in-test form is therefore the primary gate, and the marked
+// correction to `08-VALIDATION.md` is plan 08-05's T-08-13.
+//
+// THE NEEDLE IS AN ESCAPED `RegExp`, AND THAT IS A REQUIREMENT RATHER THAN A
+// STYLE CHOICE. This file lives in `packages/backend/src`, so it is inside the
+// scope of the companion repo-wide scan, and that scan exempts WHOLE-LINE
+// comments only — an assertion is not a comment. Handing the banned form to
+// `not.toContain(...)` as a plain string literal would spell it verbatim on a
+// code line and turn the scan red AGAINST THE GATE ITSELF, which the next reader
+// would then "fix" by weakening the scan. Escaping the dot and the opening
+// parenthesis keeps the banned character sequence off every code line in this
+// file. Do not simplify the regex back into a string.
+const killPlanSource = readFileSync(
+  fileURLToPath(new URL("./kill-plan.ts", import.meta.url)),
+  "utf-8",
+);
+const lifecycleCode = `${code}\n${stripCommentLines(killPlanSource)}`;
+const LLRT_NEGATIVE_PID_SIGNAL = /process\s*\.\s*kill\s*\(\s*-/g;
+
+describe("the LLRT-incompatible group-signalling spelling cannot re-enter as code (Pitfall 1)", () => {
+  it("does not appear in index.ts or kill-plan.ts once whole-line comments are stripped", () => {
+    expect(lifecycleCode.match(LLRT_NEGATIVE_PID_SIGNAL)).toBeNull();
+  });
+
+  it("still reaches the plan builder, so the gate cannot pass by deletion", () => {
+    // Without this companion the block above goes green the moment somebody
+    // removes the whole mechanism — a gate that passes hardest when there is
+    // nothing left to guard.
+    expect(lifecycleCode).toContain("buildKillTreePlan(");
+  });
+});
+
+// THE `detached` ANSWERS. `detached` is a REQUIRED member of `SpawnWithEnv`, so
+// the compiler already forces every call site to say something; this block
+// asserts WHAT each of them says, which the compiler cannot.
+//
+// The direction matters in both senses. A leaf spawn that said `true` would
+// escape Drift's own process group and outlive a hard-killed Caido while holding
+// a live session token (threat T-08-11). The provider spawn saying `false` would
+// leave its `mcp-server.mjs` grandchild unreachable from a group signal, which is
+// the LIF-02 defect itself.
+describe("index.ts states a detached answer at every spawnWithEnv call site (LIF-02 / T-08-11)", () => {
+  const calls = callArgumentTexts(code, "spawnWithEnv");
+
+  it("has exactly the three call sites the review inventoried", () => {
+    // callMcpMethod's self-test spawn, spawnAndWait's env arm, and the provider
+    // launch. A fourth site added WITH an answer still fails this count, and
+    // that is the point: a new spawn carrying a live Caido session token is a
+    // decision a human should read, not one a passing suite absorbs.
+    expect(calls).toHaveLength(3);
+  });
+
+  it("passes `detached` at every one of them", () => {
+    for (const call of calls) {
+      expect(call).toContain("detached:");
+    }
+  });
+
+  it("detaches the provider spawn and nothing else", () => {
+    // Exactly one site delegates to the pure decision, and it is the provider
+    // launch — the only spawn whose child spawns a token-bearing grandchild of
+    // its own. The other two are Drift-owned leaves that must die with Drift.
+    const detaching = calls.filter((call) =>
+      call.includes("detached: shouldDetachProviderSpawn(host?.platform)"),
+    );
+    const attached = calls.filter((call) => call.includes("detached: false"));
+
+    expect(detaching).toHaveLength(1);
+    expect(attached).toHaveLength(2);
+  });
+
+  it("reaches the plan builder through the injected-boundary shape (D-P4)", () => {
+    // The same shape as the `selectComspec` assertion above: the environment is
+    // read at this I/O boundary and the CHOICE is made by a pure function that a
+    // test can reach from literal inputs. An inline `readParentEnv().SystemRoot`
+    // at the call site would move the dual-casing fallback back into `index.ts`,
+    // where no test this project can run is able to reach it — which is the
+    // "unverifiable by construction" problem the module split exists to remove.
+    const builder = callArgumentTexts(code, "buildKillTreePlan");
+
+    expect(builder).toHaveLength(1);
+    expect(builder[0]).toContain("platform: host?.platform");
+    expect(builder[0]).toContain("env: readParentEnv()");
+  });
+});
