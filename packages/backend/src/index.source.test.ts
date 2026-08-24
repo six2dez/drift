@@ -77,6 +77,64 @@ function callArgumentTexts(source: string, name: string): string[] {
   return calls;
 }
 
+// The brace-balanced body of a top-level `function name(` or `async function
+// name(` declaration, returned as the text BETWEEN the outer braces. The same
+// shape as `callArgumentTexts` above, one brace class instead of one paren
+// class — and with one extra step that is NOT optional: the parameter list is
+// skipped by balancing PARENTHESES first, because several declarations in
+// `index.ts` take an inline object type (`input: { sessionId: string }`) whose
+// brace would otherwise be mistaken for the body's. Skipping that step returns
+// a 19-character "body" for `closeCliSession` — measured — and every ordering
+// assertion below it then passes on nothing.
+//
+// WHAT IT PROVES AND WHAT IT DOES NOT. It reads source text. It proves the
+// POSITION of a statement relative to another statement inside one function. It
+// proves nothing whatsoever about what either statement does at runtime, and
+// this file's preamble applies in full.
+//
+// Returns "" when the declaration is not found, deliberately: a missing
+// declaration must make the caller's assertion fail LOUDLY rather than yield an
+// empty body in which every `indexOf` returns -1 and every ordering comparison
+// is vacuously satisfiable. Every block below therefore asserts the body is
+// non-empty before it compares anything.
+function functionBody(source: string, name: string): string {
+  let paramsIdx = -1;
+  for (const prefix of ["async function ", "function "]) {
+    const index = source.indexOf(`${prefix}${name}(`);
+    if (index !== -1) {
+      paramsIdx = index + prefix.length + name.length;
+      break;
+    }
+  }
+  if (paramsIdx === -1) return "";
+
+  let depth = 0;
+  let cursor = paramsIdx;
+  for (; cursor < source.length; cursor += 1) {
+    const character = source[cursor];
+    if (character === "(") depth += 1;
+    else if (character === ")") {
+      depth -= 1;
+      if (depth === 0) break;
+    }
+  }
+  if (cursor >= source.length) return "";
+
+  const open = source.indexOf("{", cursor);
+  if (open === -1) return "";
+
+  depth = 0;
+  for (let index = open; index < source.length; index += 1) {
+    const character = source[index];
+    if (character === "{") depth += 1;
+    else if (character === "}") {
+      depth -= 1;
+      if (depth === 0) return source.slice(open + 1, index);
+    }
+  }
+  return "";
+}
+
 const code = stripCommentLines(indexSource);
 
 // CR-01. `buildSpawnPlan`'s cmd.exe arm falls back to the BARE name "cmd.exe",
@@ -304,5 +362,149 @@ describe("index.ts states a detached answer at every spawnWithEnv call site (LIF
     expect(builder).toHaveLength(1);
     expect(builder[0]).toContain("platform: host?.platform");
     expect(builder[0]).toContain("env: readParentEnv()");
+  });
+});
+
+
+// ── SC-4: the kill precedes the removal, at all three removal sites ──
+//
+// WHAT THIS IS REALLY ASSERTING. Each of these three functions removes a file
+// or a directory that carried CAIDO_TOKEN into a child process's environment:
+// `cleanupMcpRuntime` removes the whole MCP temp directory, `closeCliSession`
+// and `deleteChat` remove the per-session activity and approvals files. If the
+// removal runs while a token-bearing child is still alive, the deletion destroys
+// the forensic trail — which pid, which session, which policy — while leaving
+// the capability completely intact, because the token is in the process's memory
+// rather than in the file. Deleting a token-bearing file is not revocation.
+// Killing the process that read it is (threat T-08-01, and T-08-12 for the
+// startMcpServer failure path that reaches cleanupMcpRuntime too).
+//
+// WHY A POSITIONAL ASSERTION AT ALL. `index.ts` declares no `caido:plugin` alias
+// and cannot be imported by any test this project can run, so there is no
+// behavioural vehicle for this fact. And nothing else in this repository measures
+// statement ORDER inside `index.ts` — `callArgumentTexts` returns argument text
+// and discards offsets. A shell gate over the same three functions exists and is
+// run as an independent second read, but it is not what this evidence rests on:
+// a vitest assertion runs on all five CI legs unprompted, a shell gate runs where
+// somebody remembers to run it.
+describe("index.ts kills every tracked tree before it removes the files that carried its token (SC-4)", () => {
+  // The three sites are written out ONE PER ASSERTION rather than driven from a
+  // table. A table would name each function exactly once, in a data literal; the
+  // unrolled form names it at the call to `functionBody`, which is where a reader
+  // grepping for the site actually lands — and it keeps every assertion inline
+  // where `vitest/expect-expect` can see it, this repository running eslint at
+  // `--max-warnings 0`.
+
+  it("cleanupMcpRuntime terminates every tracked pid before the temp dir goes", () => {
+    // The directory removed here holds the MCP config, the context file and the
+    // per-session approvals/activity documents — every env-source that carried
+    // the Caido token into a child's environment.
+    const body = functionBody(code, "cleanupMcpRuntime");
+
+    // The non-vacuity guard: an empty body makes both lookups -1 and the
+    // comparison meaningless, so it fails loudly here instead.
+    expect(body).not.toBe("");
+    expect(body.indexOf("killTree(")).not.toBe(-1);
+    expect(body.indexOf("rm(")).not.toBe(-1);
+    expect(body.indexOf("killTree(")).toBeLessThan(body.indexOf("rm("));
+  });
+
+  it("closeCliSession terminates before it removes the session's runtime files", () => {
+    const body = functionBody(code, "closeCliSession");
+
+    expect(body).not.toBe("");
+    expect(body.indexOf("killTree(")).not.toBe(-1);
+    expect(body.indexOf("rm(")).not.toBe(-1);
+    expect(body.indexOf("killTree(")).toBeLessThan(body.indexOf("rm("));
+  });
+
+  it("deleteChat terminates before it removes the session's runtime files", () => {
+    const body = functionBody(code, "deleteChat");
+
+    expect(body).not.toBe("");
+    expect(body.indexOf("killTree(")).not.toBe(-1);
+    expect(body.indexOf("rm(")).not.toBe(-1);
+    expect(body.indexOf("killTree(")).toBeLessThan(body.indexOf("rm("));
+  });
+});
+
+// ── SC-4: the absolute-timeout handler kills before it finalizes ──
+//
+// Pitfall 10. The kill moved UP; `finalize` did NOT move and must not: it is a
+// `const` arrow declared lower in the same promise executor, so hoisting it into
+// the handler puts it in its temporal dead zone and throws a ReferenceError
+// synchronously inside the executor. `finalize` removes the activity and
+// approvals files, which is why the order matters here for the same reason it
+// matters at the three sites above.
+describe("index.ts kills before it finalizes a timed-out turn (SC-4 / Pitfall 10)", () => {
+  const body = functionBody(code, "sendCliMessage");
+
+  // THE END ANCHOR IS THE CALL'S FULL CLOSING LINE, AND IT IS SEARCHED FORWARD
+  // FROM THE START ANCHOR — note the second argument to `indexOf`. Do not shorten
+  // it back to the bare `currentSettings.processTimeoutSeconds` identifier: that
+  // identifier's FIRST occurrence inside `sendCliMessage` is the
+  // `sendCliMessage start …` debug-log line, roughly five hundred lines ABOVE the
+  // handler. An unanchored lookup would therefore return an end BEFORE the start,
+  // `.slice` would return "", both inner lookups would return -1, and the
+  // ordering assertion would pass while proving nothing. That vacuous pass is the
+  // precise failure this block exists to prevent, so the guards below are part of
+  // the assertion rather than decoration.
+  const startIdx = body.indexOf("const timeout = setTimeout(");
+  const endIdx = body.indexOf(
+    "}, currentSettings.processTimeoutSeconds * 1000)",
+    startIdx,
+  );
+
+  it("finds a non-empty, correctly-ordered handler slice", () => {
+    expect(body).not.toBe("");
+    expect(startIdx).not.toBe(-1);
+    expect(endIdx).not.toBe(-1);
+    expect(endIdx).toBeGreaterThan(startIdx);
+    expect(body.slice(startIdx, endIdx)).not.toBe("");
+  });
+
+  it("puts the tree kill above finalize()", () => {
+    const slice = body.slice(startIdx, endIdx);
+
+    expect(slice).toContain("killTree(");
+    expect(slice).toContain("finalize(");
+    expect(slice.indexOf("killTree(")).toBeLessThan(slice.indexOf("finalize("));
+  });
+});
+
+// ── The termination call-site census ──
+//
+// The count is asserted AS WELL AS the per-site content, the same argument the
+// buildSpawnPlan block above makes: a ninth call site added correctly still fails
+// this count, and that is the point — a new termination of a token-bearing
+// process is a decision a human should read, not one a passing suite absorbs
+// silently. If a measured count ever differs from the numbers here, update the
+// number AND the enumeration in the same edit. Never relax an exact count to a
+// range or a lower bound.
+describe("index.ts pins every process-termination site to a counted inventory (LIF-01 / LIF-02)", () => {
+  it("declares the tree killer exactly once", () => {
+    expect(code.match(/function killTree\(/g)).toHaveLength(1);
+  });
+
+  it("has the one declaration plus the eight in-scope call sites", () => {
+    // deleteChat 1, the sendCliMessage absolute timeout 1,
+    // requestGracefulShutdown 2, cancelCliMessage 2, closeCliSession 1,
+    // cleanupMcpRuntime 1 — eight calls, plus the declaration itself.
+    expect(code.match(/killTree\(/g)).toHaveLength(9);
+  });
+
+  it("leaves exactly the three out-of-scope single-pid signals on the child handle", () => {
+    // Two of them are callMcpMethod's own rungs against Drift's self-test child,
+    // which is a leaf with no tree. The third is INSIDE killTree: the single-pid
+    // rung it issues before spawning the group kill, kept deliberately as defence
+    // against assumption A1 (does the shipped Caido LLRT honour the process-group
+    // spawn option?), which 08-SPIKE.md still records as OPEN and unmeasured.
+    // That rung is load-bearing, not decoration — do not delete it to make this
+    // number smaller.
+    expect(code.match(/proc\.kill\(/g)).toHaveLength(3);
+
+    // resolveCommand's PATH-search timeout. A `which` invocation is a leaf
+    // process with no tree of its own, explicitly excluded from tree termination.
+    expect(code.match(/child\.kill\(/g)).toHaveLength(1);
   });
 });
