@@ -3439,12 +3439,36 @@ async function cleanupMcpRuntime(
   await unregisterMcpFromCli("gemini", sdk);
   await unregisterMcpFromCli("codex", sdk);
 
-  // LIF-01 SEAM / Phase 8 (process lifecycle) owns a requirement that lands HERE: the
-  // provider process tree must be terminated BEFORE the temp-directory removal
-  // below, or a surviving MCP child keeps the Caido token in its environment
-  // while the files it was reading are deleted underneath it. The seam is marked
-  // and NOT acted on — the statement order in this function is deliberately
-  // unchanged by this phase, and no termination is added here. Grep LIF-01.
+  // SC-4 / LIF-01 / LIF-02 — THE SEAM PHASE 7 MARKED HERE, NOW ACTED ON. Phase 7
+  // left a marker at this exact spot recording that the provider process tree
+  // must be terminated BEFORE the temp-directory removal below, and that the
+  // statement order was being left alone until this phase. The loop below is
+  // that termination; `grep LIF-01` still lands here, and the requirement now
+  // lands here as code rather than as a promise.
+  //
+  // WHY THE ORDER IS THE CONTROL AND NOT THE CALL. The directory removed below
+  // holds the env-source documents — the MCP config, the context file, the
+  // per-session approvals and activity files — that carried the Caido token into
+  // every tracked child's environment. Removing them while such a child is still
+  // running destroys the forensic trail (which pid, which session, which policy)
+  // while leaving the capability completely intact, because the token is in the
+  // process's MEMORY and not in the file it arrived through. Deleting a
+  // token-bearing file is not revocation; killing the process that read it is.
+  // The removal below must NOT be moved above this loop.
+  //
+  // This is load-bearing on more than the Stop button: startMcpServer's own
+  // failure path reaches this function too, so a fix written at the Stop button
+  // instead of here would have left that path exposed (threat T-08-12).
+  //
+  // The FORCEFUL rung, deliberately: MCP is being torn down, so there is no turn
+  // left for anyone to read partial output from, and on the failure path nothing
+  // is in flight at all. Nothing here is awaited — spawnAndWait carries no
+  // timeout, so an awaited kill could hold cleanup open indefinitely (Pitfall 8).
+  for (const [sessionId, proc] of activeProcesses.entries()) {
+    killTree(sdk, proc, "kill");
+    activeProcesses.delete(sessionId);
+  }
+
   if (mcpTempDir !== undefined) {
     try {
       await rm(mcpTempDir, { recursive: true, force: true });
@@ -3683,6 +3707,10 @@ async function startMcpServer(sdk: BackendSDK): Promise<Result<McpServerInfo>> {
 }
 
 async function stopMcpServer(sdk: BackendSDK): Promise<Result<void>> {
+  // SC-4 is satisfied here BY DELEGATION and nothing needs to be added: the
+  // kill-every-tracked-pid-before-the-sweep loop lives inside cleanupMcpRuntime,
+  // so this path inherits it — as does startMcpServer's failure path, which is
+  // the half a fix written at this button would have missed.
   await cleanupMcpRuntime(sdk);
   return ok(undefined);
 }
@@ -4050,10 +4078,31 @@ async function sendCliMessage(
     // what was requested, or the one artifact a Windows user can send back would
     // describe a spawn that never happened.
     //
-    // LIF-01 SEAM / Phase 8 (process lifecycle), marked and NOT acted on: on
-    // Windows the interpreter branch inserts a `cmd.exe` level, so the tree
-    // this session must later terminate is one deeper than on POSIX. That is
-    // that phase's requirement to solve; nothing here reorders or terminates.
+    // LIF-01 — RESOLVED BY PHASE 8, AND RESOLVED BY COSTING NOTHING HERE. Phase 7
+    // marked this spot because on Windows the interpreter branch above inserts a
+    // `cmd.exe` level, so the tree this session must later terminate is one
+    // deeper than on POSIX. Phase 8's answer is that the extra level is free:
+    // buildKillTreePlan's win32 arm emits `taskkill.exe /pid <n> /t /f`, and `/t`
+    // is documented as ending "the specified process and any child processes
+    // started by it" — it walks the ParentProcessId relation recorded in the
+    // process table, RECURSIVELY, and is therefore depth-independent. That is
+    // precisely why nothing at this site had to reorder, terminate or change:
+    // one more level of parentage costs the mechanism nothing.
+    //
+    // THE RESIDUAL, NAMED RATHER THAN HIDDEN. The walk can only follow parentage
+    // that still exists. If the intermediate `cmd.exe` has ALREADY EXITED, its
+    // surviving children are no longer reachable from the tracked pid and are not
+    // terminated (08-RESEARCH.md § /T's documented blind spot, Pitfall 5,
+    // assumption A3 — community/issue-tracker evidence only, so it is stated as
+    // such rather than as a measurement). Two facts size it: `cmd.exe /c`
+    // normally waits for its child, so the window is narrow but not zero; and
+    // Phase 6 already prefers a real `.exe` over a `.cmd` shim, which removes
+    // this level entirely wherever a native install exists.
+    //
+    // That residual is ACCEPTED, not mitigated — recorded as 08-SECURITY.md
+    // AR-01 — because the correct primitive is a Windows Job Object, which
+    // neither LLRT nor Node exposes without a native addon, and native addons are
+    // banned by the QuickJS runtime constraint.
     const spawnPlan = buildSpawnPlan({
       command: resolved,
       args,
