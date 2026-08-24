@@ -4,6 +4,7 @@ import os from "os";
 import path from "path";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { selectComspec } from "./platform";
 import {
   buildSpawnPlan,
   escapeCmdArgument,
@@ -317,6 +318,68 @@ describe.skipIf(process.platform !== "win32")("buildSpawnPlan on a real cmd.exe"
         plan.windowsVerbatimArguments,
       );
 
+      expect(code).toEqual(0);
+      expect(await readReceivedArgv(fixture.outputPath)).toEqual(HAZARD_ARGS);
+    },
+    SPAWN_TIMEOUT_MS,
+  );
+
+  // CR-01's leg, added after a post-execution code review found that every
+  // production call site omitted `comspec`, so `file` was always the BARE
+  // literal `cmd.exe` — resolved by a Windows search order that includes the
+  // current working directory, on the one branch that carries a literal Caido
+  // session token to `codex mcp add`.
+  //
+  // Why this leg exists at all, stated plainly: the fix landed with zero
+  // real-Windows coverage. `platform.test.ts` proves `selectComspec` picks the
+  // right STRING from an injected dict on any host, and the source scan proves
+  // the argument is PRESENT at all five call sites — but neither proves the
+  // value that arrives on a real Windows machine is a spawnable interpreter.
+  // Every gate this phase built was aimed one argument to the left of the
+  // defect; this is the one aimed at `file`.
+  //
+  // It reads the REAL environment rather than an injected fixture, because the
+  // property under test is "what a genuine Windows host supplies", which an
+  // injected dict cannot falsify.
+  it(
+    "resolves an ABSOLUTE interpreter from the real environment and executes through it (CR-01)",
+    async () => {
+      const fixture = await createFixture();
+
+      const comspec = selectComspec({
+        env: process.env,
+        platform: "win32",
+      });
+
+      // The discriminating assertion. A regression that drops the env read
+      // returns `undefined` here, `buildSpawnPlan` falls back to the bare
+      // literal, and the round-trip below would still pass — which is exactly
+      // how the Critical survived every other gate. Assert the interpreter is
+      // absolute BEFORE proving it runs.
+      expect(comspec).toBeDefined();
+      expect(path.isAbsolute(comspec as string)).toBe(true);
+      expect((comspec as string).toLowerCase()).toContain("cmd.exe");
+
+      const plan = buildSpawnPlan({
+        command: fixture.shimPath,
+        args: HAZARD_ARGS,
+        platform: "win32",
+        comspec,
+      });
+
+      // The plan carries the resolved absolute path, NOT the fallback literal.
+      expect(plan.file).toEqual(comspec);
+      expect(plan.file).not.toEqual("cmd.exe");
+
+      const code = await runToCompletion(
+        plan.file,
+        plan.args,
+        plan.windowsVerbatimArguments,
+      );
+
+      // An absolute interpreter must round-trip the hazard set identically to
+      // the bare one: the fix closes a resolution hole and changes nothing
+      // about the escaping contract.
       expect(code).toEqual(0);
       expect(await readReceivedArgv(fixture.outputPath)).toEqual(HAZARD_ARGS);
     },
