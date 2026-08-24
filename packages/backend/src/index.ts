@@ -118,6 +118,7 @@ import {
   findExpandableEnvKeys,
   formatMcpRemoveFailure,
   formatMcpRemoveUnusable,
+  formatMcpSweepBlockedResidual,
   formatSpawnDebugLine,
   planMcpCliRegistration,
   planMcpCliRemoval,
@@ -2834,6 +2835,19 @@ const mcpCliRemovalFailures = new Map<
   Map<McpCliRemovalScope, number>
 >();
 
+// WR-04. Which blocked-sweep residual notices this PROCESS has already emitted,
+// keyed by CLI and the command value that could not be used. Process-lifetime by
+// design: the notice is worth saying once per Drift run and per change to the
+// field, and worth saying again after a restart, but not on every MCP start —
+// a line that repeats forever is the one a user stops reading, which is the
+// failure `sweepStaleMcpCliRegistrations` and `classifyMcpRemoveExit` both
+// already argue against for their own messages.
+//
+// Holds a provider command string, so like every other value on this path it is
+// a KEY only and is never rendered: `formatMcpSweepBlockedResidual` takes no
+// parameter through which it could arrive.
+const mcpCliBlockedSweepNotices = new Set<string>();
+
 function recordMcpCliRemovalOutcome(input: {
   cli: "gemini" | "codex";
   scope: McpCliRemovalScope;
@@ -3225,8 +3239,7 @@ async function unregisterMcpFromCli(cli: "gemini" | "codex", sdk: BackendSDK): P
 // implementations exit zero whether or not an entry existed, so the removal is
 // idempotent and needs to know nothing about what is currently registered.
 //
-// UNCONDITIONAL, and the four gates it deliberately does NOT carry are the
-// whole point:
+// Four gates it deliberately does NOT carry, and they are the whole point:
 //
 //   1. the provider's `enabled` flag — a user who disabled the CLI after a
 //      crash is exactly the case that never gets cleaned otherwise;
@@ -3243,6 +3256,24 @@ async function unregisterMcpFromCli(cli: "gemini" | "codex", sdk: BackendSDK): P
 // disabled the provider — extended across PROCESS LIFETIMES rather than
 // sessions.
 //
+// TWO GATES IT DOES CARRY, and this paragraph exists because they were left out
+// of the list above while the word UNCONDITIONAL was left in (WR-04). Both are
+// forced rather than chosen: this function removes an entry by SHELLING THE
+// CLI'S OWN `mcp remove`, so with no command field and no resolvable binary
+// there is no removal to run.
+//
+//   5. an empty `providers[*].command` — a deliberate user edit; the shipped
+//      defaults are non-empty;
+//   6. `resolveCommand` returning undefined — the CLI is not installed, or was
+//      renamed, moved or uninstalled since Drift last registered with it.
+//
+// Gate 6 is the highest-value case the sweep exists for, inverted: hard-kill
+// while Codex is registered, then the binary goes away, and `~/.codex/config.toml`
+// keeps a literal Caido session token indefinitely. Neither gate can be removed,
+// so the residual is REPORTED instead — see the blocked-sweep branch below. The
+// README's promise was rewritten in the same commit to state the same thing;
+// they are one claim written in two places and must not drift apart again.
+//
 // Per-iteration try/catch isolation, copied from the orphan sweep: one CLI that
 // hangs, throws or cannot be read must not abort the other's sweep or MCP start.
 async function sweepStaleMcpCliRegistrations(sdk: BackendSDK): Promise<void> {
@@ -3250,16 +3281,39 @@ async function sweepStaleMcpCliRegistrations(sdk: BackendSDK): Promise<void> {
     try {
       const providerConfig = currentSettings.providers[MCP_CLI_TO_PROVIDER[cli]];
       const command = providerConfig?.command;
-      if (command === undefined || command === "") continue;
-      const resolved = await resolveCommand(command);
+      // Gate 5 and gate 6 (WR-04), taken together because they have one
+      // consequence: the sweep cannot run, so whatever this CLI's configuration
+      // holds stays there. The old code treated the second as "not a security
+      // event: nothing here says a Drift entry may remain", which was true of
+      // the SENTENCE and false of the situation.
+      const resolved =
+        command === undefined || command === ""
+          ? undefined
+          : await resolveCommand(command);
       if (resolved === undefined) {
-        // A CLI that is not installed has no configuration to clean. This is
-        // recorded, not silent — and it is NOT a security event: nothing here
-        // says a Drift entry may remain.
-        skippedMcpCliReasons.set(
-          cli,
-          `command "${command}" did not resolve to an executable path`,
-        );
+        // The card sentence keeps its existing wording and its existing
+        // channel. It is deliberately NOT the residual notice: an unresolvable
+        // command short-circuits `checkProvider` to `capability: "unavailable"`
+        // before `applyProviderLimitation` runs, so this string does not render
+        // on the provider card in exactly this case. Writing the security
+        // sentence into a map nothing reads is how the residual stayed silent.
+        if (command !== undefined && command !== "") {
+          skippedMcpCliReasons.set(
+            cli,
+            `command "${command}" did not resolve to an executable path`,
+          );
+        }
+        // The channel that DOES reach the user. Once per process per command
+        // value, not once per MCP start: a user who has one of these two CLIs
+        // installed and not the other would otherwise collect the same line
+        // every time they press Start, and a message that repeats forever is the
+        // one nobody reads — the same argument the removal classifier makes for
+        // its own banner.
+        const noticeKey = `${cli}:${command ?? ""}`;
+        if (!mcpCliBlockedSweepNotices.has(noticeKey)) {
+          mcpCliBlockedSweepNotices.add(noticeKey);
+          sdk.console.error(formatMcpSweepBlockedResidual({ cli }));
+        }
         continue;
       }
       for (const removal of planMcpCliRemoval({

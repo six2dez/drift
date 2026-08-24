@@ -755,6 +755,58 @@ export const MCP_CLI_REMOVE_REMEDIATION: Record<
   codex: buildMcpCliRemoveRemediation("codex"),
 };
 
+// WR-04. The line for the case the sweep CANNOT cover, and the reason it has to
+// exist at all.
+//
+// `sweepStaleMcpCliRegistrations` calls itself unconditional and lists the four
+// gates it deliberately does not carry. It carries two it never mentioned: an
+// empty command field, and a command `resolveCommand` cannot resolve. Both are
+// unavoidable — the sweep removes an entry by SHELLING THE CLI'S OWN `mcp
+// remove`, so with no binary there is no removal to run — but the residual they
+// leave is the highest-value case the sweep exists for. Drift is hard-killed
+// while Codex is registered; the user then uninstalls, renames or moves the
+// binary, or clears the field; every subsequent start silently skips the
+// removal; and a literal Caido session token stays in `~/.codex/config.toml`
+// forever — outside the temp root, outside `sweepOrphanedMcpTempDirs`, and
+// outside every promise the README makes.
+//
+// So the residual is SAID OUT LOUD, with the paste-able commands. The wording
+// differs per CLI because the exposure genuinely does: Codex's entry embeds the
+// token bytes, Gemini's carries a reference that expands from an environment
+// Drift no longer supplies. Both are worth removing; only one is a credential
+// sitting in a file.
+//
+// CONDITIONAL by construction — "if Drift ever registered" — because that is the
+// honest claim. Drift cannot know across process lifetimes whether it ever
+// registered with a CLI it can no longer even locate: `registeredMcpCliPaths` is
+// process-lifetime state and the run that crashed took its record with it. The
+// alternative was to say nothing, which is what shipped.
+//
+// Value-free like every other renderer here: it takes a CLI name and reads two
+// module tables. The user's command string is NOT a parameter — it would be the
+// one value on this path that a support bundle should not necessarily carry, and
+// naming the CLI is enough to act on.
+export function formatMcpSweepBlockedResidual(input: {
+  cli: McpCliName;
+}): string {
+  // The scopes THIS CLI's policy removes, not every scope the type allows: a
+  // codex user must not be handed `codex mcp remove --scope user drift`, which
+  // that CLI does not accept. Read from the same table planMcpCliRemoval
+  // iterates, so a new scope reaches the sweep and this sentence together.
+  const commands = MCP_CLI_REMOVAL_SCOPE_NAMES[input.cli]
+    .map((scope) => MCP_CLI_REMOVE_REMEDIATION[input.cli][scope])
+    .join(", ");
+  const exposure = MCP_CLI_EXPANDS_ENV_REFERENCES[input.cli]
+    ? `that entry carries a ${CAIDO_TOKEN_KEY} reference rather than the token bytes, and it can shadow the entry Drift writes next`
+    : `that entry carries your Caido session token in plain text`;
+  return (
+    `[drift] Drift could not locate the ${input.cli} CLI, so it could not remove ` +
+    `a Drift MCP entry from that CLI's own configuration. If Drift ever ` +
+    `registered with ${input.cli} on this machine, ${exposure}. Remove it with: ` +
+    commands
+  );
+}
+
 // The line for the THIRD outcome (WR-05), and the reason it is a separate
 // function rather than a softer parameter on the one below: the two sentences
 // make opposite claims. `formatMcpRemoveFailure` says a credential MAY REMAIN;

@@ -22,6 +22,7 @@ import {
   findExpandableEnvKeys,
   formatMcpRemoveFailure,
   formatMcpRemoveUnusable,
+  formatMcpSweepBlockedResidual,
   formatSpawnDebugLine,
   planMcpCliRegistration,
   planMcpCliRemoval,
@@ -881,6 +882,66 @@ describe("classifyMcpRemoveExit", () => {
       "spawnFailed",
     ]);
     expect(classifyMcpRemoveExit(input)).toBe("failed");
+  });
+});
+
+describe("formatMcpSweepBlockedResidual", () => {
+  it("hands the user only the removal commands their CLI actually accepts", () => {
+    // The failure this guards: `codex mcp remove --scope user drift` is not a
+    // command Codex takes, and a remediation line a user cannot paste is worse
+    // than none. The commands come from the same per-CLI policy the sweep
+    // iterates, so a scope reaches the removal and this sentence together.
+    for (const cli of ["gemini", "codex"] as const) {
+      const line = formatMcpSweepBlockedResidual({ cli });
+      for (const { scope } of planMcpCliRemoval({ cli, platform: "linux" })) {
+        expect(line).toContain(MCP_CLI_REMOVE_REMEDIATION[cli][scope]);
+      }
+    }
+    // Concretely, and in both directions.
+    expect(formatMcpSweepBlockedResidual({ cli: "codex" })).toContain(
+      "codex mcp remove drift",
+    );
+    expect(formatMcpSweepBlockedResidual({ cli: "codex" })).not.toContain(
+      "--scope",
+    );
+    const gemini = formatMcpSweepBlockedResidual({ cli: "gemini" });
+    expect(gemini).toContain("gemini mcp remove --scope user drift");
+    expect(gemini).toContain("gemini mcp remove --scope project drift");
+  });
+
+  it("describes each CLI's ACTUAL exposure rather than one averaged sentence", () => {
+    // Codex's entry embeds the token bytes; Gemini's carries a reference that
+    // expands from an environment Drift is no longer supplying. Both are worth
+    // removing, only one is a credential sitting in a file, and telling a Gemini
+    // user their token is in plain text would be false.
+    expect(formatMcpSweepBlockedResidual({ cli: "codex" })).toContain(
+      "plain text",
+    );
+    expect(formatMcpSweepBlockedResidual({ cli: "gemini" })).not.toContain(
+      "plain text",
+    );
+    expect(formatMcpSweepBlockedResidual({ cli: "gemini" })).toContain(
+      "CAIDO_TOKEN",
+    );
+  });
+
+  it("states the claim CONDITIONALLY, because Drift cannot know across restarts", () => {
+    // `registeredMcpCliPaths` is process-lifetime state, so a run that crashed
+    // took its record with it. "If Drift ever registered" is the strongest true
+    // claim available; asserting the entry exists would be a guess.
+    for (const cli of ["gemini", "codex"] as const) {
+      expect(formatMcpSweepBlockedResidual({ cli })).toContain(
+        "If Drift ever registered",
+      );
+    }
+  });
+
+  it("has no parameter through which the user's command string could arrive", () => {
+    // The one value on this path a support bundle should not necessarily carry.
+    // Naming the CLI is enough to act on (T-07-05).
+    expect(formatMcpSweepBlockedResidual).toHaveLength(1);
+    const input = { cli: "codex" } as const;
+    expect(Object.keys(input)).toEqual(["cli"]);
   });
 });
 

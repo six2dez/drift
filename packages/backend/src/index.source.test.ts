@@ -174,3 +174,26 @@ describe("index.ts threads the spawn discriminator into every removal classifica
     expect(code.match(/spawned: false/g)).toHaveLength(2);
   });
 });
+
+// WR-04. The sweep called itself UNCONDITIONAL while carrying two gates it never
+// listed, and README.md promised the stronger behaviour. The gates cannot be
+// removed - the sweep removes an entry by shelling the CLI's own `mcp remove`,
+// so with no binary there is no removal - so the residual has to be REPORTED.
+// This is the assertion that it still is; the sentence itself is asserted in
+// mcp-server-spec.test.ts, where it can be read as data.
+describe("index.ts reports the residual the sweep cannot remove (WR-04)", () => {
+  it("emits the blocked-sweep notice on the console channel", () => {
+    const calls = callArgumentTexts(code, "formatMcpSweepBlockedResidual");
+    expect(calls).toHaveLength(1);
+    expect(code).toContain(
+      "sdk.console.error(formatMcpSweepBlockedResidual({ cli }))",
+    );
+  });
+
+  it("emits it once per process per command value, not once per MCP start", () => {
+    // A line that repeats on every Start is the one a user stops reading, which
+    // is the same argument the removal classifier makes for its own banner.
+    expect(code).toContain("mcpCliBlockedSweepNotices");
+    expect(code).toMatch(/if \(!mcpCliBlockedSweepNotices\.has\(noticeKey\)\)/);
+  });
+});
