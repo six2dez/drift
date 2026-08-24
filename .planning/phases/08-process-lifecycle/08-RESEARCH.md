@@ -1005,28 +1005,40 @@ describe.skipIf(process.platform === "win32")("POSIX process-group termination (
 
 ---
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **OQ-1 — Does the planner amend SC-2's mechanism clause, or satisfy it literally?**
+All five were closed during Phase 8 planning. Each carries the decision that closed it and where that
+decision is recorded, so a reader arriving here does not have to reconstruct the outcome from the plans.
+
+| # | Resolution | Recorded in |
+|---|---|---|
+| **OQ-1** | RESOLVED — maintainer decision **D-01**: build the spawn form and **amend SC-2 in place**. | `08-02-PLAN.md` § *Recorded decisions* D-01; executed by `08-05-PLAN.md` T-08-12 |
+| **OQ-2** | RESOLVED — recorded decision **OQ-2**: keep **both** signals on POSIX, explicitly as defence against assumption A1. | `08-02-PLAN.md` § *Recorded decisions* OQ-2; implemented in T-08-04's `killTree` |
+| **OQ-3** | RESOLVED — recorded decision **OQ-3**: the orphan-process sweep is **out of scope**; recorded as an accepted residual, not planned as a task. | `08-05-PLAN.md` T-08-13 → `08-SECURITY.md` AR-02 |
+| **OQ-4** | RESOLVED — recorded decision **OQ-4**: `cancelCliMessage` stays **synchronous**; `killTree` is fire-and-forget, so SC-5 holds by construction. | `08-02-PLAN.md` § *Recorded decisions* OQ-4 |
+| **OQ-5** | RESOLVED — **overridden by maintainer decision D-02**: plan for *full* closure and let `/gsd-verify-work` rule, rather than pre-declaring SC-3 PARTIAL. The recommendation below is superseded. | `08-04-PLAN.md` § *objective* (the "Honesty about SC-3" block) and `08-05-PLAN.md` § *output* |
+
+1. **OQ-1 — Does the planner amend SC-2's mechanism clause, or satisfy it literally?** — **(RESOLVED — D-01)**
    - *What we know:* `detached: true` works under LLRT (source-verified). "Process-group signalling" is achievable — but only by spawning `kill`, not by `process.kill(-pid)`.
    - *What's unclear:* whether the roadmap author intended `process.kill(-pid)` specifically. The wording *"`detached: true` + process-group signalling"* is satisfied by the spawn form on a plain reading.
    - *Recommendation:* **satisfy it literally with the spawn form, and amend SC-2 in place** to name the mechanism and the reason — the Phase 5 SC-1 / Phase 7 SC-2 precedent (`05-CONTEXT.md` D-02). An unamended criterion invites a later reader to "fix" the code back to the broken spelling.
 
-2. **OQ-2 — Should the POSIX arm keep a single-pid signal alongside the group signal?**
+2. **OQ-2 — Should the POSIX arm keep a single-pid signal alongside the group signal?** — **(RESOLVED — recorded decision OQ-2: keep both)**
    - *What we know:* the group signal subsumes the single-pid one when `detached` took effect. If `detached` silently failed (an older LLRT, A1), the group form signals a group that does not exist and nothing dies at all.
    - *Recommendation:* **keep both** — `proc.kill(sig)` first, then the group spawn — as the § *Code Examples* glue shows. It costs one syscall and converts a total regression into a partial one. Note it explicitly as defence against A1, not as belt-and-braces.
 
-3. **OQ-3 — Should the start-up sweep kill orphan processes, not just orphan directories?**
+3. **OQ-3 — Should the start-up sweep kill orphan processes, not just orphan directories?** — **(RESOLVED — recorded decision OQ-3: out of scope, residual AR-02)**
    - *What we know:* `sweepOrphanedMcpTempDirs` (`index.ts:3441`) removes residue directories but never processes. A hard-killed Caido leaves an MCP process holding a live token indefinitely.
    - *What's unclear:* how to identify "a Drift MCP process from a previous run" without image-name matching that could terminate an unrelated `node`.
    - *Recommendation:* **out of scope for Phase 8.** Record as a residual in `08-SECURITY.md`. Killing by image name is the kind of blast-radius decision that needs its own discuss-phase.
 
-4. **OQ-4 — Does `cancelCliMessage` remain synchronous?**
+4. **OQ-4 — Does `cancelCliMessage` remain synchronous?** — **(RESOLVED — recorded decision OQ-4: yes, fire-and-forget)**
    - *Recommendation:* **yes**, via fire-and-forget (Pitfall 7). This is the cheapest way to satisfy SC-5 by construction, and the planner should state it as a decision so the next reader does not "improve" it into an `await`.
 
-5. **OQ-5 — How is SC-3 (*"zero lingering processes on either platform"*) evidenced?**
+5. **OQ-5 — How is SC-3 (*"zero lingering processes on either platform"*) evidenced?** — **(RESOLVED — SUPERSEDED by maintainer decision D-02)**
    - *What we know:* POSIX is fully evidenceable — the integration test in § *Code Examples* proves it on the ubuntu and macOS legs. Windows is not: no CI leg spawns a real CLI, and `index.ts` is unimportable.
-   - *Recommendation:* claim SC-3 **PARTIAL** at phase close — proven on POSIX by execution, evidenced on Windows only for the *spawn contract* (that the right `taskkill` argv is built and delivered) — and route the behavioural half to Phase 10's real-machine confirmation, alongside SC-5 and SC-6 there. Say this in the plan, not at verification time.
+   - *Recommendation (SUPERSEDED):* claim SC-3 **PARTIAL** at phase close — proven on POSIX by execution, evidenced on Windows only for the *spawn contract* (that the right `taskkill` argv is built and delivered) — and route the behavioural half to Phase 10's real-machine confirmation, alongside SC-5 and SC-6 there. Say this in the plan, not at verification time.
+   - *Actual resolution — maintainer decision **D-02**:* do **not** pre-declare PARTIAL. Plan for full closure and let `/gsd-verify-work` rule on the evidence. The honesty this recommendation asked for is preserved, but as a *statement of what the evidence does and does not reach* rather than as a pre-emptive downgrade: it is written into `08-04-PLAN.md`'s objective ("Honesty about SC-3") and `08-05-PLAN.md`'s output, and no Phase 8 `must_haves` block contains the word PARTIAL.
 
 ---
 
