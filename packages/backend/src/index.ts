@@ -3712,7 +3712,7 @@ async function saveChat(_sdk: BackendSDK, chat: StoredChat): Promise<Result<void
   return ok(undefined);
 }
 
-async function deleteChat(_sdk: BackendSDK, chatId: string): Promise<Result<void>> {
+async function deleteChat(sdk: BackendSDK, chatId: string): Promise<Result<void>> {
   await dataReady;
   currentChats = currentChats.filter((c) => c.id !== chatId);
   cliSessions.delete(chatId);
@@ -3720,7 +3720,20 @@ async function deleteChat(_sdk: BackendSDK, chatId: string): Promise<Result<void
     if (snapshot.chatId !== chatId) continue;
     const proc = activeProcesses.get(sessionId);
     if (proc !== undefined) {
-      try { proc.kill("SIGTERM"); } catch { /* already dead */ }
+      // SC-4 / LIF-01 / LIF-02, and here the ORDER is the control rather than
+      // the call. This termination must stay ABOVE the sessionRuntimeFiles
+      // block that follows: those files are what carried the Caido token into
+      // the MCP child's environment, and removing them while that child is
+      // still running destroys the evidence — which pid, which session, which
+      // policy — while leaving the capability untouched, because the token
+      // lives in the process's memory and not in the file it arrived through.
+      // Deleting a token-bearing file is not revocation; killing the process
+      // that read it is. Do NOT move the removal block back above this.
+      //
+      // The FORCEFUL rung, deliberately: a chat is being deleted, so there is
+      // no partial output left for anyone to read, and Windows has no graceful
+      // rung in any case.
+      killTree(sdk, proc, "kill");
       activeProcesses.delete(sessionId);
     }
     const runtimeFiles = sessionRuntimeFiles.get(sessionId);
@@ -4573,16 +4586,49 @@ async function sendCliMessage(
           mcpAttached: mcpTempDir !== undefined,
           reasonCode: "timeout",
         });
+        // Pitfall 10, and it names which of the next two statements is the
+        // movable one. The KILL moved UP; `finalize` did NOT move and must not:
+        // it is a `const` arrow declared LOWER in this same promise executor, so
+        // hoisting it to this position puts it in its temporal dead zone and
+        // calling it throws a ReferenceError synchronously inside the executor —
+        // the exact bug already recorded above at the spawn guard. Reorder these
+        // two and you get a rejected promise instead of a timed-out turn.
+        //
+        // Why the kill goes first at all (SC-4): `finalize` removes the activity
+        // and approvals files that carried the Caido token into the MCP child's
+        // environment. The tree that was reading them dies before they vanish.
+        killTree(sdk, proc, "kill");
         finalize(err("Process timed out"));
-        try { proc.kill("SIGKILL"); } catch { /* already dead */ }
       }, currentSettings.processTimeoutSeconds * 1000);
 
       const requestGracefulShutdown = () => {
         appendSessionDebugLog(sessionDebugLogPath, "requestGracefulShutdown(): SIGTERM");
-        try { proc.kill("SIGTERM"); } catch { /* already dead */ }
+        // Captured BEFORE the timer is scheduled and never re-read from `proc`
+        // inside it (§ Pitfall 2): by the time the deferred rung runs the child
+        // may have been reaped and the number reassigned.
+        const shutdownPid = proc.pid;
+        // PITFALL 4 — THE SECOND RUNG STAYS, ON BOTH PLATFORMS, AND FOR
+        // DIFFERENT REASONS ON EACH. On POSIX the two rungs are genuinely
+        // different signals to the process group: the first lets the CLI flush
+        // the partial output the frontend surfaces, the second collects whatever
+        // ignored it. On win32 both build the IDENTICAL forceful plan, because
+        // Windows has no graceful rung — so the second rung there is a
+        // deliberate RE-ISSUE against a pid that has normally already gone, not
+        // an inert repeat. Do not delete it as redundant, and do not "restore
+        // symmetry" by turning it back into a direct signal on the child handle:
+        // under LLRT that handle's win32 arm consumes its sender on first use,
+        // so the ladder would read graceful-then-forceful while being
+        // forceful-then-nothing.
+        killTree(sdk, proc, "term");
         setTimeout(() => {
+          // GUARDED FIRST, so the debug line below cannot claim a signal that
+          // was never sent. An unprovable liveness answer resolves toward
+          // "alive", so this can only ever skip a kill, never add one — and on
+          // Windows the forceful plan would take an unrelated process's WHOLE
+          // tree if the pid had been reassigned (threat T-08-04).
+          if (shutdownPid === undefined || !isPidAlive(shutdownPid)) return;
           appendSessionDebugLog(sessionDebugLogPath, "requestGracefulShutdown(): SIGKILL");
-          try { proc.kill("SIGKILL"); } catch { /* already dead */ }
+          killTree(sdk, proc, "kill");
         }, 3000);
       };
 
@@ -5044,7 +5090,19 @@ function closeCliSession(
   const proc = activeProcesses.get(input.sessionId);
   const snapshot = getSessionSnapshot(input.sessionId);
   if (proc !== undefined) {
-    try { proc.kill("SIGTERM"); } catch { /* already dead */ }
+    // SC-4 / LIF-01 / LIF-02 — the same ordering contract as deleteChat, and the
+    // same reason. The sessionRuntimeFiles block below removes the activity and
+    // approvals files that carried the Caido token into the MCP child's
+    // environment; removing them while that child is still alive destroys the
+    // forensic trail without withdrawing the credential, because the token is in
+    // the process's memory rather than in the file. This termination must stay
+    // ABOVE that block — do not move the removal back above it.
+    //
+    // The FORCEFUL rung: the session is being closed, so no partial output is
+    // owed to anyone, and Windows has no graceful rung. `killTree` is
+    // fire-and-forget, so this function keeps its synchronous Result<void>
+    // signature (OQ-4).
+    killTree(sdk, proc, "kill");
     activeProcesses.delete(input.sessionId);
   }
   const runtimeFiles = sessionRuntimeFiles.get(input.sessionId);
