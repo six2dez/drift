@@ -4,16 +4,16 @@ milestone: v1.0
 current_phase: 08
 current_phase_name: Process Lifecycle
 status: executing
-stopped_at: Completed 08-02-PLAN.md
-last_updated: "2026-08-24T15:26:24.989Z"
+stopped_at: Completed 08-03-PLAN.md
+last_updated: "2026-08-24T15:41:59.589Z"
 last_activity: 2026-08-24
 last_activity_desc: Phase 08 execution started
-state_head: ead2770e36100ff33edb6bc72a478935d7447c90
+state_head: 6e14e9f7138b5a145021a898e2d4f508037e0f18
 progress:
   total_phases: 13
   completed_phases: 5
   total_plans: 45
-  completed_plans: 42
+  completed_plans: 43
 milestone_name: milestone
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-06-26)
 ## Current Position
 
 Phase: 08 (Process Lifecycle) — EXECUTING
-Plan: 3 of 5
+Plan: 4 of 5
 Status: Ready to execute
 Last activity: 2026-08-24 — Phase 08 execution started
 
@@ -70,6 +70,7 @@ Progress: [███░░░░░░░] 30% (3 of 10 milestone phases)
 | Phase 05 P06 | 2h 17min | 4 tasks | 6 files |
 | Phase 08 P01 | 1h 55m | 2 tasks | 3 files |
 | Phase 08 P02 | 15 min | 3 tasks | 5 files |
+| Phase 08 P03 | 12 min | 3 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -189,6 +190,10 @@ Recent decisions affecting current work:
 - [Phase 08]: killTree keeps the single-pid signal alongside the group spawn (OQ-2), explicitly as defence against the unmeasured A1
 - [Phase 08]: buildKillTreePlan takes an env record, not a systemRoot scalar (D-P4), so the SystemRoot/SYSTEMROOT casing fallback is assertable on the Linux runner
 - [Phase 08]: killTree takes sdk as its first parameter — index.ts holds no module-level SDK reference, so the planned two-argument shape had no logging channel
+- [Phase 08]: D-P1 implemented: the SC-4 ordering gate is an in-test functionBody helper running on every CI leg, with the line-number-derived shell slice kept as an independent second read rather than as the primary control
+- [Phase 08]: The functionBody scanner balances the PARAMETER LIST before looking for the body brace - without it closeCliSession returns a 19-character type-literal body under which every ordering assertion passes vacuously
+- [Phase 08]: Both Phase 7 LIF-01 SEAM markers resolved rather than deleted: cleanupMcpRuntime by an activeProcesses kill loop, sendCliMessage by a resolution note naming the taskkill /t ParentProcessId walk and the accepted AR-01 residual
+- [Phase 08]: Pitfall 4 recorded in source: the second kill rung stays on both platforms - different signals to the group on POSIX, a deliberate re-issue of the identical forceful plan on win32
 
 ### Pending Todos
 
@@ -229,8 +234,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-24T15:26:24.871Z
-Stopped at: Completed 08-02-PLAN.md
+Last session: 2026-08-24T15:41:47.678Z
+Stopped at: Completed 08-03-PLAN.md
 Resume file: None
 
 **Live on the public remote: nothing of ours.** Plan 03-04 tore down all three `scratch/*` branches (`ci-proof-windows-probe`, `ci-proof-windows-probe-negative`, `ci-proof-windows-gate-negative`) locally and remotely. Asserted with a `test -z` discrimination over the captured glob (`scratch-glob-empty=0`) plus the full unfiltered listing, which now shows only `main` at `2d8cf16` and the pre-existing, unrelated `fix/security-hotfixes` at `0cd81f3`. `origin/main` was never pushed by this phase and is still `2d8cf16`; local `main` is 23 commits ahead and deliberately unpushed. **Re-verified 2026-08-13 (plan 03-05):** the remote still lists only `main` `2d8cf16` and the pre-existing `fix/security-hotfixes` `0cd81f3`, and all eight Phase 3 run records (4 probe + 4 `CI` control) still resolve with their recorded conclusions — which is what makes the URLs in `03-FINDINGS.md` valid citations after the branches were deleted. The probe **artifacts** do not survive: they expire 2026-09-12, which is why D-11 required the committed findings document.
