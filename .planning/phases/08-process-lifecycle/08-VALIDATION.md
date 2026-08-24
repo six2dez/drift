@@ -80,10 +80,10 @@ zero tests removed as obsolete**, verified mechanically — the check `05-REPORT
 | T-08-11 | 04 | 0 | LIF-01 / SC-3 | — | The gate itself still exists and points at a file that exists — runs on **every** platform, so a deleted gate is noticed on Linux | unit (static) | `pnpm exec vitest run packages/backend/src/kill-tree.win32.gate.test.ts` — mirrors `spawn-plan.win32.gate.test.ts` | ✅ | ✅ green (6/6 on POSIX) |
 | T-08-09 | 03 | 1+ | SC-4 | T-08-01 | In `cleanupMcpRuntime`, `closeCliSession` and `deleteChat`, the kill statement precedes every `rm` | static gate | primary: `pnpm exec vitest run packages/backend/src/index.source.test.ts` (the `functionBody` positional gate, 3 sites); second read: the `awk`-scoped shell slice | ✅ | ✅ green (falsifiable in 3 directions, verified by hand) |
 | T-08-08 | 03 | 1+ | SC-4 | T-08-01 | `cleanupMcpRuntime` kills at all — the marker changes from seam to implementation | static gate | `awk '/^async function cleanupMcpRuntime/,/^}/' … \| grep -c 'killTree'` ≥ 1; asserted in-test by `index.source.test.ts` | ✅ | ✅ green (`activeProcesses.entries()` = 1, `await killTree` = 0) |
-| T-08-09 | 03 | 1+ | SC-1 / SC-2 wiring | — | All in-scope sites route through `killTree`; the out-of-scope leaf sites still call `proc.kill`/`child.kill` directly | static gate | the call-site census in `packages/backend/src/index.source.test.ts` | ✅ | ✅ green — **measured `killTree(` = 9 (1 declaration + 8 call sites), not the seed's 5; see § Corrections C3** |
-| T-08-06 | 02 | 0 | Pitfall 1 — the LLRT trap | T-08-03 | **The LLRT-incompatible negative-pid signalling spelling appears nowhere as code.** The only vehicle-independent control against the Node-green/LLRT-broken regression | static gate | primary: the comment-stripped assertion in `packages/backend/src/index.source.test.ts` over `index.ts` **and** `kill-plan.ts`; shell companion: `grep -rn 'process\.kill(-' packages/backend/src --include='*.ts' \| grep -vE ':[0-9]+:[[:space:]]*(//\|\*)' \| wc -l` = `0` | ✅ | ✅ green — **the seeded raw-grep command was wrong and would go red on correct code; see § Corrections C1** |
+| T-08-09 | 03 | 1+ | SC-1 / SC-2 wiring | — | All in-scope sites route through `killTree`; the out-of-scope leaf sites still call `proc.kill`/`child.kill` directly | static gate | the call-site census in `packages/backend/src/index.source.test.ts` | ✅ | ✅ green — **measured `killTree(` = 9 (1 declaration + 8 call sites), not the seed's 5; see § Corrections C3. `proc.kill(` moved 3 → 4 in the fix pass; see § Corrections C5** |
+| T-08-06 | 02 | 0 | Pitfall 1 — the LLRT trap | T-08-03 | **The LLRT-incompatible negative-pid signalling spelling appears nowhere as code.** The only vehicle-independent control against the Node-green/LLRT-broken regression | static gate | primary: the comment-stripped assertion in `packages/backend/src/index.source.test.ts` over `index.ts` **and** `kill-plan.ts`; shell companion: `grep -rn 'process\.kill(-' packages/backend/src --include='*.ts' \| grep -vE ':[0-9]+:[[:space:]]*(//\|\*)' \| wc -l` = `0` | ✅ | ✅ green — **the seeded raw-grep command was wrong and would go red on correct code; see § Corrections C1. The in-test needle was WIDENED after phase close; see § Corrections C5** |
 | T-08-09 | 03 | 1+ | C-4 | — | `shell: true` still appears nowhere (the shipped Phase 7 gate, re-run) | static gate | `test "$(grep -rn 'shell: *true' packages/ --include='*.ts' \| wc -l \| tr -d ' ')" = 0` | ✅ | ✅ green (measured `0`) |
-| T-08-14 | 05 | last | SC-5 / CMP-01 | — | Full suite green; test count **grew** from 534 with zero removals; typecheck and lint clean | regression | `pnpm exec vitest run && pnpm -r typecheck && pnpm lint` | ✅ | ✅ green — 578 tests, zero removed |
+| T-08-14 | 05 | last | SC-5 / CMP-01 | — | Full suite green; test count **grew** from 534 with zero removals; typecheck and lint clean | regression | `pnpm exec vitest run && pnpm -r typecheck && pnpm lint` | ✅ | ✅ green — **602 tests, zero removed** (578 at phase close; +24 from the code-review fix pass — see § Corrections C5) |
 | T-08-14 | 05 | last | SC-5 | — | The frontend cancel-race guard is byte-unchanged — the user-visible `[Cancelled]` semantics | tripwire | `git diff --stat 1b3fde6 -- packages/frontend/src/views/ChatView.cancel.test.ts packages/frontend/src/views/ChatView.vue` is empty | ✅ | ✅ green (empty at every plan close) |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky, unexecuted or shipped-but-unfired*
@@ -170,6 +170,51 @@ rungs** (SIGTERM then a deferred SIGKILL), which the seed counted as one site ea
 The three surviving direct-handle sites are leaves with no tree, and are deliberately not routed:
 `callMcpMethod`'s two rungs, `resolveCommand`'s PATH-search timeout, and `killTree`'s own single-pid
 rung — the last being OQ-2's explicit defence against assumption A1.
+
+### C5 — facts this document recorded that the code-review fix pass changed
+
+Applied 2026-08-24 by the `--fix` pass over `08-REVIEW.md` (findings CR-01, CR-02, WR-01, WR-02,
+WR-04). Recorded as a correction rather than silently overwritten, per the `07-VALIDATION.md`
+convention this file already follows.
+
+**Test count — T-08-14's row.** 578 at phase close → **602**. Zero tests removed; the delta is 24
+added by the fix pass (6 literal-input cases for `hasTrackedProcessExited` in `kill-plan.test.ts`,
+18 source assertions in `index.source.test.ts`). Re-measured with the same command:
+`pnpm exec vitest run` → 593 passed / 9 skipped / 602 total; `pnpm -r typecheck` and `pnpm lint`
+exit 0.
+
+**The LLRT-trap needle — T-08-06's row.** Was `/process\s*\.\s*kill\s*\(\s*-/`, anchored on the
+RECEIVER. Review WR-02 found it blind to the indirection this same phase introduced twenty lines
+above `killTree` (`killRef.call(processRef.process, pid, 0)` in `isPidAlive`), which had become the
+established local idiom for reaching that primitive. Widened to
+`/\.\s*kill\s*\(\s*-|kill\w*\s*\.\s*(?:call|apply)\s*\(\s*[^,()]*,\s*-/` — receiver-agnostic, plus
+the reflective form — and given two new companions: a positive match test against synthetic text for
+both arms (a needle only ever asserted *absent* can rot into one matching nothing), and a census of
+every reference that takes the kill primitive as a **value** rather than calling it, currently
+**1**. The shell companion is unchanged and still measures **0**. What the widened needle still
+cannot see is written into the block itself: a negative pid bound to a variable first, a computed
+member access, `Reflect.apply`, or a callee not named `kill*`.
+
+**The single-pid census — T-08-09's row.** `proc.kill(` measured **3** at phase close, **4** now.
+CR-01 guarded `killTree`'s preamble rung to non-win32 (on Windows it is an unconditional
+`TerminateProcess`, so it removed the target from the process table before `taskkill /t` could walk
+its `ParentProcessId` children) and added `killWin32Leaf` as the win32 last resort at the two
+spawn-failure arms — without which a Windows host that cannot spawn `taskkill.exe` at all would lose
+nothing. `killTree(` is **unchanged at 9**; `child.kill(` unchanged at **1**; `await killTree`
+unchanged at **0**.
+
+**New standing controls this document should now count.** Four blocks were added to
+`index.source.test.ts` and one to `kill-plan.test.ts`, all of them evidence for rows already in the
+table above rather than new requirements: the CR-01 win32 ordering gate (5 assertions, verified
+falsifiable by deleting the platform guard), the CR-02 identity-before-liveness gate (5, verified
+falsifiable by swapping the two guard statements), the WR-01 cleanup-loop reporting gate (3), the
+WR-03 `isPidAlive(` census and body assertions (2), and `hasTrackedProcessExited`'s six literal-input
+cases (verified falsifiable by simplifying its body back to `exitCode !== null`, 2 red).
+
+**Still uncorrected, deliberately.** `IN-02` — this document's SC-4 row says the kill statement
+precedes *every* `rm`, while the shipped gate compares against the **first** `rm`. It is true today
+at all three sites, it was rated Info, and the fix pass was scoped to Critical and Warning. Left as
+a known documentation-vs-gate mismatch rather than silently reworded.
 
 ### C4 — seed cells that were wrong but carried no placeholder marker
 
