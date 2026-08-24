@@ -344,9 +344,11 @@ Plans:
   2. Drift detects and messages the "not on PATH" case for the Claude native installer instead of failing opaquely.
   3. Windows-aware diagnostics surface the resolved binary, the spawn strategy used, and any `mcp add` skip reason in the support bundle / session log.
   4. `windowsHide: true` is set on every spawn so no console windows flash on Windows.
+  5. **PRV-01 is confirmed by a real Claude Code turn on a real Windows desktop** — a human starts a chat, the Drift MCP attaches, and a Drift tool returns live Caido data. Not CI: a CI job proves the *spawn contract*, and `packages/backend/src/index.ts` cannot be imported under vitest, so no automated leg in this milestone reaches the wiring or the LLRT runtime the code ships into. Where the original reporter (@0xMRK0S, reported 2026-06-24) is unavailable, any Windows user's confirmation satisfies this; what does **not** satisfy it is another green CI run. *(Added 2026-08-24 at Phase 7 close, per `07-VERIFICATION.md` § roadmap_gaps. Phase 7 held SC-1 at PARTIAL for exactly this reason and its artifacts deferred the confirmation to "Phase 9/10" — which named it nowhere, so the milestone could have completed with the blocking must-have never confirmed by anyone on real hardware.)*
+  6. **Gemini's Windows status is resolved by a real-machine check** and its best-effort label either lifted or restated with the measured reason. Phase 7 SC-5 gated Gemini's status on this check and it has not happened; upstream Windows MCP reliability issues remain unresolved, so the outcome may legitimately be "still best-effort" — but recorded as a measurement rather than an assumption. *(Added 2026-08-24 at Phase 7 close, same source as SC-5 above.)*
 
 **Plans**: 1 plan (provisional)
-**Research flag**: NO — UX copy and file-system probes.
+**Research flag**: NO — UX copy and file-system probes. SC-5 and SC-6 are human confirmations, not research; they depend on a third party and should be scheduled early enough in the phase that a slow reply does not block it.
 
 ### Phase 11: Plugin Capability Discovery
 
