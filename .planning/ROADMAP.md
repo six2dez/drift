@@ -292,6 +292,7 @@ Plans:
 **Plans**: 5 plans
 
 Plans:
+
 - [ ] 07-01-PLAN.md — Tracer: launch a Windows `.cmd` provider shim end-to-end through a new pure `buildSpawnPlan`, and measure the escaping on a real `windows-latest` run (PRV-01, PRV-02, UX-01)
 - [ ] 07-02-PLAN.md — Promote `ProviderStatus` to a capability level, add the per-CLI approval-channel table, and state the limitation on the provider card (PRV-04, PRV-05, UX-01)
 - [ ] 07-03-PLAN.md — Register Gemini/Codex with `node` + args + `env` on every platform, and delete the POSIX wrapper in the same commit (SC-7) (PRV-03, PRV-04, PRV-05)
@@ -316,10 +317,21 @@ Plans:
 **Plans**: 5 plans
 
 Plans:
+**Wave 1**
+
 - [ ] 08-01-PLAN.md — Wave-0 spike: close assumptions A1 (does the shipped Caido LLRT honour `detached`?) and A6 (is the CLI's MCP child in the CLI's process group?) on real hardware, then delete the probe (LIF-02)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 08-02-PLAN.md — Tracer: a POSIX cancel takes the token-bearing grandchild with it — `kill-plan.ts`, `killTree`, `detached` at the provider spawn, and the behavioural proof with its falsifying control (LIF-01, LIF-02)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
 - [ ] 08-03-PLAN.md — Expand to every in-scope kill site and close SC-4: kill-before-sweep at `cleanupMcpRuntime`, `closeCliSession` and `deleteChat`, with a positional source gate (LIF-01, LIF-02)
 - [ ] 08-04-PLAN.md — Windows evidence: the win32-gated integration suite, the recorded `taskkill` exit code, and a `--reporter=json` CI gate with anchors distinct from Phase 7's (LIF-01)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
 - [ ] 08-05-PLAN.md — Phase close: amend SC-2 in place, the sixth pure-helper row, the validation task-ID fill with its seed corrections, `08-SECURITY.md`, and the real-hardware confirmation (LIF-01, LIF-02)
 
 **Research flag**: RESOLVED 2026-08-24 by `08-RESEARCH.md`. The primitives are indeed standard; the **mechanism** was not. `detached: true` is source-verified honoured by Caido's LLRT fork (`command.process_group(0)`), but the canonical group-signalling spelling `process.kill(-pid, sig)` **throws** there — LLRT types `pid` as `u32` and rquickjs range-checks through `f64`, raising `Underflow` before `libc::kill` is reached — while working perfectly under Node, the only vehicle any CI leg in this repository runs. SC-2 is amended in place by plan 08-05 accordingly (see the criterion's own note).
