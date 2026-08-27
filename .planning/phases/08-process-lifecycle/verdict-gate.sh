@@ -105,6 +105,56 @@ is_excluded() {
 # =============================================================================
 # ARM A — DISCOVERY (FAIL-CLOSED)
 # =============================================================================
+# WHITESPACE-SAFE DISCOVERY (review WR-05), and this is the arm's own design
+# argument applied to its own plumbing rather than a tidy-up.
+#
+# WHAT IT USED TO BE:
+#
+#   find … -type f -print | xargs grep -lE "$STALE_ERE" 2>/dev/null
+#
+# `xargs` without `-0` splits on WHITESPACE and honours quotes, so a path
+# containing a space, a tab, a single quote or a double quote was silently split
+# into operands that do not exist. `grep` reported "No such file or directory"
+# into the `2>/dev/null`, the real carrier never reached the loop, and the gate
+# stayed GREEN with the stale claim sitting in it. That is the FAIL-OPEN property
+# ARM A's header spends a paragraph arguing an inclusion list has — reintroduced
+# through the pipe, in the arm built to avoid it.
+#
+# Measured before the fix: the repo has zero such paths today, so this was LATENT
+# rather than live. It does not stay latent by itself — "Application Support" is
+# a path this project already reasons about, and one artifact named
+# `08 UAT notes.md` is the whole exploit. Verified on exactly that fixture: the
+# old pipeline finds 0, the new one names the file.
+#
+# `-exec … {} +` rather than `xargs -0`, and this is the SECOND attempt at this
+# line rather than the first — the record is kept because the first attempt was
+# worse than the bug. It used `grep -lIZE` plus `read -r -d ''`, on the assumption
+# that `-Z` means `--null`. On GNU grep it does. On FreeBSD/macOS grep, and on the
+# `ugrep` many developers have shadowing `grep` on PATH, **`-Z` means
+# `--decompress`** — so the output stayed newline-delimited, `read -d ''` found no
+# NUL, and the loop ran ZERO times. ARM A would have gone from failing open on
+# whitespace paths to failing open on EVERYTHING, while still printing "pass".
+# Caught by running the fixture; recorded so the flag is not "restored" later.
+#
+# So: only flags GNU grep, BSD grep and ugrep all agree on — `-l`, `-I`, `-E` —
+# and a newline-delimited read. `-I` skips binary files, which `grep -l` would
+# otherwise name and the loop below would then `sed` as text.
+#
+# THE ONE PATH SHAPE THIS STILL CANNOT ENUMERATE is a filename containing a
+# NEWLINE. Rather than leave that as an unstated hole in a fail-closed arm, it is
+# DETECTED: `find -print0` and `find -print` must agree on the number of names,
+# and they cannot when one contains a newline. A repository that ever grows such
+# a path turns this arm RED instead of quietly skipping it.
+N_NUL=$(find .planning packages \
+        \( -name node_modules -o -name dist -o -name .git \) -prune -o \
+        -type f -print0 2>/dev/null | tr -cd '\0' | wc -c | tr -d ' ')
+N_LINE=$(find .planning packages \
+         \( -name node_modules -o -name dist -o -name .git \) -prune -o \
+         -type f -print 2>/dev/null | wc -l | tr -d ' ')
+if [ "$N_NUL" != "$N_LINE" ]; then
+  fail "ARM A" "a path under .planning/ or packages/ contains a NEWLINE ($N_NUL names, $N_LINE lines) — the discovery loop cannot enumerate it safely."
+fi
+
 echo "== ARM A: repo-wide discovery (.planning/ and packages/, exclusion-list) =="
 ARM_A_HITS=0
 while IFS= read -r f; do
@@ -118,8 +168,7 @@ while IFS= read -r f; do
 done < <(
   find .planning packages \
        \( -name node_modules -o -name dist -o -name .git \) -prune -o \
-       -type f -print 2>/dev/null \
-  | xargs grep -lE "$STALE_ERE" 2>/dev/null
+       -type f -exec grep -lIE "$STALE_ERE" {} + 2>/dev/null
 )
 [ "$ARM_A_HITS" = "0" ] && echo "   ARM A: pass (0 live stale verdicts outside the excluded historical-record class)"
 
