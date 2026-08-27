@@ -4,16 +4,16 @@ milestone: v1.0
 current_phase: 8
 current_phase_name: Process Lifecycle
 status: needs_review
-stopped_at: Completed 08-05-PLAN.md
-last_updated: "2026-08-27T11:36:04.277Z"
+stopped_at: Completed 08-06-PLAN.md
+last_updated: "2026-08-27T12:08:41.266Z"
 last_activity: 2026-08-24
 last_activity_desc: Phase 08 verified — human_needed, no blockers
-state_head: 3c01ce3fae7cd121c21aa4aae4e90ef8e1c75d32
+state_head: 8116fcbefccef3507387b783f66e4e0cf8ef5ea3
 progress:
   total_phases: 13
   completed_phases: 5
   total_plans: 50
-  completed_plans: 45
+  completed_plans: 46
 milestone_name: milestone
 ---
 
@@ -73,6 +73,7 @@ Progress: [███░░░░░░░] 30% (3 of 10 milestone phases)
 | Phase 08 P03 | 12 min | 3 tasks | 2 files |
 | Phase 08 P04 | 20 min | 2 tasks | 3 files |
 | Phase 08 P05 | 42 min | 3 tasks | 5 files |
+| Phase 08 P06 | 25 min | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -201,6 +202,11 @@ Recent decisions affecting current work:
 - [Phase 08]: Phase 8 T-08-01 closed on a maintainer ATTESTATION, not a recorded measurement — threats_open 0 — The maintainer replied approved without supplying the pgrep counts, and 08-SPIKE.md never recorded the pre-fix control, so there is no measured before/after pair on that machine. One confounder is unexcluded: the provider CLI own cleanup could explain a zero as readily as this phase mechanism. Recorded as the closure basis in 08-SECURITY.md so a later reader can re-evaluate rather than inherit a bare zero.
 - [Phase 08]: ROADMAP SC-2 amended in place to name the shipped mechanism and the LLRT reason the canonical spelling was unusable — The original clause named process-group signalling, whose canonical spelling raises an Underflow conversion error under Caido LLRT (u32 pid, rquickjs f64 range check) while passing on every Node CI leg. Unamended it was a standing instruction to reintroduce a defect that is green on all five legs. The static gate stops the code; the amendment stops the intent.
 - [Phase 08]: Phase 8 nyquist_compliant stays false and the timeout path is recorded as NOT exercised — Two validation rows (the win32 suite and its CI gate) have never executed and one windows-latest run closes both; a validated document with a false compliance flag is how audit-milestone tells PARTIAL from NOT-VALIDATED. The timeout path was not reported by the maintainer and the cancel-path attestation is not allowed to imply it.
+- [Phase 08]: The orphan's identity is its own argv (session temp-dir marker + mcp-server.mjs + adjacency), not a handle Drift holds and not the process group the CLI chose — the only identity available for a process Drift never spawned.
+- [Phase 08]: The orphan kill operand is a POSITIVE single pid everywhere; A6 was measured FALSE on 2026-08-27 so a group reference cannot be relied on to reach the child.
+- [Phase 08]: pgrep over ps for enumeration: no parsing surface over user-influenced argv, a distinguishable exit-1 no-match signal, and output that scales with matches rather than the process table.
+- [Phase 08]: win32 gets no orphan enumerator and refuses with unsupported-platform; the foreign-parented orphan class stays unreachable there (AR-04).
+- [Phase 08]: OQ-2's single-pid rung survives A1's closure with a corrected reason: defence against a future Caido that rebases its LLRT fork, not against an unmeasured one.
 
 ### Pending Todos
 
@@ -243,8 +249,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-24T18:40:05.568Z
-Stopped at: Completed 08-05-PLAN.md
+Last session: 2026-08-27T12:08:27.939Z
+Stopped at: Completed 08-06-PLAN.md
 Resume file: None
 
 **Live on the public remote: nothing of ours.** Plan 03-04 tore down all three `scratch/*` branches (`ci-proof-windows-probe`, `ci-proof-windows-probe-negative`, `ci-proof-windows-gate-negative`) locally and remotely. Asserted with a `test -z` discrimination over the captured glob (`scratch-glob-empty=0`) plus the full unfiltered listing, which now shows only `main` at `2d8cf16` and the pre-existing, unrelated `fix/security-hotfixes` at `0cd81f3`. `origin/main` was never pushed by this phase and is still `2d8cf16`; local `main` is 23 commits ahead and deliberately unpushed. **Re-verified 2026-08-13 (plan 03-05):** the remote still lists only `main` `2d8cf16` and the pre-existing `fix/security-hotfixes` `0cd81f3`, and all eight Phase 3 run records (4 probe + 4 `CI` control) still resolve with their recorded conclusions — which is what makes the URLs in `03-FINDINGS.md` valid citations after the branches were deleted. The probe **artifacts** do not survive: they expire 2026-09-12, which is why D-11 required the committed findings document.

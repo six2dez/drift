@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 3
+open_count: 5
 waived_count: 0
 fixed_count: 9
-total_count: 12
-last_updated: 2026-08-24T15:54:03.743Z
+total_count: 14
+last_updated: 2026-08-27T12:08:50.833Z
 ---
 
 # Broken Windows Ledger
@@ -27,6 +27,8 @@ last_updated: 2026-08-24T15:54:03.743Z
 | 10 | 06 | deviation | packages/backend/src/command-resolution.ts |  | CR-02 (06-REVIEW): two catalogue rows were non-administrator-writable on default Windows ACLs, and a binary resolved from either is spawned with CAIDO_TOKEN in its environment. CLOSED in Phase 6 per 06-VERIFICATION human item 4, option (a): %ProgramData%\\scoop\\shims dropped entirely; C:\\nvm4w\\nodejs now gated on nvm-windows' own NVM_HOME/NVM_SYMLINK contract via the new pure isNvmWindowsInstalled (platform.ts), threaded in as the injected nvmWindowsInstalled input so the three builders stay I/O-free and never read process.env. Both removals recorded as in-code non-claims naming the token exposure. | fixed |  | 2026-08-21T13:16:56.847Z | 2026-08-21T13:17:01.729Z |
 | 11 | 08 | unmet-truth | packages/backend/src/kill-plan.ts |  | LIF-02's POSIX mechanism rests on assumptions A1 and A6, both recorded OPEN - not measured in 08-SPIKE.md after the Wave-0 hardware checkpoint was waived. kill-tree.posix.test.ts proves the group-kill argv under NODE; no CI leg executes Caido's LLRT and none spawns a real provider CLI. Closes only on a real-hardware run of 08-SPIKE.md's four-step procedure (probe recoverable at 68199fa). | open |  | 2026-08-24T15:24:21.284Z |  |
 | 12 | 08 | unrun-verify | packages/backend/src/kill-tree.win32.test.ts |  | The three win32 kill-tree cases have never executed: they are skipIf-gated and no windows-latest run exists for them yet. The reserved dead-pid exit-code block is empty and the run URL is unfilled. | open |  | 2026-08-24T15:54:03.743Z |  |
+| 13 | 08 | unrun-verify | packages/backend/src/index.ts |  | reapMcpOrphans and its cleanupMcpRuntime call site are covered by no executed assertion — index.ts cannot be imported under vitest and no static source gate was added (plan rated the truth 'verification: backstop') | open |  | 2026-08-27T12:08:50.726Z |  |
+| 14 | 08 | unrun-verify | packages/backend/src/kill-plan.ts |  | Whether Caido's plugin sandbox can spawn pgrep at all is unmeasured; if it cannot, the orphan reap degrades silently to the enumerator-unavailable no-op | open |  | 2026-08-27T12:08:50.833Z |  |
 
 ````json
 [
@@ -172,6 +174,30 @@ last_updated: 2026-08-24T15:54:03.743Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-08-24T15:54:03.743Z",
+    "resolved_at": null
+  },
+  {
+    "id": 13,
+    "kind": "unrun-verify",
+    "phase": "08",
+    "file": "packages/backend/src/index.ts",
+    "line": null,
+    "description": "reapMcpOrphans and its cleanupMcpRuntime call site are covered by no executed assertion — index.ts cannot be imported under vitest and no static source gate was added (plan rated the truth 'verification: backstop')",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-08-27T12:08:50.726Z",
+    "resolved_at": null
+  },
+  {
+    "id": 14,
+    "kind": "unrun-verify",
+    "phase": "08",
+    "file": "packages/backend/src/kill-plan.ts",
+    "line": null,
+    "description": "Whether Caido's plugin sandbox can spawn pgrep at all is unmeasured; if it cannot, the orphan reap degrades silently to the enumerator-unavailable no-op",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-08-27T12:08:50.833Z",
     "resolved_at": null
   }
 ]
