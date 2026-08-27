@@ -273,6 +273,7 @@ describe.skipIf(process.platform !== "win32")(
           platform: "win32",
           env: process.env,
           rung: "kill",
+          systemRootFallback: "",
         });
         expect(plan.kind).toBe("spawn");
         if (plan.kind !== "spawn") throw new Error("unreachable");
@@ -312,6 +313,7 @@ describe.skipIf(process.platform !== "win32")(
           platform: "win32",
           env: process.env,
           rung: "kill",
+          systemRootFallback: "",
         });
         expect(plan.kind).toBe("spawn");
         if (plan.kind !== "spawn") throw new Error("unreachable");
@@ -386,6 +388,7 @@ describe.skipIf(process.platform !== "win32")(
           platform: "win32",
           env: process.env,
           rung: "kill",
+          systemRootFallback: "",
         });
         expect(plan.kind).toBe("spawn");
         if (plan.kind !== "spawn") throw new Error("unreachable");

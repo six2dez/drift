@@ -1011,7 +1011,7 @@ describe("selectComspec", () => {
   const windowsComspec = "C:\\WINDOWS\\system32\\cmd.exe";
 
   it("returns the absolute COMSPEC verbatim on win32", () => {
-    expect(selectComspec({ env: { COMSPEC: windowsComspec }, platform: "win32" })).toBe(
+    expect(selectComspec({ env: { COMSPEC: windowsComspec }, platform: "win32", systemRootFallback: "" })).toBe(
       windowsComspec,
     );
   });
@@ -1020,21 +1020,21 @@ describe("selectComspec", () => {
     // The spelling cmd.exe actually exports. `process.env` is case-INsensitive
     // on Windows only, and Caido's backend runtime is LLRT rather than Node, so
     // a single-cased property access is not guaranteed to reach it.
-    expect(selectComspec({ env: { ComSpec: windowsComspec }, platform: "win32" })).toBe(
+    expect(selectComspec({ env: { ComSpec: windowsComspec }, platform: "win32", systemRootFallback: "" })).toBe(
       windowsComspec,
     );
   });
 
   it("accepts the all-lowercase spelling upstream cross-spawn reads", () => {
     // Upstream's literal is `process.env.comspec`.
-    expect(selectComspec({ env: { comspec: windowsComspec }, platform: "win32" })).toBe(
+    expect(selectComspec({ env: { comspec: windowsComspec }, platform: "win32", systemRootFallback: "" })).toBe(
       windowsComspec,
     );
   });
 
   it("trims surrounding whitespace off the value it returns", () => {
     expect(
-      selectComspec({ env: { COMSPEC: `  ${windowsComspec}  ` }, platform: "win32" }),
+      selectComspec({ env: { COMSPEC: `  ${windowsComspec}  ` }, platform: "win32", systemRootFallback: "" }),
     ).toBe(windowsComspec);
   });
 
@@ -1043,13 +1043,14 @@ describe("selectComspec", () => {
       selectComspec({
         env: { PATH: "C:\\WINDOWS\\system32", USERPROFILE: "C:\\Users\\six" },
         platform: "win32",
+        systemRootFallback: "",
       }),
     ).toBeUndefined();
   });
 
   it("treats an empty or whitespace-only value as ABSENT", () => {
-    expect(selectComspec({ env: { COMSPEC: "" }, platform: "win32" })).toBeUndefined();
-    expect(selectComspec({ env: { COMSPEC: "   " }, platform: "win32" })).toBeUndefined();
+    expect(selectComspec({ env: { COMSPEC: "" }, platform: "win32", systemRootFallback: "" })).toBeUndefined();
+    expect(selectComspec({ env: { COMSPEC: "   " }, platform: "win32", systemRootFallback: "" })).toBeUndefined();
   });
 
   it("REFUSES a relative COMSPEC rather than passing it to a spawn", () => {
@@ -1058,7 +1059,7 @@ describe("selectComspec", () => {
     // close nothing. "C:cmd.exe" is drive-RELATIVE and belongs in this list.
     for (const relative of ["cmd.exe", ".\\cmd.exe", "system32\\cmd.exe", "C:cmd.exe"]) {
       expect(
-        selectComspec({ env: { COMSPEC: relative }, platform: "win32" }),
+        selectComspec({ env: { COMSPEC: relative }, platform: "win32", systemRootFallback: "" }),
       ).toBeUndefined();
     }
   });
@@ -1071,8 +1072,70 @@ describe("selectComspec", () => {
       selectComspec({
         env: { COMSPEC: "cmd.exe", ComSpec: windowsComspec },
         platform: "win32",
+        systemRootFallback: "",
       }),
     ).toBeUndefined();
+  });
+
+  it("uses the DERIVED root when no COMSPEC spelling carries a value (G-01)", () => {
+    // THE PHASE 7 HOLE, reopened by the runtime rather than by an edit. CR-01
+    // added this function so a bare "cmd.exe" would never reach a spawn that
+    // carries CAIDO_TOKEN — and then the environment it reads turned out to be
+    // EMPTY on every real install, so the loop above found nothing, returned
+    // undefined, and `buildSpawnPlan` fell back to that bare name anyway. This
+    // rung is what makes the mitigation actually run (T-08-33).
+    expect(
+      selectComspec({
+        env: {},
+        platform: "win32",
+        systemRootFallback: "D:\\Windows",
+      }),
+    ).toBe("D:\\Windows\\System32\\cmd.exe");
+  });
+
+  it("prefers a COMSPEC the environment carries over the derived root", () => {
+    expect(
+      selectComspec({
+        env: { COMSPEC: windowsComspec },
+        platform: "win32",
+        systemRootFallback: "D:\\Windows",
+      }),
+    ).toBe(windowsComspec);
+  });
+
+  it("still returns undefined when no root can be derived either", () => {
+    // buildSpawnPlan keeps ownership of the last-resort bare name, exactly as
+    // this function's comment says: the new rung sits BEFORE this answer, not
+    // in place of it. An empty fallback composes the bare "cmd.exe", which is
+    // not drive-absolute and is therefore refused here rather than passed on.
+    expect(
+      selectComspec({ env: {}, platform: "win32", systemRootFallback: "" }),
+    ).toBeUndefined();
+  });
+
+  it("REFUSES a derived value that is not drive-absolute", () => {
+    // The same rule the loop above applies to a value it read. A relative
+    // interpreter is resolved through the very search order this function
+    // exists to bypass, so its origin does not earn it an exemption.
+    expect(
+      selectComspec({
+        env: {},
+        platform: "win32",
+        systemRootFallback: "   ",
+      }),
+    ).toBeUndefined();
+  });
+
+  it("CMP-01: does not consult the derived root on a POSIX platform", () => {
+    // A non-win32 host takes buildSpawnPlan's passthrough arm and spawns no
+    // interpreter at all, so a fallback reaching a POSIX plan could only ever
+    // be wrong. The platform guard sits above both rungs, which is what makes
+    // this byte-identical to today.
+    for (const platform of ["darwin", "linux", undefined] as const) {
+      expect(
+        selectComspec({ env: {}, platform, systemRootFallback: "D:\\Windows" }),
+      ).toBeUndefined();
+    }
   });
 
   it("CMP-01: returns undefined on darwin, linux and an undefined platform", () => {
@@ -1081,7 +1144,7 @@ describe("selectComspec", () => {
     // reach a plan that will never use one.
     for (const platform of ["darwin", "linux", undefined] as const) {
       expect(
-        selectComspec({ env: { COMSPEC: windowsComspec }, platform }),
+        selectComspec({ env: { COMSPEC: windowsComspec }, platform, systemRootFallback: "" }),
       ).toBeUndefined();
     }
   });

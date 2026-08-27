@@ -12,11 +12,16 @@
 // `pid`, `platform`, `env` and `rung` are INJECTED parameters, never read from
 // the runtime.
 //
-// The one import is `./platform`, and it is here for exactly one reason, in the
+// The one import is `./platform`, and it is here for exactly two reasons, in the
 // `spawn-plan.ts` house style of justifying each import a module allows:
 // `Platform` is the narrow three-member union that `buildKillTreePlan` and
 // `shouldDetachProviderSpawn` gate on, and restating that union here would let
-// the two copies drift. Deliberately NOT imported: `os` and `process` (Phase 4
+// the two copies drift; and `resolveWindowsSystemBinary` is the system-binary
+// ladder this module's win32 arm used to carry its OWN copy of, comment for
+// comment. Widening an EXISTING named import rather than adding a second
+// statement is deliberate — the zero-other-imports property above is asserted by
+// `grep -cE '^import'` returning 1, and a second statement would break a claim
+// that has nothing to do with what was actually added. Deliberately NOT imported: `os` and `process` (Phase 4
 // D-02 gives `index.ts` the one guarded runtime read of either, and a module
 // that touches neither has no hidden input a test cannot supply), `path` (it
 // resolves to its POSIX flavour on the Linux CI runner, where it would corrupt
@@ -123,7 +128,7 @@
 // a test cannot supply", but "the runtime does not supply it in the first
 // place".
 
-import { type Platform } from "./platform";
+import { type Platform, resolveWindowsSystemBinary } from "./platform";
 
 // The rung of the two-step ladder a POSIX caller is on. Windows has no second
 // rung and says so at its own branch below.
@@ -168,6 +173,14 @@ export type KillTreePlan =
 // is resolved by Windows through a search order that includes the working
 // directory the plugin host chose, so it is the LAST resort and never the
 // preference (T-08-03).
+//
+// KEPT, and the distinction matters. G-01 did not find this constant wrong; it
+// found that an empty environment reached it FIRST rather than last, which made
+// "last resort" a description of the code's shape rather than of its behaviour.
+// The derived-root rung above it is what makes the phrase true. Do not delete
+// this arm to "finish" that fix: a host where no root can be read AND none can
+// be derived still has to be handed something, and a loud bare name is what it
+// gets.
 export const DEFAULT_TASKKILL = "taskkill.exe";
 
 // THE pid refusal, spelled ONCE. Both `buildKillTreePlan` and
@@ -193,6 +206,7 @@ export function buildKillTreePlan(input: {
   pid: number | undefined;
   platform: Platform | undefined;
   env: Record<string, string | undefined>;
+  systemRootFallback: string;
   rung: KillRung;
 }): KillTreePlan {
   // REFUSAL FIRST, per the fail-closed branch order `planMcpCliRegistration`
@@ -207,35 +221,20 @@ export function buildKillTreePlan(input: {
   // THEN win32. The literal "win32" only — `undefined` falls through to the
   // POSIX arm below, deliberately.
   if (input.platform === "win32") {
-    // Read the system root from the INJECTED env under both spellings, first
-    // non-empty trimmed value winning. Windows' own environment lookup is
-    // case-insensitive so one spelling would do on the real platform; the unit
-    // test runs on Linux, where a plain object lookup is case-SENSITIVE, so both
-    // are read here. That is D-P4's whole point and `getWhichCommand`
-    // (`platform.ts:255-294`) is the shipped precedent it copies: taking an
-    // `env` RECORD rather than a resolved `systemRoot` scalar keeps this
-    // Windows-only fallback inside a test's reach instead of stranding it in
-    // `index.ts`.
-    let systemRoot = "";
-    for (const name of ["SystemRoot", "SYSTEMROOT"]) {
-      const value = input.env[name]?.trim();
-      if (value === undefined || value === "") continue;
-      systemRoot = value;
-      break;
-    }
-
-    // Strip every trailing separator BY HAND rather than with `path`, which
-    // resolves to its POSIX flavour on the Linux CI runner. A root that already
-    // carries one must not produce a doubled separator, and — as at
-    // `getWhichCommand` — there is deliberately NO bare-drive guard: a segment
-    // is being APPENDED here rather than a root preserved, so reducing "D:\" to
-    // "D:" yields the correct "D:\System32\…".
-    let root = systemRoot;
-    while (root.length > 0) {
-      const last = root[root.length - 1];
-      if (last !== "\\" && last !== "/") break;
-      root = root.slice(0, -1);
-    }
+    // The system-binary ladder, through the ONE implementation in `platform.ts`.
+    // This arm used to carry its own copy of it — the dual-casing read and the
+    // hand-written trailing-separator strip, comment for comment — and
+    // `getWhichCommand` carried the other. Two copies of a security decision are
+    // two copies that can diverge, and the one that diverges is the one nobody
+    // re-read. D-P4's point is unchanged and is what makes this call possible:
+    // taking an `env` RECORD rather than a resolved `systemRoot` scalar keeps
+    // this Windows-only decision inside a test's reach instead of stranding it
+    // in `index.ts`.
+    //
+    // `systemRootFallback` is the rung BETWEEN that read and the bare name, and
+    // it exists because the read returns nothing on a real install: measured
+    // 2026-08-27, `parentEnvKeyCount: 0`. It is a REQUIRED member so the
+    // compiler forces every call site to state an answer (T-08-36).
 
     // /t = "Ends the specified process and any child processes started by it."
     // /f = "Specifies that processes be forcefully ended." Both quoted from the
@@ -249,8 +248,13 @@ export function buildKillTreePlan(input: {
     // symmetry" by branching on the rung.
     return {
       kind: "spawn",
-      // Absolute path when a root is known, bare name only as a last resort.
-      file: root === "" ? DEFAULT_TASKKILL : `${root}\\System32\\${DEFAULT_TASKKILL}`,
+      // Absolute path when a root is known or derivable, bare name only as a
+      // genuine last resort — reachable and tested, never the first answer.
+      file: resolveWindowsSystemBinary({
+        env: input.env,
+        fallbackRoot: input.systemRootFallback,
+        binary: DEFAULT_TASKKILL,
+      }),
       args: ["/pid", String(input.pid), "/t", "/f"],
       // FALSE, and it is a statement rather than a placeholder. Simple switches
       // and a decimal integer: nothing in this argv was escaped by this module,

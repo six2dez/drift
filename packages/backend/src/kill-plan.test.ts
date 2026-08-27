@@ -105,6 +105,7 @@ describe("buildKillTreePlan — the refusal arms return no-pid (SC-1)", () => {
         platform: shape.platform,
         env: { SystemRoot: SYSTEM_ROOT },
         rung: shape.rung,
+        systemRootFallback: "",
       });
       expect(plan).toEqual({ kind: "none", reason: "no-pid" });
       expect(plan).not.toHaveProperty("file");
@@ -121,6 +122,7 @@ describe("buildKillTreePlan — the win32 arm resolves taskkill by absolute path
         platform: "win32",
         env: { SystemRoot: SYSTEM_ROOT },
         rung: "term",
+        systemRootFallback: "",
       }),
     );
 
@@ -141,6 +143,7 @@ describe("buildKillTreePlan — the win32 arm resolves taskkill by absolute path
         platform: "win32",
         env: { SystemRoot: SYSTEM_ROOT },
         rung: "kill",
+        systemRootFallback: "",
       }),
     );
 
@@ -155,6 +158,7 @@ describe("buildKillTreePlan — the win32 arm resolves taskkill by absolute path
         platform: "win32",
         env: { SystemRoot: SYSTEM_ROOT_TRAILING },
         rung: "term",
+        systemRootFallback: "",
       }),
     );
 
@@ -169,6 +173,7 @@ describe("buildKillTreePlan — the win32 arm resolves taskkill by absolute path
         platform: "win32",
         env: { SystemRoot: SYSTEM_ROOT_BARE_DRIVE },
         rung: "term",
+        systemRootFallback: "",
       }),
     );
 
@@ -187,6 +192,7 @@ describe("buildKillTreePlan — the win32 arm resolves taskkill by absolute path
         platform: "win32",
         env: { SYSTEMROOT: SYSTEM_ROOT },
         rung: "term",
+        systemRootFallback: "",
       }),
     );
 
@@ -200,6 +206,7 @@ describe("buildKillTreePlan — the win32 arm resolves taskkill by absolute path
         platform: "win32",
         env: {},
         rung: "term",
+        systemRootFallback: "",
       }),
     );
 
@@ -217,6 +224,7 @@ describe("buildKillTreePlan — the win32 arm resolves taskkill by absolute path
         platform: "win32",
         env: { SystemRoot: "   " },
         rung: "term",
+        systemRootFallback: "",
       }),
     );
 
@@ -232,12 +240,14 @@ describe("buildKillTreePlan — the win32 arm resolves taskkill by absolute path
       platform: "win32",
       env: { SystemRoot: SYSTEM_ROOT },
       rung: "term",
+      systemRootFallback: "",
     });
     const kill = buildKillTreePlan({
       pid: PID,
       platform: "win32",
       env: { SystemRoot: SYSTEM_ROOT },
       rung: "kill",
+      systemRootFallback: "",
     });
 
     expect(term).toEqual(kill);
@@ -254,7 +264,7 @@ describe("buildKillTreePlan — the POSIX arm signals a process group (LIF-02 / 
   it("emits kill with a SIGTERM group operand on darwin, linux and an undefined platform", () => {
     for (const platform of posixPlatforms) {
       const plan = expectSpawn(
-        buildKillTreePlan({ pid: PID, platform, env: {}, rung: "term" }),
+        buildKillTreePlan({ pid: PID, platform, env: {}, rung: "term", systemRootFallback: "" }),
       );
 
       expect(plan.file).toBe("kill");
@@ -268,7 +278,7 @@ describe("buildKillTreePlan — the POSIX arm signals a process group (LIF-02 / 
   it("emits the SIGKILL operand on the same three platforms for the kill rung", () => {
     for (const platform of posixPlatforms) {
       const plan = expectSpawn(
-        buildKillTreePlan({ pid: PID, platform, env: {}, rung: "kill" }),
+        buildKillTreePlan({ pid: PID, platform, env: {}, rung: "kill", systemRootFallback: "" }),
       );
 
       expect(plan.file).toBe("kill");
@@ -280,7 +290,7 @@ describe("buildKillTreePlan — the POSIX arm signals a process group (LIF-02 / 
     // The POSIX half of Pitfall 3's positive assertion. The minus sign belongs
     // to the RENDERING, in here, and not to a template literal at a call site.
     const plan = expectSpawn(
-      buildKillTreePlan({ pid: PID, platform: "darwin", env: {}, rung: "term" }),
+      buildKillTreePlan({ pid: PID, platform: "darwin", env: {}, rung: "term", systemRootFallback: "" }),
     );
 
     expect(plan.args).toContain("-4321");
@@ -296,15 +306,85 @@ describe("buildKillTreePlan — the POSIX arm signals a process group (LIF-02 / 
       platform: "linux",
       env: { SystemRoot: SYSTEM_ROOT, SYSTEMROOT: SYSTEM_ROOT },
       rung: "term",
+      systemRootFallback: "",
     });
     const withoutRoot = buildKillTreePlan({
       pid: PID,
       platform: "linux",
       env: {},
       rung: "term",
+      systemRootFallback: "",
     });
 
     expect(withRoot).toEqual(withoutRoot);
+  });
+});
+
+// G-01 / T-08-03 — the rung between the environment read and the bare name.
+//
+// WHY THIS BLOCK EXISTS AT ALL, and it is a measurement rather than a worry: the
+// environment the win32 arm above reads is EMPTY on a real Caido install
+// (2026-08-27 diagnostics, `parentEnvKeyCount: 0`). Every case in the block
+// above passes a POPULATED env, which is the CI condition and not the shipping
+// one — so the bare-name arm those cases treat as an edge was in fact the
+// expected Windows answer on every real machine. These three cases assert the
+// ladder that fixes that, rung by rung.
+//
+// RED INPUT for the whole block: remove the `systemRootFallback` argument at any
+// PRODUCTION call site and the compiler rejects it, because the member is
+// required rather than optional. That is the point of making it required — the
+// CR-01 failure shape was a security-relevant parameter that worked perfectly in
+// its own unit test and that no production call site ever passed.
+describe("buildKillTreePlan — the derived-root rung beneath the environment (G-01)", () => {
+  it("uses the DERIVED fallback when the environment carries no root", () => {
+    // The arm a real Windows install actually takes.
+    const plan = expectSpawn(
+      buildKillTreePlan({
+        pid: PID,
+        platform: "win32",
+        env: {},
+        rung: "term",
+        systemRootFallback: "D:\\Windows",
+      }),
+    );
+
+    expect(plan.file).toBe("D:\\Windows\\System32\\taskkill.exe");
+    expect(plan.args).toEqual(["/pid", "4321", "/t", "/f"]);
+  });
+
+  it("prefers a populated environment over the derived fallback", () => {
+    // The environment is the MEASURED root; the fallback is a DERIVATION that
+    // `TEMP` redirected across drives can get wrong. The measurement wins
+    // wherever it exists.
+    const plan = expectSpawn(
+      buildKillTreePlan({
+        pid: PID,
+        platform: "win32",
+        env: { SystemRoot: SYSTEM_ROOT },
+        rung: "term",
+        systemRootFallback: "D:\\Windows",
+      }),
+    );
+
+    expect(plan.file).toBe(`${SYSTEM_ROOT}\\System32\\taskkill.exe`);
+  });
+
+  it("keeps the BARE name as the genuine last resort, reachable and tested", () => {
+    // SC-1 (amended by WR-04) permits this form only when no root can be read
+    // AND none can be derived. Deleting the arm would be the wrong fix: a host
+    // in that state still has to be handed something, and a bare name that
+    // fails loudly is what it gets.
+    const plan = expectSpawn(
+      buildKillTreePlan({
+        pid: PID,
+        platform: "win32",
+        env: {},
+        rung: "term",
+        systemRootFallback: "",
+      }),
+    );
+
+    expect(plan.file).toBe("taskkill.exe");
   });
 });
 

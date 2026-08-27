@@ -743,12 +743,27 @@ export function isNvmWindowsInstalled(input: {
 // the same reason, and it keeps the answer assertable from literal inputs on the
 // Linux runner.
 //
-// `env` is an INPUT, never a `process.env` read — the read belongs at index.ts's
-// I/O boundary. The returned path is DATA for a spawn and must never be rendered
-// into a log or diagnostic (T-04-04).
+// `env` is an INPUT, never an environment read of its own — the read belongs at
+// index.ts's I/O boundary. The returned path is DATA for a spawn and must never
+// be rendered into a log or diagnostic (T-04-04).
+//
+// UPDATED 2026-08-27 (G-01), and this is the most severe of the three consumers
+// the update touches. Phase 7's CR-01 mitigation — the whole reason this
+// function exists — reads an environment that is EMPTY on every real install
+// (measured, `parentEnvKeyCount: 0`). So the loop below found nothing, returned
+// `undefined`, and `buildSpawnPlan` fell back to the bare "cmd.exe": the exact
+// search-order hole this function was written to close, silently reopened by the
+// runtime rather than by an edit. `systemRootFallback` is the rung that closes
+// it for real, and it is a REQUIRED member so the compiler forces every call
+// site to state an answer (T-08-36, which is CR-01's own failure shape).
+//
+// This is the branch that carries a live CAIDO_TOKEN into a spawn. Of the three
+// consumers sharing this fix, it is the one whose bare name would be handed the
+// credential.
 export function selectComspec(input: {
   env: Record<string, string | undefined>;
   platform: Platform | undefined;
+  systemRootFallback: string;
 }): string | undefined {
   // Only win32. `undefined` (pre-probe, or a platform normalizePlatform refused)
   // and the POSIX platforms never reach buildSpawnPlan's interpreter arm, so an
@@ -773,9 +788,36 @@ export function selectComspec(input: {
       : undefined;
   }
 
-  // No spelling carried a value. `undefined` rather than a literal, because
-  // buildSpawnPlan owns the last-resort bare name and there is exactly one place
-  // that decision should be written.
+  // No spelling carried a value — the case a real install always takes. Before
+  // giving up, try the DERIVED root.
+  //
+  // `env` is passed DELIBERATELY EMPTIED here. This function's variable is
+  // COMSPEC, not a system root: the environment has already been consulted
+  // above, under all three spellings, and consulting it a second time under a
+  // different name would mean a machine that exports `SystemRoot` but no
+  // `COMSPEC` silently gets an interpreter chosen by a variable no caller of
+  // this function ever mentioned. One environment read per function, and this
+  // one already had its turn.
+  const derived = resolveWindowsSystemBinary({
+    env: {},
+    fallbackRoot: input.systemRootFallback,
+    binary: "cmd.exe",
+  });
+
+  // Only a DRIVE-ABSOLUTE result is returned, by the same rule the loop above
+  // applies to a value it read: an interpreter that is not absolute is resolved
+  // through the search order this function exists to bypass, so returning one
+  // would close nothing. When the fallback is empty the call above hands back
+  // the bare "cmd.exe", which fails this check and falls to the line below —
+  // which is correct, and is why that line is unchanged.
+  if (isAbsolutePath({ value: derived, platform: input.platform })) {
+    return derived;
+  }
+
+  // `undefined` rather than a literal, because buildSpawnPlan owns the
+  // last-resort bare name and there is exactly one place that decision should be
+  // written. Unchanged by G-01: the rung above sits BEFORE this line, not in
+  // place of it.
   return undefined;
 }
 

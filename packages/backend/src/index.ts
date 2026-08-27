@@ -657,7 +657,16 @@ function getWindowsSystemRootFallback(): string {
 // The value is handed to a spawn and never rendered: readParentEnv's contract
 // forbids logging an environment value, and an interpreter path is one.
 function getComspec(): string | undefined {
-  return selectComspec({ env: readParentEnv(), platform: host?.platform });
+  return selectComspec({
+    env: readParentEnv(),
+    platform: host?.platform,
+    // G-01. The environment above is EMPTY on a real install, which made this
+    // whole mitigation inert: `selectComspec` found no COMSPEC, returned
+    // undefined, and `buildSpawnPlan` fell back to the bare "cmd.exe" — the
+    // search-order hole CR-01 closed, reopened by the runtime rather than by an
+    // edit. This is the spawn that carries CAIDO_TOKEN (T-08-33).
+    systemRootFallback: getWindowsSystemRootFallback(),
+  });
 }
 
 // RUN-05. The single `os` read of the whole backend, and the only place
@@ -5742,6 +5751,10 @@ function killTree(
     pid,
     platform: host?.platform,
     env: readParentEnv(),
+    // G-01, the reported gap. That environment is EMPTY on a real install, so
+    // the win32 arm reached its bare-name constant on every one — the form
+    // SC-1 permits only as a last resort and T-08-03 exists to prevent.
+    systemRootFallback: getWindowsSystemRootFallback(),
     rung,
   });
 

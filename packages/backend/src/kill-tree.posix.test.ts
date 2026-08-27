@@ -232,6 +232,7 @@ describe.skipIf(process.platform === "win32")(
           platform: "linux",
           env: {},
           rung: "term",
+          systemRootFallback: "",
         });
         expect(plan.kind).toBe("spawn");
         if (plan.kind !== "spawn") throw new Error("unreachable");

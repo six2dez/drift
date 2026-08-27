@@ -349,6 +349,14 @@ describe.skipIf(process.platform !== "win32")("buildSpawnPlan on a real cmd.exe"
       const comspec = selectComspec({
         env: process.env,
         platform: "win32",
+        // EMPTY on purpose, and this is the discriminating choice rather than a
+        // placeholder. The property under test is "what a genuine Windows host
+        // supplies in its environment"; handing this call a derived fallback
+        // would let the assertion below pass through the fallback rung even if
+        // the environment read had regressed, which is precisely the failure
+        // this case exists to catch. The derived rung is proven from literal
+        // inputs in platform.test.ts, where it can be falsified.
+        systemRootFallback: "",
       });
 
       // The discriminating assertion. A regression that drops the env read
