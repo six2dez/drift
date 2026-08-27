@@ -3,7 +3,7 @@ status: testing
 phase: 08-process-lifecycle
 source: 08-01-SUMMARY.md, 08-02-SUMMARY.md, 08-03-SUMMARY.md, 08-04-SUMMARY.md, 08-05-SUMMARY.md
 started: 2026-08-24T22:40:00Z
-updated: 2026-08-27T07:15:00Z
+updated: 2026-08-27T07:20:00Z
 gate_overrides:
   - gate: api-coverage.verify-pre
     decided: 2026-08-24
@@ -19,11 +19,11 @@ gate_overrides:
 
 ## Current Test
 
-number: 1
-name: A1 — the shipped Caido LLRT honours the process-group spawn option
+number: 2
+name: A6 — a real provider CLI's MCP child sits in the group the kill reaches
 expected: |
-  Drift → Settings → Copy diagnostics reports spikeDetachedGroupKill as
-  "grandchild-died (detached honoured)".
+  During a LIVE Claude turn, `ps -eo pid,ppid,pgid,comm | grep -E 'mcp-server|claude'`
+  shows the `node …mcp-server.mjs` row's pgid equal to the `claude` row's pid.
 awaiting: user response
 note: |
   A diagnostics report was submitted 2026-08-27 from a real macOS Caido install. It does
@@ -45,9 +45,41 @@ None of them closes a test; G-01 opens a gap.
 - MCP running, `authState: valid`, `authSource: session`, 18 tools registered
 
 **Unavailable in the real backend runtime:** `processVersion`, `versionsNode`,
-`versionsLlrt` all report `unavailable` — the exact LLRT build users run still cannot be
-identified from inside the plugin, which is why assumption A1 remains closable only by the
+`versionsLlrt` all report `unavailable` — the exact LLRT build users run cannot be
+identified from inside the plugin, which is why assumption A1 was closable only by the
 spike and not by a version check.
+
+## The root cause behind G-01 and G-02 (2026-08-27, probe build)
+
+Four independent readings from the same real install:
+
+| Reading | Value |
+|---|---|
+| `typeof process.kill` | `undefined` |
+| `parentEnvKeyCount` (`process.env`) | `0` |
+| `processVersion` (`process.version`) | `unavailable` |
+| `versionsNode` / `versionsLlrt` (`process.versions`) | `unavailable` |
+
+These are not four coincidences. **Caido's plugin sandbox exposes a heavily restricted
+`process` shim, not LLRT's full `process` module.** `08-RESEARCH.md` § *Q2* source-read
+`modules/llrt_process/src/lib.rs:197-199` and found `process.set("kill", …)` — that
+describes LLRT. It does not describe what the plugin sandbox re-exports to a backend
+bundle. The distinction was never drawn before this reading, and it is the single
+mechanism behind both gaps below.
+
+Two consequences, recorded rather than acted on here:
+
+1. **G-01's risk rating rises.** An empty `process.env` on darwin could have been a
+   host quirk. A sandbox that also withholds `kill`, `version` and `versions` is a
+   *policy*, and a policy is very unlikely to differ on Windows. The `SystemRoot` lookup
+   in `buildKillTreePlan` reads that same shim, so the bare-name `taskkill.exe` fallback
+   is now the *expected* path on a real Windows install rather than a remote contingency.
+2. **ROADMAP SC-2's recorded reason is incomplete, though its conclusion holds.** SC-2
+   bans `process.kill(-pid, …)` because rquickjs converts through `f64` to `u32` and a
+   negative pid raises `Underflow`. On this build that failure is unreachable — the call
+   would be `TypeError: process.kill is not a function` first. The ban is still correct
+   and the static gate still earns its place; only the stated mechanism is partial. Worth
+   a marked correction in the `07-VALIDATION.md` style, not a scramble.
 
 **Operational, outside Phase 8 scope (Phase 7 / registration territory):**
 `mcpCliRemovalFailures: gemini: 2 failed (scope=user exit=127, scope=project exit=127)`.
@@ -75,7 +107,20 @@ but it is a live token-at-rest condition and should not be lost in a summary.
 ### 1. A1 — LLRT honours the process-group spawn option
 source: 08-01-SUMMARY.md D2
 expected: Diagnostics reports `spikeDetachedGroupKill: grandchild-died (detached honoured)`. Any other value — including `inconclusive`, `skipped`, or `error: <ctor>` — is a halt, not a retry.
-result: [pending]
+result: pass
+reported: |
+  2026-08-27, probe build (68199fa) installed in Caido on darwin 25.6.0:
+    spikeProcessKillType:   "undefined"
+    spikeDetachedGroupKill: "grandchild-died (detached honoured)"
+    spikeNote:              "Phase 8 A1 probe — temporary, removed by T-08-03"
+evidence: >-
+  **A1 is CLOSED FAVOURABLY, by measurement rather than inference.** The shipped Caido
+  LLRT honours `detached: true`: a detached spawn's group kill reached the grandchild on
+  real hardware. This is the assumption the phase's entire POSIX mechanism rests on, and
+  the one no CI leg could ever reach — every leg runs Node, which honours the option
+  regardless. Nine `killTree` sites are now backed by execution, not by source analysis
+  of a pinned commit. Ledger entry 11's A1 half is closed.
+  Second field is a separate matter — see G-02; it does NOT weaken this result.
 
 ### 2. A6 — a real provider CLI's MCP child sits in the group the kill reaches
 source: 08-01-SUMMARY.md D3
@@ -126,10 +171,11 @@ result: [pending]
 ## Summary
 
 total: 10
-passed: 0
+passed: 1
 issues: 0
-pending: 10
+pending: 9
 at_risk: 1
+degraded_as_designed: 1
 skipped: 0
 blocked: 0
 
@@ -165,7 +211,41 @@ blocked: 0
     rated **Low**). Its stated basis is Phase 3's P3-VARS check, which measured
     `USERPROFILE`/`APPDATA`/`LOCALAPPDATA` in CI — a different vehicle from the plugin
     backend this reading came from. The rating deserves re-examination on that basis.
-  root_cause: ""     # Filled by diagnosis
-  artifacts: []      # Filled by diagnosis
-  missing: []        # Filled by diagnosis
+  root_cause: >-
+    Identified 2026-08-27, ahead of formal diagnosis. Caido's plugin sandbox exposes a
+    restricted `process` shim: `process.env` is empty, and `process.kill`,
+    `process.version` and `process.versions` are all absent. `readParentEnv()`
+    (index.ts:573) reads `processRef.process?.env ?? {}` from that shim, so it can only
+    ever return `{}` on a real install. Every consumer of it inherits the emptiness.
+  artifacts:
+    - path: "packages/backend/src/index.ts:573"
+      issue: "readParentEnv() sources from the sandbox's restricted process shim; returns {} on real installs"
+    - path: "packages/backend/src/kill-plan.ts:143-176"
+      issue: "win32 arm scans that empty record for SystemRoot/SYSTEMROOT, so root === '' and DEFAULT_TASKKILL (bare name) is returned"
+  missing:
+    - "A SystemRoot source that does not depend on the sandbox's process.env — or an explicit, recorded acceptance that the bare-name fallback is the shipping Windows path, with T-08-03 re-rated accordingly"
+    - "The same question asked of every other readParentEnv() consumer (selectComspec/COMSPEC at :601, getWindowsNamedRoots and isNvmWindowsInstalled at :1672-1676, buildSpawnEnv at :653) — Phase 7's cmd.exe absolute-path mitigation reads the same empty shim and is likely inert for the same reason"
   debug_session: ""  # Filled by diagnosis
+
+- truth: "The deferred SIGKILL rung skips when the tracked process has already exited (T-08-04, review CR-02)"
+  status: degraded_as_designed
+  reason: >-
+    `spikeProcessKillType` measured `undefined` on the real install — the sandbox exposes
+    no `process.kill`, so the signal-0 liveness probe cannot run. `isPidAlive`
+    (index.ts:5144) already guards this at line 5153 (`typeof killRef !== "function"` →
+    return true), so it does not throw; it simply always answers "alive" and never skips.
+    The guard therefore reduces on Caido to its identity half alone —
+    `hasTrackedProcessExited` over the handle's own observed `exit` event.
+    This is NOT a defect: index.ts:4751-4755 documents exactly this fallback in advance
+    ("under Caido's LLRT the handle carries no exit state at all … so liveness is the only
+    answer left there"), and every unknown resolves toward "alive", so neither check can
+    ever ADD a kill. Recorded because the 08-01 checkpoint predicted a value other than
+    `function` would mean "the deferred-rung guard needs a redesign" — that warning
+    predates the CR-02 fix which introduced `hasTrackedProcessExited`, and is now stale.
+  severity: minor
+  test: 1
+  source: "2026-08-27 spike build (68199fa) on a real macOS Caido install"
+  action: >-
+    No code change. Update the 08-01 checkpoint's stale prediction and note in
+    08-SECURITY.md T-08-04 that on Caido the guard runs on identity only, with the
+    accepted residual already stated at index.ts:4757-4763.
