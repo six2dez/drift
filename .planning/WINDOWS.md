@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 7
+open_count: 8
 waived_count: 0
 fixed_count: 9
-total_count: 16
-last_updated: 2026-08-27T12:30:13.533Z
+total_count: 17
+last_updated: 2026-08-27T12:53:54.797Z
 ---
 
 # Broken Windows Ledger
@@ -31,6 +31,7 @@ last_updated: 2026-08-27T12:30:13.533Z
 | 14 | 08 | unrun-verify | packages/backend/src/kill-plan.ts |  | Whether Caido's plugin sandbox can spawn pgrep at all is unmeasured; if it cannot, the orphan reap degrades silently to the enumerator-unavailable no-op | open |  | 2026-08-27T12:08:50.833Z |  |
 | 15 | 08 | unrun-verify | packages/backend/src/index.ts |  | reapMcpOrphans / reapSessionOrphansIfIdle wiring is asserted only by source text; whether Caido's LLRT sandbox can spawn pgrep at all is unmeasured, so both reaps may degrade silently to the enumerator-unavailable no-op while every gate stays green | open |  | 2026-08-27T12:30:13.421Z |  |
 | 16 | 08 | deviation | .planning/phases/08-process-lifecycle/08-07-PLAN.md | 193 | Ninth vacuous gate: Task 1 criterion 'grep -c never processes ... is 0' returned 0 at HEAD before any edit; the quoted sentence lives in 08-05-PLAN.md / 08-RESEARCH.md, never in index.ts | open |  | 2026-08-27T12:30:13.533Z |  |
+| 17 | 08 | deviation | packages/backend/src/platform.ts |  | 08-08 Task 1 acceptance criterion 'grep -c process.env platform.ts is 0' is VACUOUS: returns 7 at HEAD before any edit (all seven are comment mentions of the rule the module follows). Intent verified instead by comment-stripped grep = 0, before and after. Tenth vacuous gate in Phase 8. | open |  | 2026-08-27T12:53:54.797Z |  |
 
 ````json
 [
@@ -224,6 +225,18 @@ last_updated: 2026-08-27T12:30:13.533Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-08-27T12:30:13.533Z",
+    "resolved_at": null
+  },
+  {
+    "id": 17,
+    "kind": "deviation",
+    "phase": "08",
+    "file": "packages/backend/src/platform.ts",
+    "line": null,
+    "description": "08-08 Task 1 acceptance criterion 'grep -c process.env platform.ts is 0' is VACUOUS: returns 7 at HEAD before any edit (all seven are comment mentions of the rule the module follows). Intent verified instead by comment-stripped grep = 0, before and after. Tenth vacuous gate in Phase 8.",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-08-27T12:53:54.797Z",
     "resolved_at": null
   }
 ]
