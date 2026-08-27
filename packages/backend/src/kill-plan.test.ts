@@ -2,9 +2,16 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildKillTreePlan,
+  buildOrphanKillPlan,
+  buildPreviousRunOrphanScanPlan,
+  buildSessionOrphanScanPlan,
+  classifyOrphanScanOutcome,
   DEFAULT_TASKKILL,
   hasTrackedProcessExited,
   type KillTreePlan,
+  MCP_SERVER_SCRIPT_NAME,
+  MCP_TEMP_DIR_PREFIX,
+  parseOrphanScanPids,
   shouldDetachProviderSpawn,
 } from "./kill-plan";
 
@@ -401,5 +408,423 @@ describe("hasTrackedProcessExited — handle identity, on both runtimes (T-08-04
         ).toBe(false);
       }
     }
+  });
+});
+
+// ── The orphan reap contract (plan 08-06) ───────────────────────────
+//
+// Everything below is the same literal-input discipline as everything above,
+// applied to the four builders and the one classifier that make up the path
+// which does NOT depend on process groups. A6 was measured FALSE on 2026-08-27,
+// so "this operand is a single positive pid" is not a style preference — it is
+// the whole reason the path exists, and there is a case below that goes red the
+// moment someone renders it negative again.
+
+// A token of exactly the shape `genShortToken` (`index.ts`) emits: 20 lowercase
+// hex characters.
+const SESSION_TOKEN = "9b48c5c2275914bc4fd0";
+const SESSION_DIR = `${MCP_TEMP_DIR_PREFIX}${SESSION_TOKEN}`;
+
+// The token body the class-wide (previous-run) pattern must carry INSTEAD of a
+// literal token. Pinned as data: a pattern that carried one session's token
+// would silently scan for one session rather than for the class.
+const TOKEN_CLASS = "[0-9a-f]{8,64}";
+
+// The script name with its dot escaped, which is what a pattern must contain.
+// An UNESCAPED dot matches any character, so `mcp-serverXmjs` would match too.
+const ESCAPED_SCRIPT = "mcp-server\\.mjs";
+
+const POSIX_PLATFORMS = ["darwin", "linux", undefined] as const;
+
+describe("buildSessionOrphanScanPlan — the accepted scan carries both anchors and their adjacency (LIF-02)", () => {
+  it("emits pgrep with the full-command-line flag, the end-of-options separator and one pattern operand", () => {
+    for (const platform of POSIX_PLATFORMS) {
+      const plan = expectSpawn(
+        buildSessionOrphanScanPlan({ platform, sessionDirName: SESSION_DIR }),
+      );
+
+      expect(plan.file).toBe("pgrep");
+      // `-f` matches the FULL COMMAND LINE. Without it pgrep matches the process
+      // NAME, which for `node <dir>/mcp-server.mjs` is `node` — the exact
+      // mistake 08-SPIKE.md § Step 3 corrects for `ps -eo comm`, and it would
+      // turn this scan into the image-name matching T-08-21 forbids.
+      expect(plan.args).toContain("-f");
+      expect(plan.args).toContain("--");
+      // EXACTLY ONE pattern operand. A second one would be an implicit OR at
+      // some pgrep implementations and an error at others.
+      expect(plan.args).toHaveLength(3);
+      expect(plan.windowsVerbatimArguments).toBe(false);
+    }
+  });
+
+  it("composes the pattern from the marker, a separator and the ESCAPED script name", () => {
+    const plan = expectSpawn(
+      buildSessionOrphanScanPlan({
+        platform: "darwin",
+        sessionDirName: SESSION_DIR,
+      }),
+    );
+
+    const pattern = plan.args[2];
+    expect(pattern).toBe(`${SESSION_DIR}/${ESCAPED_SCRIPT}`);
+    // The three components, asserted individually so a failure names which one
+    // was lost: without the marker the scan is machine-wide, without the script
+    // name it is not anchored on an MCP server, and without the adjacency it
+    // would match a directory that merely mentions the token.
+    expect(pattern).toContain(SESSION_DIR);
+    expect(pattern).toContain(`/${ESCAPED_SCRIPT}`);
+    expect(pattern).toContain(MCP_SERVER_SCRIPT_NAME.split(".")[0]);
+  });
+
+  it("refuses win32 with unsupported-platform and no argv at all", () => {
+    // No enumerator exists there: tasklist does not print command lines, wmic is
+    // removed from current Windows, and spawning PowerShell from the plugin is a
+    // surface this phase will not open. Recorded as AR-04 rather than hidden.
+    const plan = buildSessionOrphanScanPlan({
+      platform: "win32",
+      sessionDirName: SESSION_DIR,
+    });
+
+    expect(plan).toEqual({ kind: "none", reason: "unsupported-platform" });
+    expect(plan).not.toHaveProperty("file");
+    expect(plan).not.toHaveProperty("args");
+  });
+});
+
+describe("buildSessionOrphanScanPlan — every unusable marker refuses before a pattern is composed (T-08-21 / T-08-22)", () => {
+  // THE BLAST-RADIUS GUARD, arm by arm. Each of these, if accepted, would
+  // compose a pattern looser than the one anchor set the threat model permits.
+  const REFUSED_MARKERS = [
+    { label: "an undefined marker — no MCP runtime is staged", value: undefined },
+    { label: "an empty string", value: "" },
+    { label: "the prefix alone, with no token body", value: MCP_TEMP_DIR_PREFIX },
+    {
+      label: "a token below the minimum length",
+      value: `${MCP_TEMP_DIR_PREFIX}a1b2c3`,
+    },
+    {
+      label: "a token above the maximum length",
+      value: `${MCP_TEMP_DIR_PREFIX}${"a".repeat(65)}`,
+    },
+    {
+      label: "a token carrying an upper-case letter",
+      value: `${MCP_TEMP_DIR_PREFIX}A1b2c3d4e5f6`,
+    },
+    {
+      label: "a token carrying a path separator",
+      value: `${MCP_TEMP_DIR_PREFIX}a1b2c3d4/e5f6`,
+    },
+    {
+      label: "a token carrying a regular-expression metacharacter",
+      value: `${MCP_TEMP_DIR_PREFIX}a1b2.*c3d4`,
+    },
+    {
+      label: "a marker with the right shape but the wrong prefix",
+      value: `drift-not-mcp-${SESSION_TOKEN}`,
+    },
+  ];
+
+  // RED INPUT: delete the marker shape validation from
+  // `buildSessionOrphanScanPlan` and the metacharacter, separator and
+  // upper-case rows all fail — which is the point, because a metacharacter
+  // reaching the enumerator is regular-expression injection into a machine-wide
+  // process scan (T-08-22).
+  it.each(REFUSED_MARKERS)("refuses $label", ({ value }) => {
+    for (const platform of POSIX_PLATFORMS) {
+      const plan = buildSessionOrphanScanPlan({
+        platform,
+        sessionDirName: value,
+      });
+      expect(plan).toEqual({ kind: "none", reason: "bad-marker" });
+      expect(plan).not.toHaveProperty("file");
+      expect(plan).not.toHaveProperty("args");
+    }
+  });
+});
+
+describe("buildPreviousRunOrphanScanPlan — the class-wide scan, and the one condition it may run under", () => {
+  it("emits the token CLASS rather than a literal token when no session is staged", () => {
+    for (const platform of POSIX_PLATFORMS) {
+      const plan = expectSpawn(
+        buildPreviousRunOrphanScanPlan({
+          platform,
+          currentSessionDirName: undefined,
+        }),
+      );
+
+      expect(plan.file).toBe("pgrep");
+      expect(plan.args).toEqual([
+        "-f",
+        "--",
+        `${MCP_TEMP_DIR_PREFIX}${TOKEN_CLASS}/${ESCAPED_SCRIPT}`,
+      ]);
+      // A literal token here would mean the class-wide scan had quietly become
+      // a session scan for whichever token was pasted in.
+      expect(plan.args[2]).not.toContain(SESSION_TOKEN);
+    }
+  });
+
+  it("refuses with session-active while a runtime IS staged, and returns no argv", () => {
+    // The arm that keeps this safe: a class-wide pattern matches the LIVE
+    // session's own MCP child as readily as a dead run's, so it may only ever
+    // run when nothing is staged. Refusing beats filtering pids afterwards —
+    // a filter is a second thing that can be got wrong, and the cost of getting
+    // it wrong is killing the MCP server of the turn the user is watching.
+    const plan = buildPreviousRunOrphanScanPlan({
+      platform: "darwin",
+      currentSessionDirName: SESSION_DIR,
+    });
+
+    expect(plan).toEqual({ kind: "none", reason: "session-active" });
+    expect(plan).not.toHaveProperty("file");
+    expect(plan).not.toHaveProperty("args");
+  });
+
+  it("refuses win32 with unsupported-platform and no argv at all", () => {
+    const plan = buildPreviousRunOrphanScanPlan({
+      platform: "win32",
+      currentSessionDirName: undefined,
+    });
+
+    expect(plan).toEqual({ kind: "none", reason: "unsupported-platform" });
+    expect(plan).not.toHaveProperty("file");
+    expect(plan).not.toHaveProperty("args");
+  });
+});
+
+describe("parseOrphanScanPids — text from another process becomes numbers exactly once (T-08-23)", () => {
+  it("returns an ordinary multi-line list in first-seen order", () => {
+    expect(
+      parseOrphanScanPids({ stdout: "123\n124\n125\n", excludePids: [] }),
+    ).toEqual([123, 124, 125]);
+  });
+
+  it("tolerates carriage-return-terminated lines", () => {
+    // A "123\r\n" line parsed without the trim would be a parse of "123\r".
+    expect(
+      parseOrphanScanPids({ stdout: "123\r\n124\r\n", excludePids: [] }),
+    ).toEqual([123, 124]);
+  });
+
+  it("drops blank and whitespace-only lines", () => {
+    expect(
+      parseOrphanScanPids({ stdout: "\n123\n   \n\n124\n", excludePids: [] }),
+    ).toEqual([123, 124]);
+  });
+
+  it("drops a non-numeric line rather than letting NaN through", () => {
+    expect(
+      parseOrphanScanPids({
+        stdout: "123\npgrep: illegal option\n124\n",
+        excludePids: [],
+      }),
+    ).toEqual([123, 124]);
+  });
+
+  it("drops 0, 1 and any negative — the floor is 1, not 0", () => {
+    // `0` is a process-GROUP reference on POSIX (signalling it would signal
+    // Drift's own group) and `1` is init. Neither can ever be a Drift MCP child,
+    // so a floor of 0 would let the group reference back in through the parser
+    // after the builders spent the whole module refusing it.
+    expect(
+      parseOrphanScanPids({
+        stdout: "0\n1\n-1\n-4321\n2\n",
+        excludePids: [],
+      }),
+    ).toEqual([2]);
+  });
+
+  it("collapses duplicates", () => {
+    expect(
+      parseOrphanScanPids({ stdout: "123\n123\n124\n123\n", excludePids: [] }),
+    ).toEqual([123, 124]);
+  });
+
+  it("drops an excluded pid", () => {
+    expect(
+      parseOrphanScanPids({ stdout: "123\n124\n", excludePids: [124] }),
+    ).toEqual([123]);
+  });
+
+  it("returns an empty array for empty output", () => {
+    expect(parseOrphanScanPids({ stdout: "", excludePids: [] })).toEqual([]);
+  });
+
+  it("preserves FIRST-SEEN order rather than sorting", () => {
+    // A sort would be a silent reordering of which orphan is signalled first.
+    // Nothing depends on that order today, which is exactly why an accidental
+    // sort would go unnoticed — so it is pinned here.
+    expect(
+      parseOrphanScanPids({
+        stdout: "900\n\n12\nnope\n900\n0\n77\r\n1\n",
+        excludePids: [12],
+      }),
+    ).toEqual([900, 77]);
+  });
+});
+
+describe("buildOrphanKillPlan — one orphan, one POSITIVE pid, never a group (GD-01)", () => {
+  // The SAME five shapes `buildKillTreePlan` rejects, asserted from THIS caller
+  // too, so the shared `isUnusablePid` predicate is proven from both — a guard
+  // that only holds at the call site someone remembered to test is not a guard.
+  const REFUSED_PIDS = [
+    { label: "an undefined pid", pid: undefined },
+    { label: "NaN", pid: Number.NaN },
+    { label: "0 — every process in Drift's own group", pid: 0 },
+    { label: "-1 — already a group reference", pid: -1 },
+    { label: "1.5 — a non-integer cannot be a pid", pid: 1.5 },
+  ];
+
+  it.each(REFUSED_PIDS)("refuses $label from the orphan caller too", ({ pid }) => {
+    for (const platform of POSIX_PLATFORMS) {
+      const plan = buildOrphanKillPlan({ pid, platform });
+      expect(plan).toEqual({ kind: "none", reason: "no-pid" });
+      expect(plan).not.toHaveProperty("file");
+      expect(plan).not.toHaveProperty("args");
+    }
+  });
+
+  it("renders the pid operand POSITIVE on darwin, linux and an undefined platform", () => {
+    // RED INPUT: change the rendering in `buildOrphanKillPlan` to `-${pid}` and
+    // this case goes red. That is the machine form of GD-01 — a negative operand
+    // is a PROCESS GROUP reference, and A6 was measured FALSE on 2026-08-27
+    // (codex pid 43921 in pgid 43752, its mcp-server child pid 44284 in pgid
+    // 44284), so a group reference cannot reach the child this path exists for.
+    for (const platform of POSIX_PLATFORMS) {
+      const plan = expectSpawn(buildOrphanKillPlan({ pid: PID, platform }));
+
+      expect(plan.file).toBe("kill");
+      expect(plan.args).toEqual(["-KILL", "--", "4321"]);
+      expect(plan.args).toContain("4321");
+      expect(plan.args).not.toContain("-4321");
+      expect(plan.windowsVerbatimArguments).toBe(false);
+    }
+  });
+
+  it("refuses win32 with unsupported-platform and no argv at all", () => {
+    const plan = buildOrphanKillPlan({ pid: PID, platform: "win32" });
+
+    expect(plan).toEqual({ kind: "none", reason: "unsupported-platform" });
+    expect(plan).not.toHaveProperty("file");
+    expect(plan).not.toHaveProperty("args");
+  });
+});
+
+describe("the orphan path never renders a pid as a leading-minus operand (GD-01)", () => {
+  it("produces no argument derived from a pid that begins with a minus", () => {
+    // Scoped to the ORPHAN builders on purpose. `buildKillTreePlan`'s POSIX arm
+    // renders `-4321` deliberately — that is the shipped group kill, asserted
+    // above — and this claim is about the path that must NOT depend on groups.
+    // RED INPUT: render the `buildOrphanKillPlan` operand negative and this goes
+    // red alongside the case above.
+    const plans = [
+      buildOrphanKillPlan({ pid: PID, platform: "darwin" }),
+      buildSessionOrphanScanPlan({
+        platform: "darwin",
+        sessionDirName: SESSION_DIR,
+      }),
+      buildPreviousRunOrphanScanPlan({
+        platform: "darwin",
+        currentSessionDirName: undefined,
+      }),
+    ];
+
+    for (const plan of plans) {
+      if (plan.kind !== "spawn") throw new Error("expected a spawn plan");
+      for (const argument of plan.args) {
+        // A leading minus followed by digits is the group-reference spelling.
+        // `-KILL`, `-f` and `--` are switches and are unaffected.
+        expect(/^-\d/.test(argument)).toBe(false);
+      }
+    }
+  });
+});
+
+// THE FOUR-ARM DECISION, and the ONLY place must_haves truth 4 is reachable by
+// an executed assertion. `reapMcpOrphans` lives in `index.ts`, which no test in
+// this project can import, so the ladder was lifted out here on purpose: a
+// four-arm decision written inline there is a decision no assertion can reach.
+describe("classifyOrphanScanOutcome — every unavailable-enumeration outcome is a no-op", () => {
+  // RED INPUT for the whole block: make any single arm return `kill: true` and
+  // that arm's case goes red; hardwire the classifier to refuse and the positive
+  // case at the end goes red. The two directions are what make this block a
+  // proof rather than a restatement.
+  it("treats an enumerator that could not be spawned as a no-op", () => {
+    // `spawn` throws SYNCHRONOUSLY for an unspawnable file, which is what a host
+    // with no `pgrep` produces. Such a host is left exactly as well served as it
+    // is at HEAD: this reaper removes no pre-existing termination path.
+    expect(
+      classifyOrphanScanOutcome({
+        spawnThrew: true,
+        exitCode: undefined,
+        timedOut: false,
+        pids: [123],
+      }),
+    ).toEqual({
+      kind: "noop",
+      kill: false,
+      reason: "enumerator-unavailable",
+    });
+  });
+
+  it("treats a timed-out scan as a no-op rather than retrying it", () => {
+    expect(
+      classifyOrphanScanOutcome({
+        spawnThrew: false,
+        exitCode: undefined,
+        timedOut: true,
+        pids: [123],
+      }),
+    ).toEqual({ kind: "noop", kill: false, reason: "scan-timeout" });
+  });
+
+  it("treats a non-zero exit as a no-op, exit 1 and any other alike", () => {
+    // Exit 1 is pgrep's DOCUMENTED "no process matched" and is deliberately NOT
+    // distinguished: both outcomes reap nothing, so a separate reason would be a
+    // distinction with no consequence and one more arm to get wrong.
+    for (const exitCode of [1, 2, 127, -1]) {
+      expect(
+        classifyOrphanScanOutcome({
+          spawnThrew: false,
+          exitCode,
+          timedOut: false,
+          pids: [123],
+        }),
+      ).toEqual({ kind: "noop", kill: false, reason: "scan-failed" });
+    }
+    // `null` is the code a child killed by a signal leaves behind. Fail-closed.
+    expect(
+      classifyOrphanScanOutcome({
+        spawnThrew: false,
+        exitCode: null,
+        timedOut: false,
+        pids: [123],
+      }),
+    ).toEqual({ kind: "noop", kill: false, reason: "scan-failed" });
+  });
+
+  it("treats a clean scan that matched nothing as a no-op", () => {
+    expect(
+      classifyOrphanScanOutcome({
+        spawnThrew: false,
+        exitCode: 0,
+        timedOut: false,
+        pids: [],
+      }),
+    ).toEqual({ kind: "noop", kill: false, reason: "no-match" });
+  });
+
+  it("reaps ONLY on exit 0 carrying at least one parsed pid", () => {
+    // The positive case, and it is not optional: without it the four no-op arms
+    // above would all pass against a classifier hardwired to refuse everything,
+    // which would be four green assertions over a mechanism that never runs.
+    expect(
+      classifyOrphanScanOutcome({
+        spawnThrew: false,
+        exitCode: 0,
+        timedOut: false,
+        pids: [44284, 123],
+      }),
+    ).toEqual({ kind: "reap", kill: true, pids: [44284, 123] });
   });
 });
