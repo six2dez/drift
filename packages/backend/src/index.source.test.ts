@@ -1000,7 +1000,14 @@ describe("index.ts wires the orphan reap at every counted site and nowhere else 
   // out of its mutator, or drop `callMcpMethod`'s acquire, and this fails.
   it("increments and releases the direct-call depth exactly once each, through the shared mutators", () => {
     expect(code.match(/mcpDirectCallDepth \+= 1/g) ?? []).toHaveLength(1);
-    expect(code.match(/mcpDirectCallDepth -= 1/g) ?? []).toHaveLength(1);
+    expect(
+      code.match(/mcpDirectCallDepth = Math\.max\(0, mcpDirectCallDepth - 1\)/g) ??
+        [],
+    ).toHaveLength(1);
+    // The UNCLAMPED spelling must be gone, not merely outnumbered. A bare
+    // `-= 1` alongside the clamped one would restore the negative-depth path
+    // the clamp exists to close, while both totals above stayed at 1.
+    expect(code.match(/mcpDirectCallDepth -= 1/g)).toBeNull();
 
     const acquire = topLevelDeclarationSlice(code, "acquireDirectMcpCall");
     expect(acquire).not.toBe("");
@@ -1008,16 +1015,46 @@ describe("index.ts wires the orphan reap at every counted site and nowhere else 
 
     const release = topLevelDeclarationSlice(code, "releaseDirectMcpCall");
     expect(release).not.toBe("");
-    expect(release.match(/mcpDirectCallDepth -= 1/g) ?? []).toHaveLength(1);
+    expect(
+      release.match(/mcpDirectCallDepth = Math\.max\(0, mcpDirectCallDepth - 1\)/g) ??
+        [],
+    ).toHaveLength(1);
 
     const slice = topLevelDeclarationSlice(code, "callMcpMethod");
     expect(slice).not.toBe("");
     expect(slice).toContain("spawnWithEnv(");
     expect(slice.match(/acquireDirectMcpCall\(\)/g) ?? []).toHaveLength(1);
 
-    // Released from BOTH handlers, because either can be this child's last
-    // event and neither is guaranteed to fire under Caido's runtime.
-    expect(slice.match(/releaseDirectCall\(\)/g) ?? []).toHaveLength(2);
+    // Released from ALL THREE handlers, because any of them can be this child's
+    // last event and none is guaranteed to fire under Caido's runtime. `exit` is
+    // the one `kill-plan.ts` records LLRT as actually supplying, and it was the
+    // missing one (review WR-01); `releaseDirectCall()` is idempotent, so a
+    // runtime that delivers two of them still releases exactly once.
+    expect(slice.match(/releaseDirectCall\(\)/g) ?? []).toHaveLength(3);
+    for (const event of ["exit", "close", "error"]) {
+      expect(slice).toContain(`proc.on("${event}"`);
+    }
+  });
+
+  // 5c. THE FAIL-SAFE RESET (review WR-01). The counter is module-level and,
+  // before this, nothing ever wrote zero to it — so a single undelivered release
+  // left the idle gate closed at all four sites for the whole life of the plugin
+  // load. Bounding the counter to the MCP runtime's own lifetime is what makes
+  // that failure recoverable rather than permanent.
+  //
+  // RED INPUT: delete the reset and the count falls to 1 (the declaration alone);
+  // move it out of `cleanupMcpRuntime` and the body assertion goes red while the
+  // total still reads 2.
+  it("zeroes the direct-call depth when the runtime it belongs to is torn down", () => {
+    // TWO occurrences and no more: the declaration's initialiser and this reset.
+    // A third would be a second place the counter can be silently cleared, which
+    // is how a live self-test gets reaped.
+    expect(code.match(/mcpDirectCallDepth = 0/g) ?? []).toHaveLength(2);
+    expect(code).toContain("let mcpDirectCallDepth = 0;");
+
+    const cleanup = functionBody(code, "cleanupMcpRuntime");
+    expect(cleanup).not.toBe("");
+    expect(cleanup.match(/mcpDirectCallDepth = 0;/g) ?? []).toHaveLength(1);
   });
 
   // 5b. THE CR-01 CENSUS — every spawn whose argv carries the MCP server script

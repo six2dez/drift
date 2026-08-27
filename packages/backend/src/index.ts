@@ -370,8 +370,16 @@ function acquireDirectMcpCall(): void {
   mcpDirectCallDepth += 1;
 }
 
+// CLAMPED AT ZERO (review WR-01), and the clamp is load-bearing rather than
+// defensive padding. `cleanupMcpRuntime` resets this counter to 0, and a release
+// that arrives AFTER such a reset — a `close` for a self-test child that was
+// killed by the teardown, an `mcp add` whose await was still unwinding — would
+// otherwise drive the depth NEGATIVE. `shouldReapSessionOrphans` demands an
+// EXACT zero, so a negative depth suppresses every idle reap for the rest of the
+// plugin load: the same permanent disablement the reset exists to prevent,
+// reintroduced by the reset itself.
 function releaseDirectMcpCall(): void {
-  mcpDirectCallDepth -= 1;
+  mcpDirectCallDepth = Math.max(0, mcpDirectCallDepth - 1);
 }
 
 // The guard for a direct MCP spawn Drift AWAITS, as distinct from the one it
@@ -2585,6 +2593,27 @@ async function callMcpMethod(
       finish(() => reject(error));
     });
 
+    // THE THIRD RELEASE HANDLER, and the one that matters on the runtime this
+    // plugin actually ships to (review WR-01). `close` and `error` are both
+    // events CLAUDE.md and this function's own comment forty lines below record
+    // as unreliably delivered while an outer RPC is awaiting — which is exactly
+    // the window `runMcpSelfTest` holds open across three sequential
+    // `callMcpMethod`s per provider. `exit` is the event `kill-plan.ts` names as
+    // the one LLRT DOES supply on the handle (`lib.rs`'s `emit_str(…, "exit",
+    // …)`), and the one `sendCliMessage`'s provider spawn already registers
+    // alongside `close`. `releaseDirectCall()` is idempotent, so a runtime that
+    // delivers both releases once.
+    //
+    // WHY THIS IS NOT COSMETIC. The counter is module-level and, before the
+    // reset added to `cleanupMcpRuntime` below, was never zeroed: ONE undelivered
+    // `close` on ONE self-test child left the depth at >=1 and closed the idle
+    // gate at all four sites — cancel, close, delete and turn end — for the whole
+    // life of the plugin load, silently regressing LIF-02. The first thing a user
+    // is likely to do, the "Run preflight" button, is what armed it.
+    proc.on("exit", () => {
+      releaseDirectCall();
+    });
+
     proc.on("close", () => {
       // Released FIRST, ABOVE the `settled` early return. `close` is the
       // process's actual end, and it fires for a child whose promise the timeout
@@ -4010,6 +4039,27 @@ async function cleanupMcpRuntime(
       });
     }
   }
+
+  // THE FAIL-SAFE RESET (review WR-01). The depth counter belongs to the MCP
+  // RUNTIME, and this function is where that runtime ends: every direct MCP
+  // child was staged from the temp directory removed below, and the loop above
+  // has just killed everything Drift holds a handle on. A depth still standing
+  // at this point is a release that never arrived, not a call still in flight.
+  //
+  // Without this the leak is PERMANENT rather than per-operation — the counter
+  // is module-level and nothing else ever writes zero to it — so one undelivered
+  // `close` disabled the idle reap for the rest of the plugin load. Bounding it
+  // to the runtime's own lifetime is what makes the failure recoverable: the
+  // next `startMcpServer` begins from a counter that means what it says.
+  //
+  // Safe in the other direction too, and that is the half worth checking rather
+  // than assuming: this is a TEARDOWN, so a reap that fires afterwards has
+  // nothing of Drift's left to protect, and `getMcpSessionDirName()` returns
+  // `undefined` once `mcpTempDir` is cleared below — which makes the scan
+  // builder refuse with `bad-marker` in any case. A release arriving after this
+  // line cannot drive the counter negative because `releaseDirectMcpCall`
+  // clamps.
+  mcpDirectCallDepth = 0;
 
   // THE ORPHAN REAP, ABOVE THE REMOVAL — SC-4's statement order, extended to the
   // mechanism that does not depend on `activeProcesses`. The loop above reaches
