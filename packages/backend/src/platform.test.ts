@@ -1117,13 +1117,70 @@ describe("selectComspec", () => {
     // The same rule the loop above applies to a value it read. A relative
     // interpreter is resolved through the very search order this function
     // exists to bypass, so its origin does not earn it an exemption.
+    //
+    // CORRECTED 2026-08-27 (review WR-06). This case used to pass
+    // `systemRootFallback: "   "`, which does NOT reach the arm the title names.
+    // Trace it: `resolveWindowsSystemBinary` trims the fallback to `""`, the
+    // trailing-separator loop is a no-op on `""`, and `if (root === "") return
+    // input.binary` hands back the bare `"cmd.exe"` — the BARE-NAME arm, taken
+    // byte-identically by the preceding case, which passes `""`. The two cases
+    // were duplicates of one another under different titles, and the arm the
+    // title describes was UNASSERTED. (The whitespace-is-absent rule itself is
+    // not lost: it is asserted directly on the ladder, at "treats a
+    // whitespace-only value as ABSENT on BOTH rungs".)
+    //
+    // A NON-EMPTY, NON-DRIVE-ABSOLUTE root is the only input that reaches
+    // `isAbsolutePath`'s refusal carrying something other than a bare name:
+    // "Windows" composes "Windows\\System32\\cmd.exe", which is a real path
+    // and a RELATIVE one. That refusal guards T-08-33, rated `high`, on the
+    // branch that carries a live CAIDO_TOKEN.
+    //
+    // RED INPUT: delete the `isAbsolutePath` guard in `selectComspec` and this
+    // returns "Windows\\System32\\cmd.exe" instead of undefined. Verified by
+    // running exactly that deletion — which leaves the PRECEDING case green,
+    // because the bare "cmd.exe" it produces is also not absolute.
     expect(
       selectComspec({
         env: {},
         platform: "win32",
-        systemRootFallback: "   ",
+        systemRootFallback: "Windows",
       }),
     ).toBeUndefined();
+
+    // The composition itself, asserted so the case cannot pass because nothing
+    // was derived at all — which is exactly how the superseded input passed.
+    expect(
+      resolveWindowsSystemBinary({
+        env: {},
+        fallbackRoot: "Windows",
+        binary: "cmd.exe",
+      }),
+    ).toBe("Windows\\System32\\cmd.exe");
+  });
+
+  it("DOCUMENTS the asymmetry: the same ladder's output is NOT refused at getWhichCommand", () => {
+    // Recorded rather than silently tolerated (review WR-06). `selectComspec`
+    // applies an `isAbsolutePath` refusal to the derived root; `getWhichCommand`
+    // and `buildKillTreePlan` apply NONE, so the same non-absolute value is
+    // handed straight to `spawn` there.
+    //
+    // It is unreachable in production today — `deriveWindowsSystemRoot` only
+    // ever returns "" or `X:\Windows`, and `systemRootFallback` is fed from it
+    // at every production call site — which is why this is pinned as a
+    // documented divergence rather than fixed here: tightening a THIRD consumer
+    // of the ladder is a behaviour change on the Windows spawn path, and the
+    // maintainer cannot test native Windows locally (CLAUDE.md § Testing).
+    //
+    // RED INPUT: add an `isAbsolutePath` refusal to `getWhichCommand` and this
+    // goes red, which is the point — the divergence cannot be closed silently in
+    // either direction.
+    expect(
+      getWhichCommand({
+        platform: "win32",
+        env: {},
+        systemRootFallback: "Windows",
+      }).command,
+    ).toBe("Windows\\System32\\where.exe");
   });
 
   it("CMP-01: does not consult the derived root on a POSIX platform", () => {
