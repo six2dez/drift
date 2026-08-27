@@ -3,7 +3,7 @@ status: testing
 phase: 08-process-lifecycle
 source: 08-01-SUMMARY.md, 08-02-SUMMARY.md, 08-03-SUMMARY.md, 08-04-SUMMARY.md, 08-05-SUMMARY.md
 started: 2026-08-24T22:40:00Z
-updated: 2026-08-24T22:40:00Z
+updated: 2026-08-27T07:15:00Z
 gate_overrides:
   - gate: api-coverage.verify-pre
     decided: 2026-08-24
@@ -25,6 +25,36 @@ expected: |
   Drift → Settings → Copy diagnostics reports spikeDetachedGroupKill as
   "grandchild-died (detached honoured)".
 awaiting: user response
+note: |
+  A diagnostics report was submitted 2026-08-27 from a real macOS Caido install. It does
+  NOT answer this test: it carries no spike* fields, because it is a HEAD build and the
+  probe was removed by T-08-03 (d8ccab8). The probe build is 68199fa. The same report also
+  cannot answer tests 2-5, 9 or 10 — activeSessions: 0 and lastSpawnCommand: "" show no
+  turn was running when it was captured. It did, however, yield one unrelated finding
+  (G-01 below) and confirm three runtime facts — see § Observations.
+
+## Observations from the 2026-08-27 diagnostics
+
+Recorded because they are real-hardware readings the project had not previously taken.
+None of them closes a test; G-01 opens a gap.
+
+**Confirmed working on a real Caido install (darwin 25.6.0):**
+- `os.platform()` → `"darwin"`, recognised (`runtimeOsPlatform: ok (gating)`)
+- `os.tmpdir()` → `/var/folders/05/…/T/`; `mcpTempDir` correctly resolves under it rather
+  than a hardcoded `/tmp` — Phase 4's platform work holds outside CI
+- MCP running, `authState: valid`, `authSource: session`, 18 tools registered
+
+**Unavailable in the real backend runtime:** `processVersion`, `versionsNode`,
+`versionsLlrt` all report `unavailable` — the exact LLRT build users run still cannot be
+identified from inside the plugin, which is why assumption A1 remains closable only by the
+spike and not by a version check.
+
+**Operational, outside Phase 8 scope (Phase 7 / registration territory):**
+`mcpCliRemovalFailures: gemini: 2 failed (scope=user exit=127, scope=project exit=127)`.
+Drift's own message states a Drift MCP entry carrying a Caido session token may still be
+present in the Gemini CLI's configuration on this machine. Clear with
+`gemini mcp remove --scope user drift` and `--scope project drift`. Not a Phase 8 defect,
+but it is a live token-at-rest condition and should not be lost in a summary.
 
 ## Tests
 
@@ -99,9 +129,43 @@ total: 10
 passed: 0
 issues: 0
 pending: 10
+at_risk: 1
 skipped: 0
 blocked: 0
 
 ## Gaps
 
-<!-- APPEND only when a test reports an issue -->
+<!-- APPEND only when a test reports an issue, or when verification surfaces a defect -->
+
+- truth: "On Windows, killTree resolves taskkill.exe by absolute path from SystemRoot, using the bare name only as a last resort (SC-1, threat T-08-03)"
+  status: at_risk
+  reason: >-
+    Not a test failure — a defect surfaced by the 2026-08-27 real-hardware diagnostics.
+    That report shows `parentEnvKeyCount: 0` and `parentEnvPathEntryCount: absent`: on a
+    real macOS Caido install the backend's parent environment is EMPTY.
+    `killTree` (index.ts) passes `env: readParentEnv()` into `buildKillTreePlan`, whose
+    win32 arm (kill-plan.ts:143-176) scans that record for `SystemRoot` then `SYSTEMROOT`
+    and, finding neither, sets `root === ""` and returns `DEFAULT_TASKKILL` — the bare
+    name. If the Windows backend also yields an empty parent env, SC-1's absolute-path
+    guarantee degrades to the bare-name fallback on every real install, silently, while
+    staying green in CI where Node populates `process.env`. That is the same
+    green-on-Node / broken-on-LLRT pattern as the phase's central finding and as WR-03.
+    Corroboration in the same report: `nodeExecutable` was resolved from
+    `nodeSearchCandidates`, not from PATH.
+  severity: major
+  test: null
+  source: "2026-08-27 getDiagnostics from a real macOS Caido install"
+  scope_note: >-
+    The reading is darwin, where the POSIX arm never consults `root`, so nothing is broken
+    on macOS today. The risk is Windows-only and currently UNMEASURED — no windows-latest
+    run exists, and the win32 suite exercises `buildKillTreePlan` from literal inputs
+    rather than from a live backend's environment.
+  affects_assumption: >-
+    A7 ("%SystemRoot% is present in the environment Caido's backend sees on Windows",
+    rated **Low**). Its stated basis is Phase 3's P3-VARS check, which measured
+    `USERPROFILE`/`APPDATA`/`LOCALAPPDATA` in CI — a different vehicle from the plugin
+    backend this reading came from. The rating deserves re-examination on that basis.
+  root_cause: ""     # Filled by diagnosis
+  artifacts: []      # Filled by diagnosis
+  missing: []        # Filled by diagnosis
+  debug_session: ""  # Filled by diagnosis
