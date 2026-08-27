@@ -1,13 +1,20 @@
 ---
 phase: 8
 slug: 08-process-lifecycle
-status: draft
+status: approved
+approved: 2026-08-28
+approved_by: gsd-ui-checker
 shadcn_initialized: false
 preset: none
 created: 2026-08-28
 scope: regression-contract
 frontend_files_changed_by_phase: 0
-open_decisions: 1
+open_decisions: 0
+decisions_resolved:
+  - id: UD-01
+    decided: 2026-08-28
+    by: six2dez
+    choice: "C — diagnostics-only getDiagnostics() key; no user-visible surface; zero frontend files"
 ---
 
 # Phase 8 — UI Design Contract
@@ -32,9 +39,10 @@ does exactly two things, and deliberately no more:
 - **§ A — the unchanged-surface regression contract.** ROADMAP **SC-5** ("macOS/Linux cancellation
   and timeout semantics *visible to the user* are unchanged") is a UI claim with no artifact behind
   it. § A turns it into checkable statements about components that already exist.
-- **§ B — one open design decision (UD-01).** Whether the orphan reap's
-  `reason=enumerator-unavailable` outcome deserves any user-visible surface. **Not decided here —
-  it is a maintainer decision and is recorded as OPEN.**
+- **§ B — one design decision (UD-01), now RESOLVED.** Whether the orphan reap's
+  `reason=enumerator-unavailable` outcome deserves any user-visible surface. Referred to the
+  maintainer rather than decided by the researcher, and **answered 2026-08-28: option C —
+  a diagnostics-only `getDiagnostics()` key, no user-visible surface, zero frontend files.**
 
 **There is no `08-CONTEXT.md`.** It was never created across ten executed plans. Nothing in this
 document was lifted from one; every locked row below was read out of source or out of
@@ -105,7 +113,13 @@ line heights are Tailwind's paired defaults.
 | Section label | 14px (`text-sm`) | 500 medium (`font-medium`) | 1.43 (20px) | Settings MCP status label, Help card titles (45 / 43 occurrences) |
 | Section heading | 18px (`text-lg`) | 600 semibold (`font-semibold`) | 1.56 (28px) | "MCP Server" heading in `SettingsView.vue` |
 
-Two weights in the touched surface: **400 (default) and 500/600 for labels and headings**.
+**Three weights are in force** in the touched surface: **400** (body and control labels — the
+default), **500** (`font-medium`, section labels), **600** (`font-semibold`, section headings).
+*(Corrected 2026-08-28 per the UI-checker's Dimension 4 FLAG. The line previously read "Two weights
+… 400 (default) and 500/600", collapsing `font-medium` and `font-semibold` into one entry while the
+table above listed all three separately. Prose only — no `.vue` file is touched, and R-10 is not
+engaged. A regression contract that miscounts its own baseline is weakest at exactly the moment
+someone cites it to argue a change was safe.)*
 `font-bold` (3 occurrences) and `text-2xl` (1) exist elsewhere in the app and are **out of scope** —
 Phase 8 touches neither.
 
@@ -191,7 +205,7 @@ statement — what must stay true — and names the artifact that can falsify it
 | **R-03** | A provider result arriving **after** a cancel for that session is discarded, produces no second message, and clears the session from the cancelled set — so the *next* turn on the same session renders normally (`["[Cancelled]", "new reply"]`). A result for a session that was **not** cancelled still surfaces as an error (`["error:spawn failed"]`). | `ChatView.cancel.test.ts` — all three cases |
 | **R-04** | A timeout publishes `state: "error"`, `reasonCode: "timeout"`, `reason: "Process timed out."`. `CliStatus.vue` therefore renders `Session error \| MCP attached` (or `\| no MCP`) plus the verbatim reason on the `text-[11px] text-surface-500` line. Both the state word and the reason line must keep appearing. | `index.ts:5418-5421` + `CliStatus.vue:39-72` |
 | **R-05** | A cancel publishes `state: "stopped"`, `reasonCode: "cancelled"`, `reason: "Provider turn cancelled by the user."` — surfaced through the same `sessionReason` branch, which explicitly lists `"cancelled"`. | `index.ts:6142-6150` + `CliStatus.vue:66-72` |
-| **R-06** | The `CliStatus` dot is `yellow-500` with the word `Streaming...` while a turn runs and `green-500` with `Ready` otherwise. Cancel and timeout both return it to `Ready` because both clear `isStreaming`. | `CliStatus.vue:80-90` |
+| **R-06** | The `CliStatus` dot is `yellow-500` with the word `Streaming...` while a turn runs and `green-500` with `Ready` otherwise. Cancel and timeout both return it to `Ready` because both clear `isStreaming`. | `CliStatus.vue:81-85` |
 | **R-07** | `cancelCliMessage` keeps its **synchronous `Result<void>`** signature and the orphan reap stays **fire-and-forget** (`reapSessionOrphansIfIdle(sdk);` — no `await`). The Stop click must not gain latency proportional to a `pgrep` spawn, and must never show a spinner, toast, progress bar or disabled state. | `index.ts:6140` — the source comment there, and the identical one at `:6188`, state this is decision **OQ-4** and that the goal is "its user-visible semantics unchanged" |
 | **R-08** | Deleting a chat still shows exactly one `window.confirm` with the copy in the table above, **before** the kill-then-reap-then-sweep sequence Phase 8 wired at that site. No second confirmation, no new modal. | `ChatView.vue:383-393`; `08-VERIFICATION.md` Key Link table — `deleteChat` is one of the four `reapSessionOrphansIfIdle` sites, each placed after `activeProcesses.delete` and before every `rm` |
 | **R-09** | The Settings MCP control keeps its two-state Start/Stop shape (label + icon + severity all flipping on `mcpStatus.running`), and `App.vue`'s badge keeps its five labels. Phase 8's kill-before-sweep at `stopMcpServer` must not add an intermediate "Stopping…" label or a third state. | `SettingsView.vue:399-410`; `App.vue:28-42` |
@@ -200,11 +214,44 @@ statement — what must stay true — and names the artifact that can falsify it
 **R-10 has exactly one licensed exception:** § B UD-01 resolved to option **A** or **B**. Options
 **C** and **D** require no frontend file at all (see below).
 
+> **2026-08-28 — the exception is now dead by resolution.** UD-01 was answered **C**, so R-10 stands
+> unconditional for Phase 8: a gap-closure plan that opens a file under `packages/frontend` or
+> `packages/shared` is wrong, with no licensed exception remaining.
+
 ---
 
-## § B — OPEN DECISION UD-01: does `enumerator-unavailable` get a user-visible surface?
+## § B — UD-01 (RESOLVED): does `enumerator-unavailable` get a user-visible surface?
 
-**Status: OPEN. Awaiting the maintainer. Not decided by this document.**
+> **DECIDED 2026-08-28 by the maintainer (six2dez): option C — diagnostics-only field.**
+> No user-visible surface. Add one key to the `getDiagnostics()` record carrying the last orphan-reap
+> outcome (e.g. `lastOrphanReap: "noop reason=enumerator-unavailable killed=0"`), keep the existing
+> backend console lines unchanged, and change **zero** files under `packages/frontend` or
+> `packages/shared` — `SettingsView.vue:676-677` renders the diagnostics record generically
+> (`v-for="(value, key) in diagnostics"`), so a new key needs no frontend edit.
+>
+> **Rationale.** C is the only option that lets a user or a bug reporter answer *"is the reap inert on
+> my machine?"* without touching the UI, so § A/R-10 and ROADMAP SC-5 both survive intact and no
+> Phase 8 gap-closure plan has to enter `packages/frontend`. It matches what `08-VERIFICATION.md`
+> actually asks for — a **retrievable reading**, not an alert. Its weakness is accepted and recorded
+> rather than argued away: diagnostics is user-triggered and after-the-fact, so it never *tells*
+> anyone; it only answers someone who thought to ask. A/B were rejected as scope expansion into a
+> deliberately quiet UI for a condition that fails **closed** (a capability gap, not a regression —
+> the posture with it is exactly the pre-Phase-8 posture); A additionally carries the per-cancel
+> alarm-fatigue failure mode. D was rejected because it leaves the fact discoverable only by someone
+> who already knows to open the backend console, which is the status quo the verification report
+> named as a problem.
+>
+> **Consequences of choosing C — all of them are "no change":** § A/R-10 needs **no** marked
+> exception; ROADMAP SC-5 needs **no** amendment; the § Color, § Typography and § Copywriting
+> contracts are untouched. Sub-question 1 is resolved as recommended — **only the inert case is
+> load-bearing**; the diagnostics key records whatever the last reap was, but nothing is ever pushed
+> at the user, so the "train users to ignore the channel" risk does not arise. Sub-questions 2 and 3
+> (colour, alert copy) are **moot** — they applied only to A/B.
+>
+> **Carried into planning as a locked decision.** The `lastOrphanReap` key is backend-only work for
+> the `/gsd-plan-phase 8 --gaps` round; it is not a licensed reason to open a frontend file.
+
+**Status: RESOLVED — option C. The analysis below is preserved as written for the record.**
 
 ### The situation
 
@@ -254,7 +301,7 @@ it is exactly the pre-Phase-8 posture.
 |---|--------|------------------------|----------------------|------|
 | **A** | **Persistent degraded-capability indicator** — e.g. an `amber-400` chip in `CliStatus.vue` beside "Override active", or a line in the Settings MCP panel, shown whenever the last reap reported `enumerator-unavailable`. | 1–2 (`CliStatus.vue` and/or `SettingsView.vue`) + a `shared` type field | **Breaks R-10.** SC-5 needs an amendment: the visible semantics *do* change. | Highest. New state plumbing backend → `shared` → store → component; a new always-on chip in a deliberately quiet UI; risk of alarm fatigue since it fires on every cancel on an affected machine. |
 | **B** | **One-time notice** — surface it once per Caido session (first time the reap reports `enumerator-unavailable`), then stay quiet. | 1 + a `shared` field | **Breaks R-10**, but SC-5 stays defensible: the steady-state semantics are unchanged. | Medium-high. Needs a "seen" flag with a lifetime nobody has specified; a notice the user dismisses before reading is worse than the console line. |
-| **C** | **Diagnostics-only field** — add a key to the `getDiagnostics()` record (e.g. `lastOrphanReap: "noop reason=enumerator-unavailable killed=0"`). `SettingsView.vue:676-677` already renders the diagnostics record **generically** (`v-for="(value, key) in diagnostics"`), so a new key needs **no frontend edit at all**. | **0** | **R-10 holds. SC-5 holds** — nothing in the chat surface changes. | Low. One backend `let` + one record entry. Precedent exists: `mcpTempWriteAttempts` was added to `getDiagnostics` for exactly this "not inducible in CI, tell a future reader" reason (`index.ts:493-497`). |
+| **C** ✅ **CHOSEN** | **Diagnostics-only field** — add a key to the `getDiagnostics()` record (e.g. `lastOrphanReap: "noop reason=enumerator-unavailable killed=0"`). `SettingsView.vue:676-677` already renders the diagnostics record **generically** (`v-for="(value, key) in diagnostics"`), so a new key needs **no frontend edit at all**. | **0** | **R-10 holds. SC-5 holds** — nothing in the chat surface changes. | Low. One backend `let` + one record entry. Precedent exists: `lastFirstWriteAttempts` (`index.ts:493-498`, surfaced as `mcpFirstWriteAttempts` at `:6317`) was added to `getDiagnostics` for exactly this "not inducible in CI, tell a future reader" reason; `lastTempWriteAttempts` → `mcpTempWriteAttempts` (`:499`, `:6319`) is its sibling on the other call site. |
 | **D** | **Console-only — change nothing.** Optionally add one line of Help copy telling a user where to look. | 0 (or 1 if the Help line is added) | R-10 and SC-5 hold trivially. | Lowest. Leaves the fact discoverable only by a maintainer who already knows to look. |
 
 ### Sub-questions the answer must also resolve
@@ -293,22 +340,77 @@ intent.*
 
 ## UI Considerations
 
-State coverage for the surface Phase 8's guarantees touch. No new states are introduced by this
-phase; every row below is an existing state being held to a regression baseline.
+State coverage for the surface Phase 8's guarantees touch, produced by the **UI-consideration probe**
+(`ui-consideration-probe.cjs`, run 2026-08-28 after checker approval — never inline during authoring,
+so a revision-loop rewrite cannot clobber it). Six surfaces were classified into the closed 8-category
+shape-rooted taxonomy. **No new state is introduced by this phase**; every resolved row below is an
+existing state held to a regression baseline.
 
-Applicable state considerations resolved: **5 covered, 1 backstop, 1 unresolved**
+**Kind-confirmation override (the partial-cue mitigation, and it mattered here).** The prose
+classifier is heuristic and lossy. It classified **E2** (`CliStatus` strip) and **E5** (App MCP badge)
+as `static-content` **only**, raising just `overflow`/`long-text` — so the surface that actually
+renders the timeout and cancel reason strings was never asked what it shows while loading or on error.
+The maintainer confirmed `interactive-control` on both (2026-08-28), which raised their `loading` and
+`error` rows. Applicable considerations went **30 → 34**. Coverage here rests on identified kinds,
+not on a single tripped cue.
 
-| Category | Element(s) | Status | Resolution / Reason |
-|----------|------------|--------|---------------------|
-| loading | Stop/Send button pair (`ChatInput.vue`) | ✅ covered | The streaming state IS the loading state; Stop replaces Send via `v-if`/`v-else`. R-01 and R-07 forbid any additional pending/disabled/spinner state on the cancel path. |
-| error | session-reason line (`CliStatus.vue`) | ✅ covered | Timeout and cancel both render the verbatim backend `reason` on the `text-[11px] text-surface-500` line. Copy frozen in § Copywriting; behaviour pinned by R-04 and R-05. |
-| populated | chat transcript after a cancel | ✅ covered | Exactly one `[Cancelled]` message appended; a partial turn keeps its streamed prefix. Pinned by R-02 and asserted in `ChatView.cancel.test.ts`. |
-| zero-one-many | late results after a cancel | ✅ covered | Zero extra messages for a cancelled session; one message for the next turn on that same session; non-cancelled sessions still surface their error. All three cases asserted in `ChatView.cancel.test.ts`. R-03. |
-| empty | — | ✅ covered | N/A by shape — this phase renders no collection. `Session idle` (`CliStatus.vue:42`) is the nearest analogue and is a status, not an empty state. |
-| partial | orphan-reap outcome (`enumerator-unavailable`) | 🧪 backstop | The degraded-capability state exists in the backend today and has **no** presentation. Whether it gets one is **§ B UD-01, OPEN**. Until UD-01 is answered, a verifier finding no evidence here must report `insufficient_spec`, never a silent pass. |
-| overflow / long-text | session-reason line (`CliStatus.vue`) | ⚠ unresolved | The line is `truncate` (single-line clip, no tooltip, no title attribute), so a long backend `reason` is silently cut with no way to read the rest. Pre-existing, not introduced by Phase 8, and **out of scope** — recorded so it is surfaced as an assumption rather than dropped. The two strings this phase produces (`Process timed out.` / `Provider turn cancelled by the user.`) both fit. |
+**Resolved: 21 explicit, 3 backstop, 9 dismissed, 1 unresolved — 34 applicable.**
+
+| # | Element | Category | Status | Resolution / Reason |
+|---|---------|----------|--------|---------------------|
+| E1 | Stop/Send pair (`ChatInput.vue`) | loading | ✅ explicit | The streaming state **is** the loading state: `Stop` replaces `Send` via `v-if`/`v-else`. R-01/R-07 forbid any additional spinner, progress bar, toast or disabled state on the cancel path. Check: exactly one `label="Stop"` and one `label="Send"` in the pair; no `loading`/`:disabled` binding added on the cancel path. |
+| E1 | Stop/Send pair | error | ✅ explicit | A failed cancel does **not** alter the button pair; the failure surfaces on the `CliStatus` reason line (R-04/R-05), never as a button-level affordance. Check: `ChatView.vue` cancel path appends `[Cancelled]` and sets session state only. |
+| E1 | Stop/Send pair | long-text | ✅ explicit | Labels are fixed string literals (`Stop`, `Send`), not bound user data — no truncation or reflow risk. Check: literals in source, not expressions. |
+| E1 | Stop/Send pair | empty | ⊘ dismissed | N/A by shape. A two-state action control renders no collection and has no unfilled state — `Send` is always present when not streaming. (Category raised by a spurious `media` cue.) |
+| E1 | Stop/Send pair | populated | ⊘ dismissed | N/A by shape — a button pair has no "typical volume of content". Same spurious `media` cue. |
+| E2 | `CliStatus` strip | loading | ✅ explicit | `isStreaming` → dot `yellow-500` + the word `Streaming...`; otherwise `green-500` + `Ready`. Cancel and timeout both return it to `Ready` because both clear `isStreaming`. R-06. Check: `CliStatus.vue:81-85`. |
+| E2 | `CliStatus` strip | error | ✅ explicit | The `state === "error" \|\| reasonCode === timeout\|spawn_error\|cancelled` branch renders the **verbatim** backend `reason` on the `text-[11px]` line. R-04/R-05. The two strings this phase produces are `Process timed out.` (`index.ts:5418`) and `Provider turn cancelled by the user.` (`index.ts:6147`). |
+| E2 | `CliStatus` strip | long-text | 🧪 backstop | An unusually long backend `reason` must clip without breaking the strip's single-line layout or shifting the transcript. No wired evidence exists today; a held-out visual check. |
+| E2 | `CliStatus` strip | overflow | ⚠ **unresolved** | The reason line is `truncate` with **no tooltip and no `title` attribute**, so a long `reason` is silently cut with no way to read the rest. **Pre-existing, not introduced by Phase 8, and out of scope** — recorded as an explicit planner assumption rather than dropped. Both strings this phase produces fit. |
+| E3 | Chat transcript after cancel/timeout | populated | ✅ explicit | Exactly **one** `[Cancelled]` message is appended. R-02; asserted in `ChatView.cancel.test.ts`. |
+| E3 | Chat transcript | partial | ✅ explicit | A partially streamed turn **keeps its streamed prefix** — the prefix is not discarded on cancel. R-02. |
+| E3 | Chat transcript | zero-one-many | ✅ explicit | Zero extra messages for a cancelled session; one message for the next turn on that same session; non-cancelled sessions still surface their error. All three asserted in `ChatView.cancel.test.ts`. R-03. |
+| E3 | Chat transcript | loading | ✅ explicit | No skeleton and no placeholder — the streamed prefix is the in-flight presentation. R-02. |
+| E3 | Chat transcript | error | ✅ explicit | A cancelled session suppresses its late error; a **non**-cancelled session still surfaces one. R-03; both directions asserted in `ChatView.cancel.test.ts`. |
+| E3 | Chat transcript | empty | ✅ explicit | A cancel against an empty transcript still appends exactly one `[Cancelled]` message; there is no separate empty state to design. |
+| E3 | Chat transcript | overflow | ⊘ dismissed | Transcript scroll is pre-existing `MessageList.vue` behaviour, untouched by this phase and outside the SC-5 surface. |
+| E4 | Settings MCP panel | error | ✅ explicit | MCP failure surfaces through the status label (`Stopped`, `SettingsView.vue:133`) and the health-check card. This phase changes neither. |
+| E4 | Settings MCP panel | loading | 🧪 backstop | The Start/Stop button's in-flight state during an MCP start or stop is not pinned by this phase — the label/icon/severity triple flips on `mcpStatus?.running` (`SettingsView.vue:403-406`) with no explicit pending state. Held-out visual check; **not** a licence to add one. |
+| E4 | Settings MCP panel | empty | ⊘ dismissed | N/A by shape — the panel always reports a status. Spurious `media` cue. |
+| E4 | Settings MCP panel | populated | ⊘ dismissed | N/A by shape — same spurious cue. |
+| E4 | Settings MCP panel | overflow | ⊘ dismissed | Fixed literal labels (`Start`, `Stop`, `Running`, `Stopped`) — no user data can overflow. |
+| E4 | Settings MCP panel | long-text | ⊘ dismissed | Same — fixed literals, no bound user data. |
+| E5 | App MCP badge (`App.vue:28-42`) | loading | ✅ explicit | No separate loading state: the badge reads `MCP Stopped` until the server is reachable. One of five fixed labels is always shown. |
+| E5 | App MCP badge | error | ✅ explicit | Failure is covered by the same closed set of five fixed labels; no error-specific presentation is added. |
+| E5 | App MCP badge | overflow | ⊘ dismissed | Five fixed literals, no user data. |
+| E5 | App MCP badge | long-text | ⊘ dismissed | Same. |
+| E6 | Diagnostics record (`SettingsView.vue:676-679`) | partial | ✅ explicit | **This is the row UD-01 resolved.** Option C: a single `getDiagnostics()` key (e.g. `lastOrphanReap`) carries the last reap's kind, reason and killed-count, so `reason=enumerator-unavailable` — the mechanism being **inert** on that machine — is distinguishable from a reap that ran. Check: `getDiagnostics()` returns such a key **and** `git log --name-only` shows zero files under `packages/frontend`/`packages/shared` for the change. |
+| E6 | Diagnostics record | populated | ✅ explicit | The record renders **generically** — `v-for="(value, key) in diagnostics"` (`SettingsView.vue:677`) — so a new key needs no frontend edit at all. This is what makes option C cost zero frontend files. |
+| E6 | Diagnostics record | zero-one-many | ✅ explicit | The same `v-for` with `:key="key"` handles any key count; no singular/plural copy exists to get wrong. |
+| E6 | Diagnostics record | empty | ✅ explicit | `v-if="diagnostics !== undefined"` (`SettingsView.vue:676`) guards the whole block — nothing renders before diagnostics are fetched. |
+| E6 | Diagnostics record | loading | ✅ explicit | Same guard. The panel is **user-triggered and after-the-fact**; nothing is ever pushed at the user, which is the accepted weakness of option C recorded in § B. |
+| E6 | Diagnostics record | overflow | ✅ explicit | `min-width: 160px` on the key span and `word-break: break-all` on the value span (`SettingsView.vue:678-679`) — long values wrap rather than clip. |
+| E6 | Diagnostics record | long-text | ✅ explicit | Same `word-break: break-all`; a long `lastOrphanReap` value wraps inside the panel. |
+| E6 | Diagnostics record | error | 🧪 backstop | What the key shows when the reap itself **errored** (`kind=noop` with a reason other than `enumerator-unavailable`) — the value string carries it, but no wired evidence exists because the key does not exist yet. Held-out check on the plan that adds it. |
+
+**Backstop items, in the flat-scalar shape the plan-phase lift rule reads.** Each routes to
+`insufficient_spec → human_needed` at verify time if no evidence is wired — never a silent pass.
+
+```yaml
+- statement: "A long backend session `reason` clips without breaking the CliStatus strip's single-line layout or shifting the chat transcript"
+  verification: backstop
+- statement: "The Settings MCP Start/Stop button's in-flight state during an MCP start or stop does not regress; no pending state is added"
+  verification: backstop
+- statement: "The lastOrphanReap diagnostics key renders a readable value when the reap errored with a reason other than enumerator-unavailable"
+  verification: backstop
+```
+
+**The one unresolved item is an explicit planner assumption, not a silent drop:** the `CliStatus`
+reason line is `truncate` with no tooltip. Pre-existing, out of Phase 8 scope, and surfaced here so
+the planner treats it as a known assumption rather than discovering it later.
 
 ---
+
 
 ## Registry Safety
 
@@ -329,14 +431,24 @@ Phase 5 established (`[05-02]`), not assumed. **Phase 8 makes no such change.**
 
 ## Checker Sign-Off
 
-- [ ] Dimension 1 Copywriting: PASS
-- [ ] Dimension 2 Visuals: PASS
-- [ ] Dimension 3 Color: PASS
-- [ ] Dimension 4 Typography: PASS
-- [ ] Dimension 5 Spacing: PASS
-- [ ] Dimension 6 Registry Safety: PASS
+- [x] Dimension 1 Copywriting: PASS
+- [x] Dimension 2 Visuals: PASS
+- [x] Dimension 3 Color: PASS
+- [x] Dimension 4 Typography: **FLAG** (non-blocking) — the weight count was understated as two; corrected to three (400 / 500 `font-medium` / 600 `font-semibold`) in § Typography on 2026-08-28. Prose only; no `.vue` file touched.
+- [x] Dimension 5 Spacing: PASS
+- [x] Dimension 6 Registry Safety: PASS
 
-**Blocking:** § B **UD-01 is OPEN**. This spec must not be marked `approved` until the maintainer
-selects A, B, C or D and the choice is recorded in place with its rationale.
+**Blocking:** ~~§ B **UD-01 is OPEN**. This spec must not be marked `approved` until the maintainer
+selects A, B, C or D and the choice is recorded in place with its rationale.~~
+**CLEARED 2026-08-28** — UD-01 resolved to **option C** (diagnostics-only field) by the maintainer;
+the choice and its rationale are recorded in place at the head of § B. No open decisions remain.
 
-**Approval:** pending
+**Approval:** APPROVED 2026-08-28 by `gsd-ui-checker` — 5 PASS, 1 FLAG (non-blocking), 0 BLOCK.
+Citation audit passed: every spot-checked `file:line` landed on its claimed content, including R-07's
+load-bearing `index.ts:6140`. Two cosmetic off-by-one refs were reviewed; `CliStatus.vue:80-90` was
+tightened to `:81-85` (the exact `<i>` element), and `SettingsView.vue:676-677` was kept as-is because
+that range covers the `v-if` guard plus the `v-for` and is the more useful citation.
+
+**Post-approval:** the UI-consideration probe ran on the approved spec (2026-08-28) and rewrote
+`## UI Considerations` — 34 applicable considerations, 21 explicit / 3 backstop / 9 dismissed /
+1 unresolved, after a maintainer-confirmed kind override on E2 and E5.
