@@ -121,13 +121,38 @@ Open Drift → Settings → the Copy-diagnostics action, and record the three `s
 
 ### Step 3 — readings 3 and 4 (A6)
 
+> **CORRECTION (2026-08-27, during UAT — this step was unrunnable as first written).**
+> The original command was:
+>
+> ```
+> ps -eo pid,ppid,pgid,comm | grep -E 'mcp-server|claude'
+> ```
+>
+> `ps -eo comm` prints the **executable name**, not the command line. The MCP server runs
+> as `node <tmp>/mcp-server.mjs`, so its `comm` is `node` — the `mcp-server` alternation
+> can never match, and the command returns only `claude` rows however many MCP servers are
+> alive. Run against a real install it produced nine `claude` rows and no MCP row at all.
+> The fix is `args` (full command line) instead of `comm`, plus an anchor that distinguishes
+> the **Drift-spawned** CLI from the maintainer's own `claude` sessions — Drift attaches via
+> `--mcp-config` (see CLAUDE.md § *Per-Provider MCP Attachment Strategy*), the user's own
+> sessions do not.
+>
+> The same broken spelling was propagated to `08-RESEARCH.md` § *Validation Architecture*
+> (Wave 0 item 5), `08-01-PLAN.md` (incl. an acceptance criterion), `08-05-PLAN.md` ×3 and
+> `08-VERIFICATION.md`. Those are historical records of what was planned; **this file is the
+> procedure meant to stay runnable, so it is corrected here.** Nobody caught it through
+> research → plan → plan-check → execute → verify because nobody executed it — the same
+> class as the three pass-by-accident gates this phase did catch.
+
 Start a Claude Code chat turn in Drift with the MCP attached, and while it is still running:
 
 ```
-ps -eo pid,ppid,pgid,comm | grep -E 'mcp-server|claude'
+ps -eo pid,ppid,pgid,args | grep -E 'mcp-server\.mjs|--mcp-config' | grep -v grep
 ```
 
-Record the **pgid** of the `node …mcp-server.mjs` row and the **pid** of the `claude` row.
+Record the **pgid** of the `node …mcp-server.mjs` row and the **pid** of the `claude` row
+carrying `--mcp-config` (that is Drift's child; unadorned `claude` rows are unrelated
+sessions).
 Equal → A6 closed favourably: the MCP child sits in the CLI's group, so a group signal reaches
 it. Different → the CLI calls `setsid()` on its own child; LIF-02 is **not** closed by process
 groups alone. Report and stop.

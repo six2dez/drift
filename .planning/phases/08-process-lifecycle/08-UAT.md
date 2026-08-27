@@ -3,7 +3,7 @@ status: testing
 phase: 08-process-lifecycle
 source: 08-01-SUMMARY.md, 08-02-SUMMARY.md, 08-03-SUMMARY.md, 08-04-SUMMARY.md, 08-05-SUMMARY.md
 started: 2026-08-24T22:40:00Z
-updated: 2026-08-27T07:20:00Z
+updated: 2026-08-27T07:30:00Z
 gate_overrides:
   - gate: api-coverage.verify-pre
     decided: 2026-08-24
@@ -22,8 +22,9 @@ gate_overrides:
 number: 2
 name: A6 — a real provider CLI's MCP child sits in the group the kill reaches
 expected: |
-  During a LIVE Claude turn, `ps -eo pid,ppid,pgid,comm | grep -E 'mcp-server|claude'`
-  shows the `node …mcp-server.mjs` row's pgid equal to the `claude` row's pid.
+  During a LIVE Drift turn, `ps -eo pid,ppid,pgid,args | grep -E 'mcp-server\.mjs|--mcp-config' | grep -v grep`
+  shows the `node …mcp-server.mjs` row's pgid equal to the pid of the `claude` row that
+  carries --mcp-config. (Command corrected 2026-08-27 — see test 2's note.)
 awaiting: user response
 note: |
   A diagnostics report was submitted 2026-08-27 from a real macOS Caido install. It does
@@ -124,8 +125,17 @@ evidence: >-
 
 ### 2. A6 — a real provider CLI's MCP child sits in the group the kill reaches
 source: 08-01-SUMMARY.md D3
-expected: During a live Claude turn, `ps -eo pid,ppid,pgid,comm | grep -E 'mcp-server|claude'` shows the `node …mcp-server.mjs` row's **pgid** equal to the `claude` row's **pid**.
+expected: During a live Drift turn, `ps -eo pid,ppid,pgid,args | grep -E 'mcp-server\.mjs|--mcp-config' | grep -v grep` shows the `node …mcp-server.mjs` row's **pgid** equal to the **pid** of the `claude` row carrying `--mcp-config`.
 result: [pending]
+attempt_1: |
+  2026-08-27. The originally-specified command returned nine `claude` rows and NO
+  mcp-server row. Not a result — the command was unrunnable. See G-03.
+correction: >-
+  `ps -eo comm` prints the executable name, not the command line; `node <tmp>/mcp-server.mjs`
+  has comm `node`, so the `mcp-server` alternation could never match. Corrected to `args`
+  plus a `--mcp-config` anchor that distinguishes Drift's spawned CLI from the maintainer's
+  own concurrent `claude` sessions (all nine returned rows had pgid == pid, i.e. ordinary
+  shell job-control groups, and at least one was the session running this workflow).
 
 ### 3. The LIF-02 defect reproduces on real hardware (pre-fix baseline)
 source: 08-01-SUMMARY.md D4
@@ -226,6 +236,42 @@ blocked: 0
     - "A SystemRoot source that does not depend on the sandbox's process.env — or an explicit, recorded acceptance that the bare-name fallback is the shipping Windows path, with T-08-03 re-rated accordingly"
     - "The same question asked of every other readParentEnv() consumer (selectComspec/COMSPEC at :601, getWindowsNamedRoots and isNvmWindowsInstalled at :1672-1676, buildSpawnEnv at :653) — Phase 7's cmd.exe absolute-path mitigation reads the same empty shim and is likely inert for the same reason"
   debug_session: ""  # Filled by diagnosis
+
+- truth: "The A6 verification procedure recorded across the phase's artifacts can actually produce a reading"
+  status: failed
+  reason: >-
+    Executed 2026-08-27 against a real install and it returned nine `claude` rows and no
+    MCP row at all. `ps -eo comm` prints the executable NAME, not the command line: the
+    MCP server runs as `node <tmp>/mcp-server.mjs`, so its `comm` is `node` and the
+    `mcp-server` alternation can never match — the command is incapable of producing the
+    A6 reading under any circumstances, including one where A6 holds perfectly.
+    The instruction also gave no way to tell Drift's spawned CLI from the maintainer's own
+    concurrent `claude` sessions; all nine rows returned pgid == pid (ordinary shell
+    job-control groups) and at least one was the session running this workflow.
+  severity: major
+  test: 2
+  source: "2026-08-27, run against a real macOS Caido install"
+  propagation:
+    - "08-SPIKE.md:127 — the procedure explicitly preserved to stay runnable (CORRECTED 2026-08-27)"
+    - "08-UAT.md — current test + test 2 (CORRECTED 2026-08-27)"
+    - "08-VERIFICATION.md:31 — the verifier's stated human test (stale; historical record)"
+    - "08-RESEARCH.md:1120 — Validation Architecture, Wave 0 item 5 (stale; historical record)"
+    - "08-01-PLAN.md:23 and :225 — including an acceptance criterion (stale; plan already executed)"
+    - "08-05-PLAN.md:335, :348, :368 — the non-zero-after-count halt procedure (stale; plan already executed)"
+  root_cause: >-
+    Wrong `ps` output format specifier (`comm` instead of `args`), authored in
+    08-RESEARCH.md and copied unchanged through plan, plan-check, execution and
+    verification. It survived every gate because no gate executed it — the same
+    pass-by-accident class as the `sed` two-range union, the 19-character `functionBody`
+    slice, and the win32 gate-name collision, all of which this phase DID catch by
+    running them.
+  artifacts:
+    - path: ".planning/phases/08-process-lifecycle/08-SPIKE.md:127"
+      issue: "unrunnable A6 command in the durable procedure — corrected in place with a marked correction"
+  missing:
+    - "Corrected command: ps -eo pid,ppid,pgid,args | grep -E 'mcp-server\\.mjs|--mcp-config' | grep -v grep"
+    - "A note in 08-VERIFICATION.md that its stated A6 test command is superseded by 08-SPIKE.md's corrected step 3"
+  debug_session: ""
 
 - truth: "The deferred SIGKILL rung skips when the tracked process has already exited (T-08-04, review CR-02)"
   status: degraded_as_designed
