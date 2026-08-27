@@ -56,6 +56,16 @@ count GROWS and nothing is removed. Progression, each figure taken from the plan
 removed at any step, and zero gates weakened.** 686 is the floor for anything that follows;
 plan 08-10 changes no source and must therefore hold it exactly.
 
+**Extended again 2026-08-27 — the `08-REVIEW-GAPS.md` fix pass (CR-01, WR-01…WR-06).** The
+progression continues **686 (08-09/08-10) → 695 (695 total: 686 passed / 9 skipped)**, `+9`. The
+nine skipped are the same two deliberate platform gates as before, unchanged. **Zero tests removed
+and zero gates weakened; three gates were made ABLE TO FAIL that previously could not** —
+`verdict-gate.sh` ARM C (asserted against `git diff HEAD`, empty by construction at every commit
+boundary), ARM A (`find | xargs` without `-0`, invisible to any path containing whitespace), and
+`platform.test.ts`'s "REFUSES a derived value that is not drive-absolute" (whose input took the
+bare-name arm, duplicating the case above it). **695 is the floor for anything that follows.**
+Full detail, per finding, in `08-REVIEW-GAPS-FIX.md`.
+
 ---
 
 ## Sampling Rate
