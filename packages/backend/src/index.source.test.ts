@@ -1118,6 +1118,26 @@ describe("index.ts wires the orphan reap at every counted site and nowhere else 
     expect(code).toContain("async function withDirectMcpCall<T>(");
   });
 
+  // 5d. THE GATE'S REFUSAL IS OBSERVABLE (review WR-02). The idle gate is the
+  // only arm on this path that can suppress the reap for an entire Caido
+  // session, and it was the only one that returned without logging — so a
+  // suppressed reap and a reap that found nothing produced identical
+  // diagnostics, on a phase whose verification vehicle is a human reading them.
+  //
+  // The two scalars are asserted BY NAME rather than by a bare `console.log`
+  // count, because a log line that omits the counts distinguishes nothing: it is
+  // `sessions` versus `directDepth` that separates AR-07 from a leaked depth.
+  //
+  // RED INPUT: delete the log, or drop either scalar from it, and this fails.
+  it("logs the two scalars when the idle gate refuses", () => {
+    const body = functionBody(code, "reapSessionOrphansIfIdle");
+    expect(body).not.toBe("");
+    expect(body.match(/sdk\.console\.log\(/g) ?? []).toHaveLength(1);
+    expect(body).toContain("gate-closed");
+    expect(body).toContain("sessions=${String(activeSessionCount)}");
+    expect(body).toContain("directDepth=${String(directMcpCallDepth)}");
+  });
+
   // 6. THE MARKER HAS ONE SPELLING. The directory Drift CREATES and the pattern
   // the reaper SEARCHES FOR must be the same string, which they silently would
   // not be if the prefix lived as a bare literal at either site. Plan 08-06

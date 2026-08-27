@@ -3937,12 +3937,28 @@ function reapMcpOrphans(
 // and change their signatures, which recorded decision OQ-4 forbids. It also
 // keeps the RPC handler off the event-loop starvation path CLAUDE.md names.
 function reapSessionOrphansIfIdle(sdk: BackendSDK): void {
-  if (
-    !shouldReapSessionOrphans({
-      activeSessionCount: activeProcesses.size,
-      directMcpCallDepth: mcpDirectCallDepth,
-    })
-  ) {
+  const activeSessionCount = activeProcesses.size;
+  const directMcpCallDepth = mcpDirectCallDepth;
+  if (!shouldReapSessionOrphans({ activeSessionCount, directMcpCallDepth })) {
+    // THE REFUSAL LOGS (review WR-02). Every other refusal on this path already
+    // did: `reapMcpOrphans` logs `no orphan reap: <reason>` for a plan refusal
+    // and `kind=noop reason=… exit=… killed=0` for all four enumerator
+    // outcomes. This gate was the exception, and it is the ONE arm that can
+    // suppress the reap for a whole Caido session — through AR-07's accepted
+    // multi-session window, through a depth that leaked, or through any future
+    // arithmetic error. "The reap ran and found nothing" and "the reap never
+    // ran" are the two outcomes a reader of the diagnostics most needs to tell
+    // apart, and until now they were indistinguishable.
+    //
+    // TWO SCALARS AND NOTHING ELSE, per T-04-04: no pid, no path, no argv, no
+    // environment value — the same rendering rule the reap's own log line
+    // follows. Two counts are enough to separate the three causes on the first
+    // report: `sessions>0` is AR-07, `directDepth>0` is a direct MCP call in
+    // flight or a release that never arrived, and a pair of zeros here would
+    // mean the predicate itself refused non-integer input.
+    sdk.console.log(
+      `[drift lifecycle] no orphan reap: gate-closed sessions=${String(activeSessionCount)} directDepth=${String(directMcpCallDepth)}`,
+    );
     return;
   }
 
