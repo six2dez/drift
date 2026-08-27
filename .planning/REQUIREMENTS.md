@@ -66,8 +66,8 @@ Requirements for the hardening + native-Windows milestone. Each maps to exactly 
 
 ### Lifecycle (LIF)
 
-- [x] **LIF-01**: On Windows, cancelling or timing out a turn terminates the whole process tree (`taskkill /pid <pid> /T /F`), leaving no orphaned token-bearing process
-- [x] **LIF-02**: On POSIX, cancelling or timing out a turn also terminates the CLI's MCP child (which carries `CAIDO_TOKEN`), via process-group signalling rather than a single-pid signal *(added 2026-08-12)*
+- [ ] **LIF-01**: On Windows, cancelling or timing out a turn terminates the whole process tree (`taskkill /pid <pid> /T /F`), leaving no orphaned token-bearing process *(unticked 2026-08-27 to agree with `08-VERIFICATION.md`'s `human_needed` verdict. **The mechanism is BUILT and unit-proven** — `buildKillTreePlan`'s win32 arm emits `<SystemRoot>\System32\taskkill.exe /pid <n> /t /f` by absolute path, with a derived-system-root rung added by plan 08-08, all green in `kill-plan.test.ts`. **What has NO execution behind it is the verb "terminates":** `kill-tree.win32.test.ts` is `skipIf`-gated to win32 and is 3/3 pending on every host that has ever run it, and **no `windows-latest` run has ever executed it** — broken-windows ledger entry 12. Closes on one green Windows leg.)*
+- [ ] **LIF-02**: On POSIX, cancelling or timing out a turn also terminates the CLI's MCP child (which carries `CAIDO_TOKEN`), via process-group signalling rather than a single-pid signal *(added 2026-08-12; unticked 2026-08-27 to agree with `08-VERIFICATION.md`'s `human_needed` verdict. **The mechanism is BUILT and behaviourally proven under Node** — `kill-tree.posix.test.ts` runs a real control-plus-proof pair — and assumption A1 was measured favourably on real hardware on 2026-08-27. **But assumption A6 was measured FALSE** on the same day: codex pid 43921 sat in pgid 43752 while its own `mcp-server.mjs` child pid 44284 sat in pgid 44284, so for that provider the group signal does **not** reach the token-bearing child, and the requirement's stated mechanism does not close it. What closes it independently of process groups is the **argv-marker orphan reap** shipped by plans 08-06/08-07 — and that reap is itself covered by no executed assertion, ledger entries 13 and 15. Claude Code, the active provider, remains unmeasured.)*
 
 ### Validation (CI)
 
@@ -171,8 +171,8 @@ Which phases cover which requirements. Every v1 requirement maps to exactly one 
 | PRV-04 | Phase 7 | Pending |
 | PRV-05 | Phase 7 | Pending |
 | UX-01 | Phase 7 | Pending |
-| LIF-01 | Phase 8 | Complete |
-| LIF-02 | Phase 8 | Complete |
+| LIF-01 | Phase 8 | Partial — mechanism built, Windows execution unrun (`08-VERIFICATION.md`, `human_needed`) |
+| LIF-02 | Phase 8 | Partial — mechanism built, A6 measured FALSE, reap unasserted (`08-VERIFICATION.md`, `human_needed`) |
 | CI-01 | Phase 5 | Complete |
 | CI-03 | Phase 5 | Complete |
 | UX-03 | Phase 10 | Pending |

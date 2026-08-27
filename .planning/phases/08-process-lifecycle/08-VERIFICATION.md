@@ -47,7 +47,18 @@ behavior_unverified_items:
     expected: "`spikeDetachedGroupKill` reads exactly one of the four documented values."
     why_human: "insufficient_spec — abstained rather than passed. Recorded UNMET with `status: unknown` / `human_judgment: true`. The hardware checkpoint was waived on 2026-08-24 with no readings supplied. No CI leg can close it; every leg runs Node."
   - truth: "08-01 truth 2 (A6) — a real provider CLI's mcp-server.mjs child sits in a process group the group-kill reaches"
-    test: "08-SPIKE.md § How to run this spike later, step 3 — `ps -eo pid,ppid,pgid,comm | grep -E 'mcp-server|claude'` during a live turn."
+    test: |
+      08-SPIKE.md § How to run this spike later, step 3 — during a live turn:
+      `ps -eo pid,ppid,pgid,args | grep -E 'mcp-server\.mjs|--mcp-config' | grep -v grep`
+      CORRECTED IN PLACE 2026-08-27 (UAT gap G-03). This document is a LIVING REFERENCE — a
+      re-run consults this human-test list — and a document that will be FOLLOWED must be
+      correct, so the command is fixed here rather than annotated. The superseded spelling used
+      the `comm` output specifier, which prints the executable NAME: the MCP server runs as
+      `node <tmp>/mcp-server.mjs`, so its `comm` is `node` and the `mcp-server` alternation
+      could never match. Run against a real install it returned nine `claude` rows and no MCP
+      row at all — not a result, an unrunnable command. The `--mcp-config` anchor is what
+      distinguishes Drift's spawned CLI from the user's own concurrent sessions. Canonical
+      procedure: 08-SPIKE.md § Step 3.
     expected: "The `node …mcp-server.mjs` pgid equals the `claude` pid."
     why_human: "insufficient_spec — abstained rather than passed. Recorded UNMET. If any provider CLI calls setsid() on its own MCP child, a process-group signal misses it and LIF-02 is not closed by process groups alone."
   - truth: "08-01 truth 3 — the pre-fix control is recorded: with the shipped-at-the-time code, `pgrep -f mcp-server.mjs` returns non-zero after Stop"
