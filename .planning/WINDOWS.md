@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 9
+open_count: 10
 waived_count: 0
 fixed_count: 9
-total_count: 18
-last_updated: 2026-08-27T13:06:17.978Z
+total_count: 19
+last_updated: 2026-08-27T13:30:26.477Z
 ---
 
 # Broken Windows Ledger
@@ -33,6 +33,7 @@ last_updated: 2026-08-27T13:06:17.978Z
 | 16 | 08 | deviation | .planning/phases/08-process-lifecycle/08-07-PLAN.md | 193 | Ninth vacuous gate: Task 1 criterion 'grep -c never processes ... is 0' returned 0 at HEAD before any edit; the quoted sentence lives in 08-05-PLAN.md / 08-RESEARCH.md, never in index.ts | open |  | 2026-08-27T12:30:13.533Z |  |
 | 17 | 08 | deviation | packages/backend/src/platform.ts |  | 08-08 Task 1 acceptance criterion 'grep -c process.env platform.ts is 0' is VACUOUS: returns 7 at HEAD before any edit (all seven are comment mentions of the rule the module follows). Intent verified instead by comment-stripped grep = 0, before and after. Tenth vacuous gate in Phase 8. | open |  | 2026-08-27T12:53:54.797Z |  |
 | 18 | 08 | deviation | packages/backend/src/index.ts |  | Plan 08-09's exact-count criterion grep -c '0o700' index.ts is comment-sensitive: a 'why' comment mentioning the octal moves it with no behavioural change. Satisfied by rephrasing; executable (comment-stripped) count measured separately at 4 -> 4. Specify over the comment-stripped stream if it recurs. | open |  | 2026-08-27T13:06:17.978Z |  |
+| 19 | 08 | deviation | .planning/phases/08-process-lifecycle/08-10-PLAN.md |  | 08-10 Task 1's acceptance criterion states its scoped seven-carrier verify 'returns 12 against the uncorrected tree'; measured 7 at this plan's start. The 12 was taken BEFORE plan 08-06 block-quoted the three source carriers, which moved 5 hits inside quotes where the strip removes them. Not a vacuous gate — 7 != 0, so it was still red and still proved the work — but it is the FIFTH wrong census figure in a plan whose own thesis is that enumerated censuses cannot be trusted, which is exactly why verdict-gate.sh consumes no count. | open |  | 2026-08-27T13:30:26.477Z |  |
 
 ````json
 [
@@ -250,6 +251,18 @@ last_updated: 2026-08-27T13:06:17.978Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-08-27T13:06:17.978Z",
+    "resolved_at": null
+  },
+  {
+    "id": 19,
+    "kind": "deviation",
+    "phase": "08",
+    "file": ".planning/phases/08-process-lifecycle/08-10-PLAN.md",
+    "line": null,
+    "description": "08-10 Task 1's acceptance criterion states its scoped seven-carrier verify 'returns 12 against the uncorrected tree'; measured 7 at this plan's start. The 12 was taken BEFORE plan 08-06 block-quoted the three source carriers, which moved 5 hits inside quotes where the strip removes them. Not a vacuous gate — 7 != 0, so it was still red and still proved the work — but it is the FIFTH wrong census figure in a plan whose own thesis is that enumerated censuses cannot be trusted, which is exactly why verdict-gate.sh consumes no count.",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-08-27T13:30:26.477Z",
     "resolved_at": null
   }
 ]
