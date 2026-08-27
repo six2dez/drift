@@ -4,16 +4,16 @@ milestone: v1.0
 current_phase: 8
 current_phase_name: Process Lifecycle
 status: needs_review
-stopped_at: Completed 08-09-PLAN.md
-last_updated: "2026-08-27T13:05:41.371Z"
+stopped_at: Completed 08-10-PLAN.md
+last_updated: "2026-08-27T13:34:16.272Z"
 last_activity: 2026-08-24
 last_activity_desc: Phase 08 verified — human_needed, no blockers
-state_head: b2b8c531873bb9a7c668fdeaf895ed8bcb1976ea
+state_head: e55e229cf130441f05e053568db772f2d219993e
 progress:
   total_phases: 13
   completed_phases: 5
   total_plans: 50
-  completed_plans: 49
+  completed_plans: 50
 milestone_name: milestone
 ---
 
@@ -77,6 +77,7 @@ Progress: [███░░░░░░░] 30% (3 of 10 milestone phases)
 | Phase 08 P07 | 12 min | 3 tasks | 4 files |
 | Phase 08 P08 | 22 min | 3 tasks | 9 files |
 | Phase 08 P09 | 9 min | 2 tasks | 2 files |
+| Phase 08 P10 | 74 min | 3 tasks | 14 files |
 
 ## Accumulated Context
 
@@ -221,6 +222,13 @@ Recent decisions affecting current work:
 - [Phase 08]: All five MCP temp-directory writes carry an unconditional 0o600, with no platform guard (T-04-30), and no execute bit anywhere. — LLRT's set_mode is a total no-op off unix and Node ignores mode on Windows, so a guard would double the branch count for zero behaviour change while risking a POSIX regression. mcp-server.mjs is READ by node, never executed by the OS, so an execute bit would be a permission granted for no purpose.
 - [Phase 08]: The execute-bit gate is a callArgumentTexts scan, not a grep, and the rejected grep was re-measured on a violating tree rather than trusted. — writeMcpContextFile's writeFile is a MULTI-LINE call, so an injected mode 0o700 lands on a line carrying no writeFile token. Measured: the rejected pipeline returns 0 while a real execute bit sits at the exact site G-05 was filed against; the scan goes red and names it.
 - [Phase 08]: The Windows position on POSIX modes is an ACCEPTED trade-off (T-08-43) recorded at the source, not an open hole. — POSIX modes are ignored on Windows, so none of the five options changes anything there. What protects the files instead is os.tmpdir() resolving beneath the user's profile (AppData\Local\Temp), which Windows already ACLs to that user. CLAUDE.md asks for an equivalent or an explicit acceptance; this is the acceptance.
+- [Phase 08]: verdict-gate.sh is a repo-wide EXCLUSION-list scan, not a list of carriers. An inclusion-list loop cannot detect a carrier absent from its own list, so it fails OPEN by construction — and two real carriers (.planning/WINDOWS.md, .planning/STATE.md) were missing from an earlier draft's list and would have shipped stale under a green gate. The census was wrong three times in planning; the gate consumes no count anywhere.
+- [Phase 08]: The stale-verdict pattern is the three-spelling ERE OPEN[[:space:]]*[,em-dash-hyphen][[:space:]]*not measured, with the ASCII hyphen LAST inside the bracket so it stays a literal. Measured on the uncorrected tree: an em-dash-only fixed string scores 0 on BOTH 08-SECURITY.md and WINDOWS.md — passing vacuously while both stale claims stand — and finds 11 of 15 hits overall.
+- [Phase 08]: Dated SUMMARY files are historical records and are NEVER rewritten: a SUMMARY dated 2026-08-24 recording the verdicts as open was correct on its date. verdict-gate.sh ARM C asserts that class is unmodified, so its exclusion from ARM A is checked in BOTH directions rather than merely trusted.
+- [Phase 08]: LIF-01 and LIF-02 were deliberately NOT marked complete by plan 08-10, even though requirements.ready-ids returns 2/2 now that 08-10 is the last declaring plan. Marking them would re-tick the boxes the same plan unticked and is the exact failure threat T-08-46 names. LIF-01 needs one windows-latest run; LIF-02 needs a Drift-spawned Claude Code A6 reading plus executed evidence for the reap.
+- [Phase 08]: AR-05: awaiting killTree inside cleanupMcpRuntime is REJECTED, and not for convenience — awaiting a spawned killer inside an RPC handler suspends it on a child-process callback and a timer Caido's runtime does not reliably deliver during an await. That is the event-loop starvation CLAUDE.md names as an anti-pattern and the reason killTree is fire-and-forget (OQ-4). The argv-marker reap is insensitive to losing that race because pgrep -f matches the command line the kernel recorded.
+- [Phase 08]: AR-07 is recorded as a SCOPE decision, not a constraint. Do NOT write that argv cannot distinguish sessions — that claim is false for claude-cli and copilot-cli, whose args array Drift authors itself via buildMcpServerSpec. It is false for gemini-cli/codex-cli, which share one mcp add drift registration, so closing the multi-session cancel window means shipping two mechanisms rather than one.
+- [Phase 08]: AR-06 is an ACCEPTED high under block_on: high and names six2dez as DECIDER per recorded decision GD-02, not merely an owner. threats_open: 0 now carries a companion note naming it, because a high accepted silently past the phase's own blocking gate is exactly what a bare zero hides. Register rolled 21 -> 51 rows; T-08-03 re-rated medium -> high on a measured empty environment.
 
 ### Pending Todos
 
@@ -240,11 +248,16 @@ None yet. Eleven items are parked in the ROADMAP backlog (999.1-999.11): nine fr
 - RESOLVED 2026-08-12: the requirement-count discrepancy ("22 v1 requirements" vs 24 enumerated) is reconciled — REQUIREMENTS.md now enumerates and maps 43.
 - RESOLVED 2026-08-13 (quick 260813-dc7): Phase 01 verification gap G1 (SIG-01h) is closed. `readBrowserStorageItem()` was mutation-survivable in the forwarding direction — no test drove a *present* token through it, so a regression killing Caido token pickup would have shipped green. Three append-only cases added to `settings.test.ts` (forwarding, JSON-parse failure, non-string `getItem`). Falsifiability proven, not assumed: with `if (key !== "__never__") return undefined;` at `settings.ts:35` the suite reports **2 failed / 11 passed** (Test C survives by design); mutation reverted and confirmed byte-identical. Suite 131 → **134 tests**, lint still 0/0.
 - CORRECTED 2026-08-27 (measured, real macOS Caido, darwin 25.6.0, probe build 68199fa). **A1 CLOSED FAVOURABLY:** `spikeDetachedGroupKill: "grandchild-died (detached honoured)"` — the shipped LLRT does honour the detached spawn, so the nine-site POSIX regression this bullet feared cannot happen. **A6 FALSIFIED:** codex pid 43921 in pgid 43752, its own `mcp-server.mjs` child pid 44284 in pgid 44284 — a group signal aimed at the CLI's group cannot reach the token-bearing child, and OQ-2's single-pid rung does not help because it signals the CLI. The answer is the argv-marker orphan reap (plans 08-06/08-07), independent of process groups by construction. **STILL OPEN:** Claude Code — the active provider — is unmeasured, and the pre-fix Control was never taken. Procedure in 08-SPIKE.md; probe at 68199fa.
+
 > SUPERSEDED 2026-08-24: A1 OPEN: the shipped Caido LLRT is unverified on any real install — if its fork differs, LIF-02 is not closed and every CI leg stays green because every leg runs Node. A6 OPEN: no provider CLI's MCP child pgid was ever observed. Re-run procedure preserved in 08-SPIKE.md; probe code at commit 68199fa.
+
 - 08-04 built the Windows vehicle but took NO reading: the three win32 kill-tree cases have never executed and the reserved dead-pid exit-code block in kill-tree.win32.test.ts is empty. A windows-latest run must fill the measured code, its first stderr line and the run URL (broken-windows ledger entry 12).
 - CORRECTED 2026-08-27. Phase 8: A1 and A6 are now MEASURED (A1 closed favourably, A6 **FALSIFIED** for one provider) — ledger 11 is rewritten to that state rather than closed, because Claude Code stays unmeasured and the Control was never taken. The `windows-latest` leg still has never run (ledger 12, untouched). The T-08-14 attestation closes neither.
+
 > SUPERSEDED 2026-08-24: Phase 8: A1/A6 remain OPEN — not measured (ledger 11), and the windows-latest leg has never run (ledger 12). Neither is closed by the T-08-14 attestation.
+
 - Whether Caido plugin sandbox can spawn pgrep at all is UNMEASURED. If it cannot, both orphan reaps degrade silently to the enumerator-unavailable no-op while every source gate stays green. Needs a real Caido install (08-07 D8).
+- Phase 8 close: LIF-01 and LIF-02 are deliberately NOT complete. LIF-01 needs one windows-latest run (ledger 12). LIF-02 needs a Drift-spawned Claude Code A6 reading and the pre-fix Control (ledger 11), plus executed evidence for the orphan reap (ledger 13/15). 08-VERIFICATION.md still rules human_needed and its three human items are unchanged.
 
 ### Quick Tasks Completed
 
@@ -266,8 +279,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-27T13:05:19.200Z
-Stopped at: Completed 08-09-PLAN.md
+Last session: 2026-08-27T13:33:20.115Z
+Stopped at: Completed 08-10-PLAN.md
 Resume file: None
 
 **Live on the public remote: nothing of ours.** Plan 03-04 tore down all three `scratch/*` branches (`ci-proof-windows-probe`, `ci-proof-windows-probe-negative`, `ci-proof-windows-gate-negative`) locally and remotely. Asserted with a `test -z` discrimination over the captured glob (`scratch-glob-empty=0`) plus the full unfiltered listing, which now shows only `main` at `2d8cf16` and the pre-existing, unrelated `fix/security-hotfixes` at `0cd81f3`. `origin/main` was never pushed by this phase and is still `2d8cf16`; local `main` is 23 commits ahead and deliberately unpushed. **Re-verified 2026-08-13 (plan 03-05):** the remote still lists only `main` `2d8cf16` and the pre-existing `fix/security-hotfixes` `0cd81f3`, and all eight Phase 3 run records (4 probe + 4 `CI` control) still resolve with their recorded conclusions — which is what makes the URLs in `03-FINDINGS.md` valid citations after the branches were deleted. The probe **artifacts** do not survive: they expire 2026-09-12, which is why D-11 required the committed findings document.
