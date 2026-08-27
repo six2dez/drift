@@ -104,6 +104,7 @@ import {
   MCP_TEMP_DIR_PREFIX,
   parseOrphanScanPids,
   shouldDetachProviderSpawn,
+  shouldReapSessionOrphans,
   type KillRung,
 } from "./kill-plan";
 import {
@@ -319,6 +320,23 @@ const sessionWatchdogs = new Map<string, () => void | Promise<void>>();
 // getMcpStatus RPC handler (via a frontend keep-alive ping) to prod the
 // pending callMcpMethod promise when Caido's event loop has gone idle.
 let activeSelfTestPoll: (() => void) | undefined;
+// How many of Drift's OWN direct `node mcp-server.mjs` spawns are currently
+// running. `callMcpMethod` spawns the MCP server directly for the self-test, and
+// that child's command line is BYTE-IDENTICAL to the one a provider CLI's MCP
+// child carries — so the idle orphan reap's argv pattern selects it too. At
+// teardown that is correct: everything must die. At an IDLE reap it is not, and
+// killing it would surface to the user as a self-test failure with no visible
+// cause (T-08-28).
+//
+// A COUNTER AND NOT A PID EXCLUSION LIST, deliberately. A stale pid in such a
+// list would shield a genuine orphan that later reused the number — T-08-04's
+// failure shape pointed the wrong way. A counter cannot go stale in that
+// direction: if a release never runs (Caido's runtime does not reliably deliver
+// child_process callbacks while an RPC is awaiting) the depth stays POSITIVE and
+// the idle reap is SUPPRESSED. That is the safe direction, and it is the same
+// rule `hasTrackedProcessExited` and `isPidAlive` already follow — every unknown
+// in this phase resolves toward NOT killing.
+let mcpDirectCallDepth = 0;
 let mcpTempDir: string | undefined;
 let mcpAuthState: McpAuthState = "unknown";
 let mcpAuthMessage = "";
@@ -2199,6 +2217,36 @@ async function callMcpMethod(
       detached: false,
     });
 
+    // THE ONE INCREMENT, immediately after the spawn RETURNS — not before it.
+    // `spawnWithEnv` throws synchronously for an unspawnable file, and a throw
+    // above this line means no process exists to protect; placing the increment
+    // here means such a throw leaks nothing, because the counter was never
+    // raised.
+    mcpDirectCallDepth += 1;
+    // THE ONE RELEASE, guarded so the arithmetic has exactly one site in each
+    // direction. Called from BOTH the `close` and the `error` handler below,
+    // because either can be the last thing this child does and neither is
+    // guaranteed to fire.
+    //
+    // NOT called at the settle paths, and that is the whole distinction: this
+    // counter measures THE PROCESS'S OWN END, not the promise's. `finish()`
+    // settles the promise and only then asks the child to exit, and the timeout
+    // arm settles while the child is still being SIGKILLed — releasing at either
+    // would open the idle gate on a process that is still in the table and still
+    // matches the reaper's argv pattern.
+    //
+    // If the release never runs, the depth stays positive and the idle reap is
+    // suppressed for the rest of this Caido session. That is the intended
+    // failure direction: a suppressed reap leaves an orphan for the NEXT
+    // start-up sweep to collect, while a wrongly-released one kills a live
+    // self-test.
+    let directCallReleased = false;
+    const releaseDirectCall = (): void => {
+      if (directCallReleased) return;
+      directCallReleased = true;
+      mcpDirectCallDepth -= 1;
+    };
+
     // NOT a BoundedBuffer, and it must not become one. This is a line-DRAIN
     // buffer: complete lines are parsed out of it and only the trailing partial
     // survives. Head/tail/both retention would drop the middle of a JSON-RPC
@@ -2350,10 +2398,19 @@ async function callMcpMethod(
     // so any classification added here must match on the message text, the way
     // fs-retry.ts already classifies transient filesystem errors.
     proc.on("error", (error: Error) => {
+      // Released FIRST, unconditionally, and before `finish`'s settled guard can
+      // return early. An `error` means this child will never run, so the depth
+      // it reserved must come back whether or not the promise is still pending.
+      releaseDirectCall();
       finish(() => reject(error));
     });
 
     proc.on("close", () => {
+      // Released FIRST, ABOVE the `settled` early return. `close` is the
+      // process's actual end, and it fires for a child whose promise the timeout
+      // arm already settled — returning early there without releasing would
+      // strand the depth at 1 and suppress every later idle reap.
+      releaseDirectCall();
       if (settled) return;
       finish(() =>
         reject(
@@ -3632,6 +3689,50 @@ function reapMcpOrphans(
   });
 }
 
+// THE IDLE-GATED SESSION REAP — LIF-02 at the moment the requirement names it,
+// and without any dependence on process groups.
+//
+// A6 was measured FALSE, so the group signal a cancel issues does not reliably
+// reach the provider CLI's `mcp-server.mjs` child: the reported bug is one turn,
+// click Stop, and a token-bearing MCP server still running. `killTree` cannot
+// close that — it walks `activeProcesses`, and the child is not in it. The reaper
+// can, because it identifies its target by the target's own argv.
+//
+// WHY IT IS GATED. The marker is the shared `mcpTempDir` name, which EVERY
+// concurrent session's MCP child carries, so an ungated reap here would kill the
+// MCP server of a turn the user is watching (T-08-27). `shouldReapSessionOrphans`
+// (kill-plan.ts, unit-asserted from literal scalars) opens the gate only when
+// `activeProcesses` is empty AND Drift has no direct MCP call of its own in
+// flight. That covers the reported bug exactly; what it does NOT cover — a cancel
+// while a SECOND session is live — is residual AR-07 and threat T-08-50, named
+// at the predicate itself so a reader sees the gap rather than inferring
+// completeness.
+//
+// RETURNS `void` AND AWAITS NOTHING, and that is a requirement rather than a
+// style: it is called from `cancelCliMessage` and `closeCliSession`, which are
+// SYNCHRONOUS `Result<void>` handlers. Making this async would force them async
+// and change their signatures, which recorded decision OQ-4 forbids. It also
+// keeps the RPC handler off the event-loop starvation path CLAUDE.md names.
+function reapSessionOrphansIfIdle(sdk: BackendSDK): void {
+  if (
+    !shouldReapSessionOrphans({
+      activeSessionCount: activeProcesses.size,
+      directMcpCallDepth: mcpDirectCallDepth,
+    })
+  ) {
+    return;
+  }
+
+  reapMcpOrphans(
+    sdk,
+    buildSessionOrphanScanPlan({
+      platform: host?.platform,
+      sessionDirName: getMcpSessionDirName(),
+    }),
+    [],
+  );
+}
+
 async function cleanupMcpRuntime(
   sdk: BackendSDK,
   authState: McpAuthState = "unknown",
@@ -4107,6 +4208,12 @@ async function deleteChat(sdk: BackendSDK, chatId: string): Promise<Result<void>
       // rung in any case.
       killTree(sdk, proc, "kill");
       activeProcesses.delete(sessionId);
+      // LIF-02 without A6. `killTree` reached the provider CLI; whether its
+      // signal reached the CLI's `mcp-server.mjs` child depends on a process-group
+      // assumption UAT measured FALSE. This reaches that child by its own argv —
+      // but only once this deletion has left Drift with no session at all, which
+      // is what stops it from killing a concurrent session's child (T-08-27).
+      reapSessionOrphansIfIdle(sdk);
     }
     const runtimeFiles = sessionRuntimeFiles.get(sessionId);
     if (runtimeFiles !== undefined) {
@@ -4958,6 +5065,21 @@ async function sendCliMessage(
         clearInterval(activityInterval);
         sessionWatchdogs.delete(input.sessionId);
         activeProcesses.delete(input.sessionId);
+        // THE SINGLE FUNNEL — every normal completion AND the absolute timeout
+        // reach `finalize`, so this is where a turn that ended by itself gets the
+        // same orphan reap a cancel gets. A normal exit is exactly as capable of
+        // leaving a token-bearing `mcp-server.mjs` behind as a cancel is, because
+        // the child is not in `activeProcesses` either way.
+        //
+        // THE COST, RECORDED RATHER THAN GLOSSED: this fires after EVERY completed
+        // turn, not only after a cancel, so an otherwise-idle Drift spawns one
+        // short-lived enumerator per turn. That is deliberate (T-08-32, accepted).
+        // The enumerator is bounded by ORPHAN_SCAN_TIMEOUT_MS, is fire-and-forget,
+        // and exits immediately with no match when there is nothing to reap. The
+        // cost is ZERO on Windows, where `buildSessionOrphanScanPlan` refuses with
+        // `unsupported-platform` before any spawn happens — so UX-04's
+        // console-window count is unaffected.
+        reapSessionOrphansIfIdle(sdk);
         void (async () => {
           appendSessionDebugLog(sessionDebugLogPath, "finalize(): flushActivities start");
           // drain: one tick is byte-clamped and there is no tick after this one.
@@ -5690,6 +5812,20 @@ function cancelCliMessage(sdk: BackendSDK, sessionId: string): Result<void> {
       killTree(sdk, proc, "kill");
     }, 3000);
     activeProcesses.delete(sessionId);
+    // THE REPORTED BUG, CLOSED HERE. One turn, click Stop, and the token-bearing
+    // `mcp-server.mjs` kept running: `killTree` above signals the provider CLI's
+    // process GROUP, and A6 — "the CLI's MCP child sits in the CLI's group" — was
+    // measured FALSE on 2026-08-27. This reaches that child by its own argv
+    // instead, with no group reference anywhere on the path (GD-01).
+    //
+    // Placed AFTER the deletion, which is what makes the gate answer correctly:
+    // `shouldReapSessionOrphans` reads `activeProcesses.size`, and reaping before
+    // this session had been removed from it would refuse on the very session
+    // being cancelled.
+    //
+    // FIRE-AND-FORGET, returning `void`: this function keeps its synchronous
+    // `Result<void>` signature (OQ-4) and its user-visible semantics unchanged.
+    reapSessionOrphansIfIdle(sdk);
     if (snapshot !== undefined) {
       publishSessionState(sdk, {
         sessionId,
@@ -5728,6 +5864,16 @@ function closeCliSession(
     // signature (OQ-4).
     killTree(sdk, proc, "kill");
     activeProcesses.delete(input.sessionId);
+    // The same LIF-02 reap as the cancel path, for the same reason and with the
+    // same gate: `killTree` reached the CLI, A6 says nothing reliable about
+    // whether that reached its MCP child, and this does. Fire-and-forget, so the
+    // synchronous `Result<void>` signature above is unaffected (OQ-4).
+    //
+    // ABOVE the sessionRuntimeFiles removal below, and that placement is the same
+    // SC-4 contract this function's header already states: those files carried
+    // CAIDO_TOKEN into the child's environment, and removing them while the child
+    // still runs destroys the trail without withdrawing the credential.
+    reapSessionOrphansIfIdle(sdk);
   }
   const runtimeFiles = sessionRuntimeFiles.get(input.sessionId);
   if (runtimeFiles !== undefined) {

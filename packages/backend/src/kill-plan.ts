@@ -684,3 +684,65 @@ export function classifyOrphanScanOutcome(input: {
   // combination it does not recognise kills nothing.
   return { kind: "reap", kill: true, pids: input.pids };
 }
+
+// Whether an idle-time orphan reap may fire at all.
+//
+// It sits with `hasTrackedProcessExited` and `shouldDetachProviderSpawn` above
+// rather than with the scan builders, because it is the same KIND of thing they
+// are: one small decision, taken from injected scalars, whose whole reason for
+// living outside `index.ts` is that a test can reach it there.
+//
+// WHAT THE FIRST SCALAR IS FOR. The marker the session scan searches on is the
+// shared `mcpTempDir` directory name, and EVERY concurrent session's MCP child
+// carries it — Drift stages one temp directory per runtime, not one per chat. So
+// a marker-wide reap cannot tell one session's child from another's AS THE ARGV
+// IS COMPOSED TODAY, and firing it while any session is live would kill the MCP
+// server of a turn the user is watching (T-08-27).
+//
+// THE CORRECTION A READER WHO CHECKS WILL FIND, STATED HERE SO THEY DO NOT HAVE
+// TO. "argv cannot distinguish sessions" is FALSE for two of the four providers,
+// and one of them is the maintainer's active provider. For `claude-cli` and
+// `copilot-cli` Drift AUTHORS the `args` array itself — `buildMcpServerSpec`
+// (`mcp-server-spec.ts`) sets `args: [mcpScriptPath]`, and `toMcpConfigDocument`
+// projects it into the PER-CHAT `mcp-<chatId>.json` / `copilot-mcp-<chatId>.json`
+// that `writeChatMcpConfig` writes (`index.ts:3960` and `:4009`). A per-chat
+// token appended to that array would appear verbatim on the child's command line
+// and make the scan SESSION-PRECISE for those two, retiring this gate for them;
+// `mcp-server.mjs` reads `process.argv` only for `--validate-auth`, so the extra
+// token is inert. The claim holds only for `gemini-cli` and `codex-cli`, which
+// share ONE `mcp add drift` registration with no per-chat document, and for
+// Drift's own `callMcpMethod` spawn, which has no chat at all.
+//
+// So this gate is a SCOPE DECISION, not a constraint, and the case it leaves
+// uncovered is recorded as residual **AR-07** (plan 08-10) and as threat
+// T-08-50: with two or more sessions live, cancelling one leaves its
+// token-bearing MCP child to the process-group path UAT measured FALSE (A6), and
+// that orphan survives until the LAST session closes and this gate opens. Naming
+// it here is the point — a reader of this predicate sees what it does not cover
+// instead of inferring that nothing is missing.
+//
+// WHAT THE SECOND SCALAR IS FOR. `callMcpMethod` spawns `node
+// <mcpTempDir>/mcp-server.mjs` DIRECTLY for the MCP self-test, and its argv is
+// byte-identical to a CLI's child. At teardown that is correct — everything must
+// die. At an idle reap it is not: a concurrent self-test would be killed and
+// surface to the user as a self-test failure with no visible cause (T-08-28). A
+// pid EXCLUSION LIST was rejected for this: a stale pid in such a list would
+// shield a genuine orphan that later reused the number, which is T-08-04's
+// failure shape pointed the wrong way. A depth COUNTER cannot go stale in that
+// direction.
+//
+// EXACT ZEROS, NOT TRUTHINESS, on both inputs. A negative or non-integer value
+// on either scalar means the caller's arithmetic is wrong, and a wrong count is
+// not evidence that nothing is running — so anything other than a pair of exact
+// zeros returns FALSE. An unknown resolves toward NOT REAPING, the same
+// subtractive rule `hasTrackedProcessExited` states: this predicate can skip a
+// kill on ignorance, never add one.
+export function shouldReapSessionOrphans(input: {
+  activeSessionCount: number;
+  directMcpCallDepth: number;
+}): boolean {
+  if (!Number.isInteger(input.activeSessionCount)) return false;
+  if (!Number.isInteger(input.directMcpCallDepth)) return false;
+  if (input.activeSessionCount !== 0) return false;
+  return input.directMcpCallDepth === 0;
+}

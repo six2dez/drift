@@ -13,6 +13,7 @@ import {
   MCP_TEMP_DIR_PREFIX,
   parseOrphanScanPids,
   shouldDetachProviderSpawn,
+  shouldReapSessionOrphans,
 } from "./kill-plan";
 
 // Every input below is passed as a LITERAL, which is the entire point of
@@ -826,5 +827,83 @@ describe("classifyOrphanScanOutcome — every unavailable-enumeration outcome is
         pids: [44284, 123],
       }),
     ).toEqual({ kind: "reap", kill: true, pids: [44284, 123] });
+  });
+});
+
+// ── shouldReapSessionOrphans — the idle gate, from literal scalars ──
+//
+// THE RED INPUT, STATED SO IT DOES NOT HAVE TO BE RE-DERIVED: relax EITHER
+// condition from an exact-zero comparison to a truthiness check — write
+// `if (input.activeSessionCount) return false` in place of
+// `if (input.activeSessionCount !== 0) return false` — and the negative and
+// non-integer cases below go red, because `-1` and `NaN` are the values a
+// truthiness check reads differently from an exact-zero one (`-1` is truthy and
+// would still refuse, but `NaN` is FALSY and a truthiness check would REAP on
+// it). Verified by running exactly that mutation; both mutations were confirmed
+// red before this suite was kept.
+//
+// WHY NON-INTEGERS ARE ASSERTED AT ALL. `activeProcesses.size` cannot be `NaN`
+// and `mcpDirectCallDepth` should not be, but "should not be" is the assumption
+// this whole phase exists to stop trusting: an increment that ran against an
+// undefined counter yields `NaN`, and a gate that reaps on `NaN` would fire
+// while a self-test was live. Both scalars therefore have to EARN the reap
+// rather than merely fail to forbid it.
+describe("shouldReapSessionOrphans — only a pair of exact zeros opens the idle gate (T-08-27 / T-08-28)", () => {
+  it("reaps when Drift holds no session and has no direct MCP call in flight", () => {
+    // The ONE positive case, and it is not optional: without it every refusal
+    // below would pass against a predicate hardwired to `return false`, which is
+    // a gate over a mechanism that never runs.
+    expect(
+      shouldReapSessionOrphans({ activeSessionCount: 0, directMcpCallDepth: 0 }),
+    ).toBe(true);
+  });
+
+  it("refuses while a session is live, whatever the call depth", () => {
+    // T-08-27: the marker is the shared temp-dir name, so a reap here would kill
+    // the MCP child of a turn the user is watching.
+    expect(
+      shouldReapSessionOrphans({ activeSessionCount: 1, directMcpCallDepth: 0 }),
+    ).toBe(false);
+    expect(
+      shouldReapSessionOrphans({ activeSessionCount: 1, directMcpCallDepth: 1 }),
+    ).toBe(false);
+  });
+
+  it("refuses while Drift's own direct MCP call is in flight", () => {
+    // T-08-28: `callMcpMethod`'s spawn is argv-identical to a CLI's child.
+    expect(
+      shouldReapSessionOrphans({ activeSessionCount: 0, directMcpCallDepth: 1 }),
+    ).toBe(false);
+  });
+
+  it("refuses on a negative count on either input", () => {
+    // A negative count means the caller's arithmetic is wrong, and wrong
+    // arithmetic is not evidence that nothing is running.
+    expect(
+      shouldReapSessionOrphans({ activeSessionCount: -1, directMcpCallDepth: 0 }),
+    ).toBe(false);
+    expect(
+      shouldReapSessionOrphans({ activeSessionCount: 0, directMcpCallDepth: -1 }),
+    ).toBe(false);
+  });
+
+  it("refuses on a non-integer on either input", () => {
+    // `NaN` is the one that matters: it is FALSY, so a truthiness-based gate
+    // would REAP on it. Fractions are included because a counter that has been
+    // averaged or parsed is a counter nobody is tracking correctly.
+    for (const bad of [Number.NaN, 0.5, Number.POSITIVE_INFINITY]) {
+      expect(
+        shouldReapSessionOrphans({
+          activeSessionCount: bad,
+          directMcpCallDepth: 0,
+        }),
+      ).toBe(false);
+      expect(
+        shouldReapSessionOrphans({
+          activeSessionCount: 0,
+          directMcpCallDepth: bad,
+        }),
+      ).toBe(false);
+    }
   });
 });
