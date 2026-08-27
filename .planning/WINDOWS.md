@@ -25,7 +25,7 @@ last_updated: 2026-08-27T13:06:17.978Z
 | 8 | 06 | unrun-verify | packages/backend/src/index.ts |  | WIN32_PATH_SEARCH_TIMEOUT_MS = 5000 is a headroom estimate, not a measurement; closes on the Phase 9/10 real-machine report | open |  | 2026-08-21T11:55:43.210Z |  |
 | 9 | 06 | deviation | packages/backend/src/index.ts |  | CR-01/WR-01 (06-REVIEW): the provider spawn in sendCliMessage and the PATH-search spawn in resolveCommand were unguarded Promise-executor spawns, so a synchronous throw rejected the RPC instead of resolving. CLOSED in Phase 6 per 06-VERIFICATION human item 5: both now carry the same try/catch shape spawnAndWait already had. Provider site publishes spawn_error and cleans up runtimeFiles + the token-bearing mcp-<chatId>.json inline (finalize is in its TDZ at that point); PATH-search site resolves undefined, identical to its untouched error handler. Graceful degradation only - .cmd launchability stays PRV-02/Phase 7. | fixed |  | 2026-08-21T13:16:47.639Z | 2026-08-21T13:17:01.634Z |
 | 10 | 06 | deviation | packages/backend/src/command-resolution.ts |  | CR-02 (06-REVIEW): two catalogue rows were non-administrator-writable on default Windows ACLs, and a binary resolved from either is spawned with CAIDO_TOKEN in its environment. CLOSED in Phase 6 per 06-VERIFICATION human item 4, option (a): %ProgramData%\\scoop\\shims dropped entirely; C:\\nvm4w\\nodejs now gated on nvm-windows' own NVM_HOME/NVM_SYMLINK contract via the new pure isNvmWindowsInstalled (platform.ts), threaded in as the injected nvmWindowsInstalled input so the three builders stay I/O-free and never read process.env. Both removals recorded as in-code non-claims naming the token exposure. | fixed |  | 2026-08-21T13:16:56.847Z | 2026-08-21T13:17:01.729Z |
-| 11 | 08 | unmet-truth | packages/backend/src/kill-plan.ts |  | LIF-02's POSIX mechanism rests on assumptions A1 and A6, both recorded OPEN - not measured in 08-SPIKE.md after the Wave-0 hardware checkpoint was waived. kill-tree.posix.test.ts proves the group-kill argv under NODE; no CI leg executes Caido's LLRT and none spawns a real provider CLI. Closes only on a real-hardware run of 08-SPIKE.md's four-step procedure (probe recoverable at 68199fa). | open |  | 2026-08-24T15:24:21.284Z |  |
+| 11 | 08 | unmet-truth | packages/backend/src/kill-plan.ts |  | MEASURED 2026-08-27 on a real macOS Caido (darwin 25.6.0, probe build 68199fa), superseding the 2026-08-24 entry (preserved verbatim in the marked-correction note at the end of this file). This entry does NOT simply close. A1 is CLOSED FAVOURABLY: spikeDetachedGroupKill read 'grandchild-died (detached honoured)', so the shipped LLRT does honour the detached spawn and the nine-site POSIX regression this entry feared cannot happen. A6 is FALSIFIED: codex pid 43921 sat in pgid 43752 while its own mcp-server.mjs child pid 44284 sat in pgid 44284, so a group signal aimed at the CLI's group cannot reach the token-bearing child, and OQ-2's single-pid rung does not help because it signals the CLI rather than the child. The phase's answer to the falsification is the argv-marker orphan reap shipped by plans 08-06 and 08-07 - pgrep -f over a session-unique temp-dir marker adjacent to mcp-server.mjs, then a POSITIVE single-pid kill - which identifies its target by the target's own command line and is therefore independent of process groups by construction. WHAT KEEPS THIS ENTRY OPEN: the reading covers ONE provider (Codex), on an instance Drift did not spawn, so Claude Code - the active provider - remains unmeasured; the Control (reading 5) was never taken, so the T-08-14 attestation is still an isolated zero with the CLI-cleanup confounder unexcluded; and the reap itself is covered by no executed assertion (entries 13 and 15). Closes on one Drift-spawned Claude Code turn run through 08-SPIKE.md steps 3 and 4 (probe recoverable at 68199fa). | open | Narrowed, not closed: A1 measured favourably and A6 measured FALSE on 2026-08-27, both for one provider on one build; Claude Code unmeasured and the pre-fix Control never taken. | 2026-08-24T15:24:21.284Z |  |
 | 12 | 08 | unrun-verify | packages/backend/src/kill-tree.win32.test.ts |  | The three win32 kill-tree cases have never executed: they are skipIf-gated and no windows-latest run exists for them yet. The reserved dead-pid exit-code block is empty and the run URL is unfilled. | open |  | 2026-08-24T15:54:03.743Z |  |
 | 13 | 08 | unrun-verify | packages/backend/src/index.ts |  | reapMcpOrphans and its cleanupMcpRuntime call site are covered by no executed assertion — index.ts cannot be imported under vitest and no static source gate was added (plan rated the truth 'verification: backstop') | open |  | 2026-08-27T12:08:50.726Z |  |
 | 14 | 08 | unrun-verify | packages/backend/src/kill-plan.ts |  | Whether Caido's plugin sandbox can spawn pgrep at all is unmeasured; if it cannot, the orphan reap degrades silently to the enumerator-unavailable no-op | open |  | 2026-08-27T12:08:50.833Z |  |
@@ -162,9 +162,9 @@ last_updated: 2026-08-27T13:06:17.978Z
     "phase": "08",
     "file": "packages/backend/src/kill-plan.ts",
     "line": null,
-    "description": "LIF-02's POSIX mechanism rests on assumptions A1 and A6, both recorded OPEN - not measured in 08-SPIKE.md after the Wave-0 hardware checkpoint was waived. kill-tree.posix.test.ts proves the group-kill argv under NODE; no CI leg executes Caido's LLRT and none spawns a real provider CLI. Closes only on a real-hardware run of 08-SPIKE.md's four-step procedure (probe recoverable at 68199fa).",
+    "description": "MEASURED 2026-08-27 on a real macOS Caido (darwin 25.6.0, probe build 68199fa), superseding the 2026-08-24 entry (preserved verbatim in the marked-correction note at the end of this file). This entry does NOT simply close. A1 is CLOSED FAVOURABLY: spikeDetachedGroupKill read 'grandchild-died (detached honoured)', so the shipped LLRT does honour the detached spawn and the nine-site POSIX regression this entry feared cannot happen. A6 is FALSIFIED: codex pid 43921 sat in pgid 43752 while its own mcp-server.mjs child pid 44284 sat in pgid 44284, so a group signal aimed at the CLI's group cannot reach the token-bearing child, and OQ-2's single-pid rung does not help because it signals the CLI rather than the child. The phase's answer to the falsification is the argv-marker orphan reap shipped by plans 08-06 and 08-07 - pgrep -f over a session-unique temp-dir marker adjacent to mcp-server.mjs, then a POSITIVE single-pid kill - which identifies its target by the target's own command line and is therefore independent of process groups by construction. WHAT KEEPS THIS ENTRY OPEN: the reading covers ONE provider (Codex), on an instance Drift did not spawn, so Claude Code - the active provider - remains unmeasured; the Control (reading 5) was never taken, so the T-08-14 attestation is still an isolated zero with the CLI-cleanup confounder unexcluded; and the reap itself is covered by no executed assertion (entries 13 and 15). Closes on one Drift-spawned Claude Code turn run through 08-SPIKE.md steps 3 and 4 (probe recoverable at 68199fa).",
     "status": "open",
-    "reason": "",
+    "reason": "Narrowed, not closed: A1 measured favourably and A6 measured FALSE on 2026-08-27, both for one provider on one build; Claude Code unmeasured and the pre-fix Control never taken.",
     "recorded_at": "2026-08-24T15:24:21.284Z",
     "resolved_at": null
   },
@@ -286,3 +286,24 @@ measurement vehicle, exactly as 06-02 recorded.
 relative to the repository root, so the run litters the working tree with ~80 entries whose *names*
 contain literal backslashes. Remove them by explicit prefix match (`\var\folders\`) — never with
 `git clean`, which is prohibited in this repo's execution rules.
+
+---
+
+## Marked corrections
+
+> **Entry 11, superseded 2026-08-24 — preserved, not deleted.** Rewritten 2026-08-27 by plan
+> 08-10 once A1 and A6 were measured. The ledger's two representations are a table row and a
+> JSON object, neither of which can carry a block quote, so the superseded text is preserved
+> here instead — the `07-VALIDATION.md` marked-correction convention applied to a
+> machine-readable register. Original `description`, verbatim:
+>
+> > LIF-02's POSIX mechanism rests on assumptions A1 and A6, both recorded OPEN - not measured
+> > in 08-SPIKE.md after the Wave-0 hardware checkpoint was waived. kill-tree.posix.test.ts
+> > proves the group-kill argv under NODE; no CI leg executes Caido's LLRT and none spawns a
+> > real provider CLI. Closes only on a real-hardware run of 08-SPIKE.md's four-step procedure
+> > (probe recoverable at 68199fa).
+>
+> Original `reason`: `""` (empty). Entry 11's `status` is unchanged at `open`: A1 closed
+> favourably and A6 was FALSIFIED, but Claude Code stays unmeasured and the Control was never
+> taken, so the entry narrows rather than closes. **Entry 12 is untouched by that correction in
+> both representations.**
