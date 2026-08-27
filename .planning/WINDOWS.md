@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 5
+open_count: 7
 waived_count: 0
 fixed_count: 9
-total_count: 14
-last_updated: 2026-08-27T12:08:50.833Z
+total_count: 16
+last_updated: 2026-08-27T12:30:13.533Z
 ---
 
 # Broken Windows Ledger
@@ -29,6 +29,8 @@ last_updated: 2026-08-27T12:08:50.833Z
 | 12 | 08 | unrun-verify | packages/backend/src/kill-tree.win32.test.ts |  | The three win32 kill-tree cases have never executed: they are skipIf-gated and no windows-latest run exists for them yet. The reserved dead-pid exit-code block is empty and the run URL is unfilled. | open |  | 2026-08-24T15:54:03.743Z |  |
 | 13 | 08 | unrun-verify | packages/backend/src/index.ts |  | reapMcpOrphans and its cleanupMcpRuntime call site are covered by no executed assertion — index.ts cannot be imported under vitest and no static source gate was added (plan rated the truth 'verification: backstop') | open |  | 2026-08-27T12:08:50.726Z |  |
 | 14 | 08 | unrun-verify | packages/backend/src/kill-plan.ts |  | Whether Caido's plugin sandbox can spawn pgrep at all is unmeasured; if it cannot, the orphan reap degrades silently to the enumerator-unavailable no-op | open |  | 2026-08-27T12:08:50.833Z |  |
+| 15 | 08 | unrun-verify | packages/backend/src/index.ts |  | reapMcpOrphans / reapSessionOrphansIfIdle wiring is asserted only by source text; whether Caido's LLRT sandbox can spawn pgrep at all is unmeasured, so both reaps may degrade silently to the enumerator-unavailable no-op while every gate stays green | open |  | 2026-08-27T12:30:13.421Z |  |
+| 16 | 08 | deviation | .planning/phases/08-process-lifecycle/08-07-PLAN.md | 193 | Ninth vacuous gate: Task 1 criterion 'grep -c never processes ... is 0' returned 0 at HEAD before any edit; the quoted sentence lives in 08-05-PLAN.md / 08-RESEARCH.md, never in index.ts | open |  | 2026-08-27T12:30:13.533Z |  |
 
 ````json
 [
@@ -198,6 +200,30 @@ last_updated: 2026-08-27T12:08:50.833Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-08-27T12:08:50.833Z",
+    "resolved_at": null
+  },
+  {
+    "id": 15,
+    "kind": "unrun-verify",
+    "phase": "08",
+    "file": "packages/backend/src/index.ts",
+    "line": null,
+    "description": "reapMcpOrphans / reapSessionOrphansIfIdle wiring is asserted only by source text; whether Caido's LLRT sandbox can spawn pgrep at all is unmeasured, so both reaps may degrade silently to the enumerator-unavailable no-op while every gate stays green",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-08-27T12:30:13.421Z",
+    "resolved_at": null
+  },
+  {
+    "id": 16,
+    "kind": "deviation",
+    "phase": "08",
+    "file": ".planning/phases/08-process-lifecycle/08-07-PLAN.md",
+    "line": 193,
+    "description": "Ninth vacuous gate: Task 1 criterion 'grep -c never processes ... is 0' returned 0 at HEAD before any edit; the quoted sentence lives in 08-05-PLAN.md / 08-RESEARCH.md, never in index.ts",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-08-27T12:30:13.533Z",
     "resolved_at": null
   }
 ]

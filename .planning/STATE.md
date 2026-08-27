@@ -4,16 +4,16 @@ milestone: v1.0
 current_phase: 8
 current_phase_name: Process Lifecycle
 status: needs_review
-stopped_at: Completed 08-06-PLAN.md
-last_updated: "2026-08-27T12:08:41.266Z"
+stopped_at: Completed 08-07-PLAN.md
+last_updated: "2026-08-27T12:29:58.914Z"
 last_activity: 2026-08-24
 last_activity_desc: Phase 08 verified — human_needed, no blockers
-state_head: 8116fcbefccef3507387b783f66e4e0cf8ef5ea3
+state_head: b6965f8ff0f319341596ca59e6daa3e91f22ee8c
 progress:
   total_phases: 13
   completed_phases: 5
   total_plans: 50
-  completed_plans: 46
+  completed_plans: 47
 milestone_name: milestone
 ---
 
@@ -74,6 +74,7 @@ Progress: [███░░░░░░░] 30% (3 of 10 milestone phases)
 | Phase 08 P04 | 20 min | 2 tasks | 3 files |
 | Phase 08 P05 | 42 min | 3 tasks | 5 files |
 | Phase 08 P06 | 25 min | 3 tasks | 5 files |
+| Phase 08 P07 | 12 min | 3 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -207,6 +208,9 @@ Recent decisions affecting current work:
 - [Phase 08]: pgrep over ps for enumeration: no parsing surface over user-influenced argv, a distinguishable exit-1 no-match signal, and output that scales with matches rather than the process table.
 - [Phase 08]: win32 gets no orphan enumerator and refuses with unsupported-platform; the foreign-parented orphan class stays unreachable there (AR-04).
 - [Phase 08]: OQ-2's single-pid rung survives A1's closure with a corrected reason: defence against a future Caido that rebases its LLRT fork, not against an unmeasured one.
+- [Phase 08]: The idle reap gate is a SCOPE decision, not a constraint: a per-chat argv token would make the scan session-precise for claude-cli and copilot-cli (Drift authors their args array), so the multi-session cancel gap is recorded as AR-07 / T-08-50 rather than implied unavoidable.
+- [Phase 08]: Drift's own self-test is excluded from the idle reap by a depth COUNTER, not a pid exclusion list: a stale pid would shield a genuine orphan that reused the number (T-08-04 pointed the wrong way), while a counter that fails to release SUPPRESSES the reap.
+- [Phase 08]: AR-02 / recorded decision OQ-3 closed for the measured case: the start-up sweep now terminates previous-run MCP orphans above every rm, with the blast-radius objection answered by the two-anchor adjacency pattern.
 
 ### Pending Todos
 
@@ -228,6 +232,7 @@ None yet. Eleven items are parked in the ROADMAP backlog (999.1-999.11): nine fr
 - A1 OPEN: the shipped Caido LLRT is unverified on any real install — if its fork differs, LIF-02 is not closed and every CI leg stays green because every leg runs Node. A6 OPEN: no provider CLI's MCP child pgid was ever observed. Re-run procedure preserved in 08-SPIKE.md; probe code at commit 68199fa.
 - 08-04 built the Windows vehicle but took NO reading: the three win32 kill-tree cases have never executed and the reserved dead-pid exit-code block in kill-tree.win32.test.ts is empty. A windows-latest run must fill the measured code, its first stderr line and the run URL (broken-windows ledger entry 12).
 - Phase 8: A1/A6 remain OPEN — not measured (ledger 11), and the windows-latest leg has never run (ledger 12). Neither is closed by the T-08-14 attestation.
+- Whether Caido plugin sandbox can spawn pgrep at all is UNMEASURED. If it cannot, both orphan reaps degrade silently to the enumerator-unavailable no-op while every source gate stays green. Needs a real Caido install (08-07 D8).
 
 ### Quick Tasks Completed
 
@@ -249,8 +254,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-27T12:08:27.939Z
-Stopped at: Completed 08-06-PLAN.md
+Last session: 2026-08-27T12:29:29.927Z
+Stopped at: Completed 08-07-PLAN.md
 Resume file: None
 
 **Live on the public remote: nothing of ours.** Plan 03-04 tore down all three `scratch/*` branches (`ci-proof-windows-probe`, `ci-proof-windows-probe-negative`, `ci-proof-windows-gate-negative`) locally and remotely. Asserted with a `test -z` discrimination over the captured glob (`scratch-glob-empty=0`) plus the full unfiltered listing, which now shows only `main` at `2d8cf16` and the pre-existing, unrelated `fix/security-hotfixes` at `0cd81f3`. `origin/main` was never pushed by this phase and is still `2d8cf16`; local `main` is 23 commits ahead and deliberately unpushed. **Re-verified 2026-08-13 (plan 03-05):** the remote still lists only `main` `2d8cf16` and the pre-existing `fix/security-hotfixes` `0cd81f3`, and all eight Phase 3 run records (4 probe + 4 `CI` control) still resolve with their recorded conclusions — which is what makes the URLs in `03-FINDINGS.md` valid citations after the branches were deleted. The probe **artifacts** do not survive: they expire 2026-09-12, which is why D-11 required the committed findings document.
