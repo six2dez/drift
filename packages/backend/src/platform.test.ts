@@ -2,6 +2,7 @@ import path from "path";
 import { describe, expect, it } from "vitest";
 import {
   buildSpawnEnv,
+  deriveWindowsSystemRoot,
   getExecutableNames,
   getHomeDirCandidates,
   getSweepRoots,
@@ -13,6 +14,7 @@ import {
   joinPath,
   normalizePlatform,
   rankPathSearchHits,
+  resolveWindowsSystemBinary,
   selectComspec,
 } from "./platform";
 
@@ -150,31 +152,233 @@ describe("getSweepRoots", () => {
   });
 });
 
+// G-01 — a Windows system root that does not come from the parent environment.
+//
+// WHY A DERIVATION IS THE ANSWER AT ALL. The 2026-08-27 diagnostics from a real
+// Caido install report `parentEnvKeyCount: 0`: the environment the backend sees
+// is EMPTY, so every environment-sourced system root in this codebase resolves
+// to nothing and falls through to a bare executable name. `os.tmpdir()` is
+// confirmed working on that same install and is the one non-environment source
+// of a Windows path the runtime offers.
+//
+// Every case below drives the function with a LITERAL tmpdir, which is the whole
+// point of it taking one: the maintainer cannot run native Windows, so the win32
+// answers are proven here, on a POSIX host.
+describe("deriveWindowsSystemRoot", () => {
+  it("derives the root from a Windows temp directory's drive letter", () => {
+    expect(
+      deriveWindowsSystemRoot({
+        tmpdir: "C:\\Users\\x\\AppData\\Local\\Temp",
+      }),
+    ).toBe("C:\\Windows");
+  });
+
+  it("upper-cases the drive letter and spells the win32 separator by hand", () => {
+    // A forward-slash spelling and a lower-case drive both occur in the wild.
+    // The separator is written by hand rather than with `path`, which resolves
+    // to its POSIX flavour on this runner and would compose "D:/Windows".
+    expect(deriveWindowsSystemRoot({ tmpdir: "d:/tmp" })).toBe("D:\\Windows");
+  });
+
+  it("derives nothing from a POSIX temp root", () => {
+    // CMP-01 in its cheapest form: macOS and Linux fall out empty on SHAPE
+    // alone, with no platform gate, so no POSIX arm can ever consult this.
+    expect(deriveWindowsSystemRoot({ tmpdir: "/var/folders/05/abc/T" })).toBe(
+      "",
+    );
+    expect(deriveWindowsSystemRoot({ tmpdir: "/tmp" })).toBe("");
+  });
+
+  it("derives nothing from a UNC path, which carries no drive letter", () => {
+    // There is nothing to derive: the first character is a separator, not a
+    // letter. Guessing here would be the silent-wrong-answer this whole rung
+    // exists to replace.
+    expect(
+      deriveWindowsSystemRoot({ tmpdir: "\\\\server\\share\\tmp" }),
+    ).toBe("");
+  });
+
+  it("derives nothing from an absent, empty or whitespace-only tmpdir", () => {
+    expect(deriveWindowsSystemRoot({ tmpdir: undefined })).toBe("");
+    expect(deriveWindowsSystemRoot({ tmpdir: "" })).toBe("");
+    expect(deriveWindowsSystemRoot({ tmpdir: "   " })).toBe("");
+  });
+
+  it("derives nothing from a drive-RELATIVE prefix", () => {
+    // "C:" and "C:tmp" are drive-relative, not rooted — the same rule
+    // `isAbsolutePath` and `getTempRoot` already apply to the identical string.
+    expect(deriveWindowsSystemRoot({ tmpdir: "C" })).toBe("");
+    expect(deriveWindowsSystemRoot({ tmpdir: "C:" })).toBe("");
+    expect(deriveWindowsSystemRoot({ tmpdir: "C:tmp" })).toBe("");
+  });
+});
+
+// T-08-03 / T-08-33 / T-08-34 — the one ladder, asserted rung by rung.
+//
+// Environment first (the MEASURED root), then the derived fallback, then the
+// bare name. The bare name is the documented last resort and is kept reachable
+// and tested rather than deleted, which is what makes SC-1's "last resort"
+// clause true rather than merely written.
+describe("resolveWindowsSystemBinary", () => {
+  it("prefers the environment value over the fallback", () => {
+    expect(
+      resolveWindowsSystemBinary({
+        env: { SystemRoot: "C:\\Windows" },
+        fallbackRoot: "D:\\Windows",
+        binary: "taskkill.exe",
+      }),
+    ).toBe("C:\\Windows\\System32\\taskkill.exe");
+  });
+
+  it("uses the fallback root when the environment carries nothing", () => {
+    // The arm a real install reaches, because its environment is empty.
+    expect(
+      resolveWindowsSystemBinary({
+        env: {},
+        fallbackRoot: "D:\\Windows",
+        binary: "taskkill.exe",
+      }),
+    ).toBe("D:\\Windows\\System32\\taskkill.exe");
+  });
+
+  it("falls back to the BARE name only when neither root is available", () => {
+    expect(
+      resolveWindowsSystemBinary({
+        env: {},
+        fallbackRoot: "",
+        binary: "taskkill.exe",
+      }),
+    ).toBe("taskkill.exe");
+  });
+
+  it("reads both casings, the native spelling winning", () => {
+    expect(
+      resolveWindowsSystemBinary({
+        env: { SYSTEMROOT: "E:\\Windows" },
+        fallbackRoot: "",
+        binary: "where.exe",
+      }),
+    ).toBe("E:\\Windows\\System32\\where.exe");
+    expect(
+      resolveWindowsSystemBinary({
+        env: { SystemRoot: "D:\\Windows", SYSTEMROOT: "E:\\Elsewhere" },
+        fallbackRoot: "",
+        binary: "where.exe",
+      }),
+    ).toBe("D:\\Windows\\System32\\where.exe");
+  });
+
+  it("treats a whitespace-only value as ABSENT on BOTH rungs", () => {
+    expect(
+      resolveWindowsSystemBinary({
+        env: { SystemRoot: "   " },
+        fallbackRoot: "D:\\Windows",
+        binary: "cmd.exe",
+      }),
+    ).toBe("D:\\Windows\\System32\\cmd.exe");
+    expect(
+      resolveWindowsSystemBinary({
+        env: { SystemRoot: undefined },
+        fallbackRoot: "   ",
+        binary: "cmd.exe",
+      }),
+    ).toBe("cmd.exe");
+  });
+
+  it("strips trailing separators from EITHER root before joining", () => {
+    expect(
+      resolveWindowsSystemBinary({
+        env: { SystemRoot: "D:\\Windows\\" },
+        fallbackRoot: "",
+        binary: "where.exe",
+      }),
+    ).toBe("D:\\Windows\\System32\\where.exe");
+    expect(
+      resolveWindowsSystemBinary({
+        env: {},
+        fallbackRoot: "D:\\Windows/",
+        binary: "where.exe",
+      }),
+    ).toBe("D:\\Windows\\System32\\where.exe");
+  });
+
+  it("keeps the deliberate absence of a bare-drive guard", () => {
+    // A segment is being APPENDED rather than a root preserved, so reducing
+    // "D:\" to "D:" yields the correct "D:\System32\…" — the same reasoning
+    // `getWhichCommand` and `buildKillTreePlan` each carried before the merge.
+    expect(
+      resolveWindowsSystemBinary({
+        env: { SystemRoot: "D:\\" },
+        fallbackRoot: "",
+        binary: "taskkill.exe",
+      }),
+    ).toBe("D:\\System32\\taskkill.exe");
+  });
+
+  it("treats a NON-STRING fallbackRoot as empty and lands on the bare name", () => {
+    // This simulates an UN-UPDATED TEST CALL SITE, not any reachable production
+    // input: `packages/backend/tsconfig.json` excludes `./src/**/*.test.ts`, so
+    // `pnpm -r typecheck` cannot catch a test that omits the required member,
+    // and vitest transpiles it without checking. Such a call arrives here
+    // carrying no value at all.
+    //
+    // RED INPUT: drop the non-string coercion from `resolveWindowsSystemBinary`
+    // and the composed value becomes a plausible-looking absolute path built
+    // from the absent value's NAME, resolving to nothing — quietly wrong in the
+    // one function whose purpose is to stop a bare name reaching Windows'
+    // search order. The malformed literal is deliberately NOT spelled in this
+    // assertion: a negative grep over `packages/backend/src` guards it, and
+    // writing it here would turn that gate red against its own test.
+    const resolved = resolveWindowsSystemBinary({
+      env: {},
+      fallbackRoot: undefined as unknown as string,
+      binary: "taskkill.exe",
+    });
+    expect(resolved).toBe("taskkill.exe");
+    expect(resolved).not.toContain("System32");
+    expect(resolved).not.toContain("undefined");
+  });
+});
+
+// G-01 / T-08-34 — the fallback rung between the environment read and the bare
+// name.
+//
+// THE RULE FOR THIS BLOCK, stated so it cannot be quietly broken: folding this
+// function's win32 ladder into `resolveWindowsSystemBinary` is a REFACTOR. Every
+// pre-existing expectation below is reproduced BYTE FOR BYTE, because those
+// cases pass an EMPTY `systemRootFallback` and an empty fallback reproduces the
+// old ladder exactly. The only edit permitted to a pre-existing case is the
+// added input member. If an expectation has to move, the consolidation is wrong
+// and the work halts — the expectation is not the thing to update.
+//
+// RED INPUT for the new fallback rung: delete the `fallbackRoot` branch from
+// `resolveWindowsSystemBinary` and the two empty-env-with-fallback cases below
+// return the bare "where.exe" instead of the fallback-rooted absolute path.
 describe("getWhichCommand", () => {
   it("resolves with which on darwin and linux", () => {
-    expect(getWhichCommand({ platform: "darwin", env: {} }).command).toBe(
+    expect(getWhichCommand({ platform: "darwin", env: {}, systemRootFallback: "" }).command).toBe(
       "which",
     );
-    expect(getWhichCommand({ platform: "linux", env: {} }).command).toBe(
+    expect(getWhichCommand({ platform: "linux", env: {}, systemRootFallback: "" }).command).toBe(
       "which",
     );
   });
 
   it("resolves with where.exe on win32", () => {
-    expect(getWhichCommand({ platform: "win32", env: {} }).command).toBe(
+    expect(getWhichCommand({ platform: "win32", env: {}, systemRootFallback: "" }).command).toBe(
       "where.exe",
     );
   });
 
   it("passes the command as a single argument on every platform", () => {
     expect(
-      getWhichCommand({ platform: "darwin", env: {} }).args("node"),
+      getWhichCommand({ platform: "darwin", env: {}, systemRootFallback: "" }).args("node"),
     ).toEqual(["node"]);
     expect(
-      getWhichCommand({ platform: "linux", env: {} }).args("node"),
+      getWhichCommand({ platform: "linux", env: {}, systemRootFallback: "" }).args("node"),
     ).toEqual(["node"]);
     expect(
-      getWhichCommand({ platform: "win32", env: {} }).args("node"),
+      getWhichCommand({ platform: "win32", env: {}, systemRootFallback: "" }).args("node"),
     ).toEqual(["node"]);
   });
 
@@ -183,20 +387,21 @@ describe("getWhichCommand", () => {
     // assumed. Phase 3 measured the C:\Windows spelling on the runner, and
     // hardcoding that literal was rejected — see the comment on the function.
     expect(
-      getWhichCommand({ platform: "win32", env: { SystemRoot: "D:\\Windows" } })
+      getWhichCommand({ platform: "win32", env: { SystemRoot: "D:\\Windows" }, systemRootFallback: "" })
         .command,
     ).toBe("D:\\Windows\\System32\\where.exe");
   });
 
   it("honours the SCREAMING-case spelling, and prefers the native-cased key when both are present", () => {
     expect(
-      getWhichCommand({ platform: "win32", env: { SYSTEMROOT: "E:\\Windows" } })
+      getWhichCommand({ platform: "win32", env: { SYSTEMROOT: "E:\\Windows" }, systemRootFallback: "" })
         .command,
     ).toBe("E:\\Windows\\System32\\where.exe");
     expect(
       getWhichCommand({
         platform: "win32",
         env: { SystemRoot: "D:\\Windows", SYSTEMROOT: "E:\\Elsewhere" },
+        systemRootFallback: "",
       }).command,
     ).toBe("D:\\Windows\\System32\\where.exe");
   });
@@ -205,17 +410,52 @@ describe("getWhichCommand", () => {
     // The fallback is load-bearing, not padding: the variable's presence rests
     // on libuv's back-fill list, which is Node's, and Caido's runtime is not
     // Node. This case is why the arm is not dead code.
-    expect(getWhichCommand({ platform: "win32", env: {} }).command).toBe(
+    expect(getWhichCommand({ platform: "win32", env: {}, systemRootFallback: "" }).command).toBe(
       "where.exe",
     );
     expect(
-      getWhichCommand({ platform: "win32", env: { SystemRoot: "   " } })
+      getWhichCommand({ platform: "win32", env: { SystemRoot: "   " }, systemRootFallback: "" })
         .command,
     ).toBe("where.exe");
     expect(
-      getWhichCommand({ platform: "win32", env: { SystemRoot: undefined } })
+      getWhichCommand({ platform: "win32", env: { SystemRoot: undefined }, systemRootFallback: "" })
         .command,
     ).toBe("where.exe");
+  });
+
+  it("uses the DERIVED root when the environment carries none (G-01)", () => {
+    // The MEASURED condition, not a contingency: the environment Caido's
+    // backend sees is empty on a real install, so this is the arm a Windows
+    // user actually reaches. Before this rung existed it was the bare name.
+    expect(
+      getWhichCommand({
+        platform: "win32",
+        env: {},
+        systemRootFallback: "D:\\Windows",
+      }).command,
+    ).toBe("D:\\Windows\\System32\\where.exe");
+    expect(
+      getWhichCommand({
+        platform: "win32",
+        env: { SystemRoot: "   " },
+        systemRootFallback: "D:\\Windows",
+      }).command,
+    ).toBe("D:\\Windows\\System32\\where.exe");
+  });
+
+  it("prefers a populated environment over the derived root", () => {
+    // A REGRESSION guard rather than a proof of new behaviour, and it is worth
+    // saying which: this case was already green before the fallback rung
+    // existed, because the environment rung did. It is here so the derivation —
+    // which `TEMP` redirected across drives can get wrong — can never overtake
+    // the measurement.
+    expect(
+      getWhichCommand({
+        platform: "win32",
+        env: { SystemRoot: "D:\\Windows" },
+        systemRootFallback: "E:\\Windows",
+      }).command,
+    ).toBe("D:\\Windows\\System32\\where.exe");
   });
 
   it("does not double the separator for a root that already ends in one", () => {
@@ -223,6 +463,7 @@ describe("getWhichCommand", () => {
       getWhichCommand({
         platform: "win32",
         env: { SystemRoot: "D:\\Windows\\" },
+        systemRootFallback: "",
       }).command,
     ).toBe("D:\\Windows\\System32\\where.exe");
   });
@@ -235,10 +476,11 @@ describe("getWhichCommand", () => {
       getWhichCommand({
         platform: undefined,
         env: { SystemRoot: "D:\\Windows" },
+        systemRootFallback: "",
       }).command,
     ).toBe("which");
     expect(
-      getWhichCommand({ platform: undefined, env: {} }).args("node"),
+      getWhichCommand({ platform: undefined, env: {}, systemRootFallback: "" }).args("node"),
     ).toEqual(["node"]);
   });
 });
