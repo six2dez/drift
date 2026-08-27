@@ -30,6 +30,9 @@
 #   A  discovery (fail-closed): repo-wide, exclusion-list, block-quote-stripped
 #   B  positive content on the nine known carriers
 #   C  historical-record immutability: the dated *-SUMMARY.md class is untouched
+#      — asserted against PINNED BLOB HASHES in HEAD (committed rewrites) plus a
+#        working-tree diff (uncommitted ones). See ARM C's own header for why the
+#        original `git diff --stat HEAD` alone asserted nothing.
 #
 # Exit 0 = pass. Any non-zero exit names the offending file and the failing arm.
 # =============================================================================
@@ -166,15 +169,82 @@ IDX=packages/backend/src/index.ts
 # the OTHER direction here: the class must be UNMODIFIED. Rewriting a SUMMARY
 # dated 2026-08-24 that recorded the verdicts as open would be falsifying the
 # record, not correcting it.
+#
+# REWRITTEN 2026-08-27 (review WR-04). WHAT THIS ARM USED TO BE, AND WHY IT
+# ASSERTED NOTHING:
+#
+#   SUMMARY_DIFF=$(git diff --stat HEAD -- '…/*-SUMMARY.md')
+#
+# `git diff HEAD` compares the index and the working tree against HEAD. At every
+# COMMIT BOUNDARY — which is the only state a standing control is ever run in: a
+# CI checkout, a fresh clone, a `git bisect` checkout — that output is empty BY
+# CONSTRUCTION, whatever the history contains. Someone who rewrote a SUMMARY and
+# COMMITTED it got a green ARM C forever after; only an UNCOMMITTED edit was ever
+# red, and only until it was committed. The arm that exists to police the
+# exclusion list was itself the "green by accident" shape ARM A's commentary sets
+# out to eliminate.
+#
+# WHY A PINNED BLOB HASH AND NOT `git log --oneline --follow | wc -l`. Counting
+# commits per file asserts the right thing but only where the full history is
+# present: under `actions/checkout`'s default `fetch-depth: 1`, or any shallow
+# clone, every file reads as one commit and the check passes VACUOUSLY — the same
+# failure being fixed, relocated. `git rev-parse HEAD:<path>` reads the blob out
+# of HEAD's own tree, which exists in a shallow clone, so this arm asserts
+# CONTENT rather than history and is depth-independent.
+#
+# THE PIN IS DELIBERATE FRICTION. Regenerating one of these files now requires
+# editing this script, in a commit that says so. That is the point: "historical
+# records are never rewritten" should cost something to override.
 # =============================================================================
 echo "== ARM C: the dated *-SUMMARY.md class is unmodified =="
-SUMMARY_DIFF=$(git diff --stat HEAD -- '.planning/phases/08-process-lifecycle/*-SUMMARY.md' 2>/dev/null)
-if [ -n "$SUMMARY_DIFF" ]; then
-  fail "ARM C" "a dated SUMMARY was modified — historical records are never rewritten:"
-  echo "$SUMMARY_DIFF"
-else
-  echo "   ARM C: pass (no dated SUMMARY modified)"
+
+# path-relative-to-repo-root  <space>  blob hash in HEAD, pinned 2026-08-27.
+SUMMARY_PINS="
+08-01-SUMMARY.md 725ba461b1468a9b8017ea18e6852627766b62cf
+08-02-SUMMARY.md 1c7c7026c3d408f5e900bd28a1201fb2ff359059
+08-03-SUMMARY.md d8f71008292acd043a7e842bc59c95b68eeaad59
+08-04-SUMMARY.md 24e4c5ddc1ff74a31adc9975d4162617accfb232
+08-05-SUMMARY.md 26995e205bd8e84a93bf77eb07875e025ac4d459
+08-06-SUMMARY.md f843d52f2836c58173d1958be4f6a7eeb9d4a4df
+08-07-SUMMARY.md c49ddcc1f65eb2c7d545d90b56539cd876f85176
+08-08-SUMMARY.md f29ce7df415c746c54b4c958e915602ee7a5edbb
+08-09-SUMMARY.md 54ac7039438bb414a318f42326895c38cd133d21
+08-10-SUMMARY.md b6d79bd04cc77491bf7d23603e49ac92e501d065
+"
+
+SUMMARY_DIR=.planning/phases/08-process-lifecycle
+PINNED_COUNT=0
+while read -r name pin; do
+  [ -n "$name" ] || continue
+  PINNED_COUNT=$((PINNED_COUNT + 1))
+  actual=$(git rev-parse "HEAD:$SUMMARY_DIR/$name" 2>/dev/null || echo "MISSING")
+  if [ "$actual" != "$pin" ]; then
+    fail "ARM C" "$name is $actual in HEAD, pinned at $pin — a dated SUMMARY is written once"
+  fi
+done <<EOF
+$SUMMARY_PINS
+EOF
+
+# THE FAIL-CLOSED HALF. A pin list is an INCLUSION list, and ARM A's own header
+# explains what those are worth on their own: a SUMMARY added later and never
+# pinned would be invisible to the loop above. Counting the files on disk and
+# requiring the two numbers to agree is what stops that — a new summary makes
+# this red until it is pinned.
+ON_DISK_COUNT=$(find "$SUMMARY_DIR" -maxdepth 1 -name '*-SUMMARY.md' -type f | wc -l | tr -d ' ')
+if [ "$ON_DISK_COUNT" != "$PINNED_COUNT" ]; then
+  fail "ARM C" "$ON_DISK_COUNT dated SUMMARY files on disk but $PINNED_COUNT pinned — pin the new one"
 fi
+
+# THE SECOND, CHEAPER ARM, KEPT. The pins read HEAD's tree, so they cannot see an
+# edit that has not been committed yet. This is the original check, retained for
+# exactly the one case it does cover.
+SUMMARY_DIFF=$(git diff --stat HEAD -- "$SUMMARY_DIR/*-SUMMARY.md" 2>/dev/null)
+if [ -n "$SUMMARY_DIFF" ]; then
+  fail "ARM C" "a dated SUMMARY is modified in the working tree — historical records are never rewritten:"
+  echo "$SUMMARY_DIFF"
+fi
+
+[ "$FAILED" = "0" ] && echo "   ARM C: pass ($PINNED_COUNT pinned blobs match HEAD; working tree clean)"
 
 echo
 if [ "$FAILED" = "0" ]; then
