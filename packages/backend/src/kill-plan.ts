@@ -38,34 +38,90 @@
 // the RENDERING of the pid therefore live HERE, where `kill-plan.test.ts`
 // reaches every arm from literal inputs.
 //
-// MEASUREMENT — AND THE TWO THINGS THAT WERE **NOT** MEASURED. `spawn-plan.ts`
-// records its measured verdicts at :40-80 in this slot; the honest entry here is
-// an absence, and it is written as one rather than softened. Phase 8's Wave-0
-// spike (plan 08-01) built a probe to close assumptions A1 and A6 on a real
-// Caido install; the maintainer waived its hardware checkpoint on 2026-08-24
-// without supplying readings, so the probe was bundled and never executed. The
-// two verdict lines, quoted verbatim from `08-SPIKE.md`:
+// MEASUREMENT — **CORRECTION, 2026-08-27.** This slot carried an ABSENCE for
+// most of this phase. It now carries readings, taken on real hardware during
+// UAT. The superseded text is PRESERVED below as a block quote and is NEVER
+// deleted — the `07-VALIDATION.md` marked-correction convention, and the same
+// reason `spawn-plan.ts` keeps its own falsified prediction at :40-80: deleting
+// it would hide that a measurement was planned, budgeted, deferred and finally
+// taken. Every line prefixed `// > ` below is SUPERSEDED and is not a live claim
+// of this module; everything not so prefixed is.
+//
+// SUPERSEDED (written 2026-08-24, after the hardware checkpoint was waived):
+//
+// > MEASUREMENT — AND THE TWO THINGS THAT WERE **NOT** MEASURED. `spawn-plan.ts`
+// > records its measured verdicts at :40-80 in this slot; the honest entry here
+// > is an absence, and it is written as one rather than softened. Phase 8's
+// > Wave-0 spike (plan 08-01) built a probe to close assumptions A1 and A6 on a
+// > real Caido install; the maintainer waived its hardware checkpoint on
+// > 2026-08-24 without supplying readings, so the probe was bundled and never
+// > executed. The two verdict lines, quoted verbatim from `08-SPIKE.md`:
+// >
+// >   A1 — does the shipped Caido LLRT honour `detached: true`?
+// >        Caido version: **not recorded — spike not run**
+// >        Verdict:       **OPEN — not measured**
+// >   A6 — is the CLI's MCP child in the CLI's process group?
+// >        `claude` pid / `mcp-server.mjs` pgid: **not recorded — spike not run**
+// >        Verdict:       **OPEN — not measured**
+//
+// LIVE VERDICTS (2026-08-27, probe build 68199fa installed in a real macOS
+// Caido, darwin 25.6.0; recorded in `08-UAT.md` tests 1 and 2):
 //
 //   A1 — does the shipped Caido LLRT honour `detached: true`?
-//        Caido version: **not recorded — spike not run**
-//        Verdict:       **OPEN — not measured**
+//        Reading: `spikeDetachedGroupKill: "grandchild-died (detached honoured)"`
+//        Verdict: **CLOSED FAVOURABLY — measured**
 //   A6 — is the CLI's MCP child in the CLI's process group?
-//        `claude` pid / `mcp-server.mjs` pgid: **not recorded — spike not run**
-//        Verdict:       **OPEN — not measured**
+//        Reading:  PID   PPID  PGID  ARGS
+//                 43921  43752 43752 …/codex
+//                 44284  43921 44284 …/node …/drift-mcp-<token>/mcp-server.mjs
+//        Verdict: **FALSIFIED — measured**
 //
-// So the POSIX arm below rests on SOURCE ANALYSIS only —
-// `caido/dependency-llrt`, branch `caido`, commit `a5b021c`,
+// WHAT EACH VERDICT CHANGES HERE.
+//
+// A1 CLOSED FAVOURABLY. The POSIX arm below no longer rests on SOURCE ANALYSIS
+// alone. The source is still the mechanism — `caido/dependency-llrt`, branch
+// `caido`, commit `a5b021c`,
 // `modules/llrt_child_process/src/lib.rs:448,462,512-521`, which calls
 // `command.process_group(0)` on unix for a detached spawn, making pgid equal the
-// child pid. That source was read; it was never executed under the runtime a
-// user actually runs, and no CI leg in this repository can execute it. If the
-// shipped fork differs, the group reference below names a group that was never
-// created and every CI leg stays green while LIF-02 goes unclosed. Recorded
-// decision OQ-2 (`08-02-PLAN.md`) — `killTree` keeps the single-pid signal
-// ALONGSIDE this plan's group spawn — is the only remaining protection, and it
-// degrades a total regression into the partial one that ships today rather than
-// preventing one. Do not delete that rung on the grounds that it looks
-// redundant.
+// child pid — but it is now CORROBORATED by execution on the runtime a user
+// actually runs. The failure mode that paragraph warned about (a shipped fork
+// that ignores `detached`, so the group reference names a group that was never
+// created while every CI leg stays green) did not occur.
+//
+// Recorded decision OQ-2 (`08-02-PLAN.md`) — `killTree` keeps the single-pid
+// signal ALONGSIDE the group spawn — SURVIVES A1's closure, but its reason
+// changes and the new reason must be written down or the rung will read as
+// redundant to the next person: it is no longer defence against an UNMEASURED
+// runtime, it is defence against a FUTURE Caido that rebases its LLRT fork. One
+// measurement closes a version, not a dependency. Do not delete that rung.
+//
+// A6 FALSIFIED, and this is the one that changed the mechanism. The provider CLI
+// (codex, pid 43921) sat in process group 43752 while its own `mcp-server.mjs`
+// child (pid 44284) sat in group 44284 — a group of its own. A group signal
+// aimed at the CLI's group therefore CANNOT reach the token-bearing child, and
+// OQ-2's single-pid rung does not rescue it either because that rung signals the
+// CLI, not the child. The caveat `08-UAT.md` records travels with the verdict:
+// this is ONE provider (Codex), on an instance Drift did not spawn, and Claude
+// Code — the active provider — remains unmeasured. That is why the group kill
+// above is KEPT rather than replaced: it is still correct wherever the child
+// does stay in the CLI's group.
+//
+// The answer to A6 is the ORPHAN REAP at the foot of this file, which identifies
+// Drift's MCP children by their own argv and signals POSITIVE single pids. GD-01
+// requires that path to remain independent of process groups; the group
+// reference above is the one place in this module where a negative operand is
+// correct, and it is correct for a different mechanism.
+//
+// ONE MORE READING, because it changes why an absent import was right. The same
+// probe found `typeof process.kill === "undefined"`, `process.env` empty, and
+// `process.version` / `process.versions` unavailable — four independent readings
+// that are not four coincidences. Caido's plugin sandbox re-exports a heavily
+// restricted `process` shim; this is a POLICY of the sandbox, not a property of
+// LLRT, whose own `llrt_process` source does define `kill`. So this module's
+// refusal to import `process` at all was correct for a STRONGER reason than the
+// one originally written: not "a module that touches neither has no hidden input
+// a test cannot supply", but "the runtime does not supply it in the first
+// place".
 
 import { type Platform } from "./platform";
 

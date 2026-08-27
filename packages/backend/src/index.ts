@@ -5466,13 +5466,35 @@ function killTree(
   // THE SINGLE-PID RUNG, FIRST ON POSIX, AND IT IS NOT REDUNDANT THERE. On
   // POSIX this is the behaviour that ships today, kept deliberately as defence
   // against assumption A1 — that the Caido LLRT users actually run honours the
-  // process-group spawn option. A1 reads **OPEN — not measured** in
-  // 08-SPIKE.md: the Wave-0 probe that would have closed it was built and then
-  // waived without being run. If `detached` silently does nothing on a real
-  // install, the group reference in the plan below names a group that was never
-  // created and NOTHING dies; this rung turns that total regression into the
-  // partial one we have today. It costs one syscall. Recorded decision OQ-2 —
-  // do not delete it as redundant.
+  // process-group spawn option.
+  //
+  // SUPERSEDED (written 2026-08-24), preserved as a block quote rather than
+  // overwritten, per the marked-correction convention this phase uses:
+  //
+  // > A1 reads **OPEN — not measured** in 08-SPIKE.md: the Wave-0 probe that
+  // > would have closed it was built and then waived without being run. If
+  // > `detached` silently does nothing on a real install, the group reference in
+  // > the plan below names a group that was never created and NOTHING dies; this
+  // > rung turns that total regression into the partial one we have today.
+  //
+  // CORRECTION (2026-08-27, probe build installed in a real macOS Caido, darwin
+  // 25.6.0): **A1 IS CLOSED FAVOURABLY.** `spikeDetachedGroupKill` read
+  // `grandchild-died (detached honoured)` — the shipped LLRT does honour the
+  // detached spawn option, so the group reference in the plan below names a
+  // group that really exists. The failure this rung was written against did not
+  // occur.
+  //
+  // THE RUNG STAYS ANYWAY, and its justification is corrected rather than
+  // dropped: it is no longer defence against an UNMEASURED runtime, it is
+  // defence against a FUTURE Caido that rebases its LLRT fork. One measurement
+  // closes a version, not a dependency. It costs one syscall. Recorded decision
+  // OQ-2 — do not delete it as redundant.
+  //
+  // It is also not, and never was, a defence against A6, which the same reading
+  // measured FALSE: a provider CLI's `mcp-server.mjs` child can sit in its OWN
+  // process group, where neither this rung (which signals the CLI) nor the group
+  // kill below (which signals the CLI's group) reaches it. That class is handled
+  // by `reapMcpOrphans` above, which signals positive single pids.
   //
   // WIN32 IS EXCLUDED, AND THE EXCLUSION IS THE FIX FOR WHAT THIS RUNG WAS
   // DOING THERE (review CR-01). A1 is a POSIX assumption in the first place —

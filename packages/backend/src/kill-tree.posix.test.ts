@@ -21,18 +21,37 @@ import { buildKillTreePlan, shouldDetachProviderSpawn } from "./kill-plan";
 // This runs under NODE. Node's `detached: true` is `setsid()`; Caido's LLRT is
 // `setpgid(0, 0)`. BOTH yield a pgid equal to the child's own pid, and that is
 // the ONLY property the group-kill argv depends on — so the MECHANISM transfers.
-// The RUNTIME does not. No CI leg in this repository executes LLRT, and Phase
-// 8's Wave-0 spike that would have closed the question on real hardware was
-// waived on 2026-08-24 without being run, so assumption A1 ("the shipped Caido
-// LLRT honours `detached`") reads **OPEN — not measured** in `08-SPIKE.md`.
+// The RUNTIME does not, and no CI leg in this repository executes LLRT.
 //
-// So: a green run here proves that the production plan's argv brings down a real
-// process group on the platform the shipping user base runs. It does NOT prove
-// that Caido's LLRT creates that group in the first place, and it does NOT prove
-// that a real provider CLI keeps its `mcp-server.mjs` child inside it (A6, also
-// **OPEN — not measured**). Nor does it execute one line of `index.ts`, which
-// declares no `caido:plugin` alias and cannot be imported by any test this
-// project can run; the wiring is asserted statically in `index.source.test.ts`.
+// SUPERSEDED (written 2026-08-24), preserved as a block quote rather than
+// overwritten, per the marked-correction convention this phase uses:
+//
+// > Phase 8's Wave-0 spike that would have closed the question on real hardware
+// > was waived on 2026-08-24 without being run, so assumption A1 ("the shipped
+// > Caido LLRT honours `detached`") reads **OPEN — not measured** in
+// > `08-SPIKE.md`.
+// > […] It does NOT prove that Caido's LLRT creates that group in the first
+// > place, and it does NOT prove that a real provider CLI keeps its
+// > `mcp-server.mjs` child inside it (A6, also **OPEN — not measured**).
+//
+// CORRECTION (2026-08-27, probe build installed in a real macOS Caido, darwin
+// 25.6.0; `08-UAT.md` tests 1 and 2). **A1 is CLOSED FAVOURABLY** —
+// `spikeDetachedGroupKill` read `grandchild-died (detached honoured)`, so the
+// shipped LLRT does create the group this file's argv aims at. **A6 is
+// FALSIFIED** — a real provider CLI (codex, pid 43921, pgid 43752) put its
+// `mcp-server.mjs` child (pid 44284) in pgid 44284, its own group, which no
+// group signal aimed at the CLI can reach. The mechanism for that class is the
+// argv-marker orphan reap, proven separately in `orphan-reap.posix.test.ts`.
+//
+// THIS SUITE'S OWN REACH IS UNCHANGED BY EITHER READING, and that must not be
+// softened now that one of them is favourable. A green run here proves that the
+// production plan's argv brings down a real process group on the platform the
+// shipping user base runs — under NODE. It executes not one line of LLRT, so
+// closing A1 elsewhere does not retroactively make this file a proof of the
+// shipping runtime; the A1 evidence is the probe reading above, not this suite.
+// Nor does it execute one line of `index.ts`, which declares no `caido:plugin`
+// alias and cannot be imported by any test this project can run; the wiring is
+// asserted statically in `index.source.test.ts`.
 
 // One constant, referenced by every case as `it`'s third argument, so a future
 // raise cannot apply to one of them only. Process creation plus two settles is
