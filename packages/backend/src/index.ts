@@ -96,6 +96,7 @@ import { getPersistenceDbHandle, type PersistenceDbHandle } from "./persistence"
 import {
   buildKillTreePlan,
   buildOrphanKillPlan,
+  buildPreviousRunOrphanScanPlan,
   buildSessionOrphanScanPlan,
   classifyOrphanScanOutcome,
   hasTrackedProcessExited,
@@ -3760,12 +3761,33 @@ async function cleanupMcpRuntime(
   await publishMcpStatus(sdk);
 }
 
-// Remove orphaned drift-mcp-* dirs left by a previous run that did not stop
-// cleanly (crash, hard kill). Those dirs hold the token-bearing MCP config
-// documents, so leaking them is a credential-exposure risk. Safe to run here:
-// startMcpServer is only entered when MCP is not already running, so any
-// existing drift-mcp-* dir other than the (about-to-be-replaced) current one
-// is genuinely orphaned.
+// Kill, then remove, the residue a previous run that did not stop cleanly
+// (crash, hard kill, Caido force-quit) left behind: first every still-running
+// `mcp-server.mjs` staged from a drift-mcp-* directory, then the drift-mcp-*
+// directories themselves. Both halves are credential exposure — the directories
+// hold the token-bearing MCP config documents, and a surviving MCP process holds
+// that same Caido bearer token in its MEMORY, where no file removal can reach
+// it. Safe to run here: startMcpServer is only entered when MCP is not already
+// running, so any existing drift-mcp-* dir other than the (about-to-be-replaced)
+// current one is genuinely orphaned.
+//
+// THE PROCESS HALF IS NEW, AND IT CLOSES AR-02 / recorded decision OQ-3. Until
+// this plan the sweep reached directories only, which is exactly the gap
+// `08-SECURITY.md` AR-02 names: a hard-killed Caido left a token-bearing
+// `mcp-server.mjs` alive with its context file deleted underneath it, so the
+// forensic trail (which pid, which session, which policy) was destroyed while
+// the bearer token in that process's memory stayed valid for the whole of the
+// user's Caido session. Deleting a token-bearing file is not revocation.
+//
+// OQ-3 DEFERRED THIS ON BLAST RADIUS, AND THAT OBJECTION IS ANSWERED RATHER THAN
+// WAIVED. It read: "identifying a Drift MCP process from a previous run requires
+// image-name matching that could terminate an unrelated `node`." The pattern
+// `buildPreviousRunOrphanScanPlan` composes is NOT image-name matching — it
+// requires the `drift-mcp-` prefix, an 8-to-64 lowercase-hex token, a path
+// separator and `mcp-server.mjs`, ALL ADJACENT, on one command line. A `node`
+// process not started out of a drift-mcp directory cannot satisfy it, and
+// `pgrep -f` is handed a pattern whose every character came from a shape the
+// pure module validated (T-08-21 / T-08-22).
 //
 // The roots come from getSweepRoots(hostFacts), which on non-win32 adds the
 // LEGACY arm (CMP-02 / T-04-02) — and that arm is the security-relevant half:
@@ -3779,6 +3801,50 @@ async function sweepOrphanedMcpTempDirs(
   sdk: BackendSDK,
   hostFacts: HostFacts,
 ): Promise<void> {
+  // KILL BEFORE REMOVE — the SC-4 statement order this file already applies at
+  // `cleanupMcpRuntime`, `closeCliSession` and `deleteChat`, extended to the one
+  // removal site that had no termination above it at all. The directories the
+  // loop below removes are the env-source documents that carried CAIDO_TOKEN
+  // into these very processes; removing them first destroys the evidence and
+  // withdraws nothing.
+  //
+  // ONE SCAN FOR THE WHOLE SWEEP, NOT ONE PER DIRECTORY, for two independent
+  // reasons and both are load-bearing:
+  //
+  //   1. The class pattern reaches an orphan whose directory a PREVIOUS sweep
+  //      ALREADY REMOVED. That is AR-02 in its purest form — the process is
+  //      still alive holding the token, and there is no directory left to
+  //      iterate over, so a per-directory scan would never look for it.
+  //   2. One enumerator spawn is one enumerator spawn regardless of how many
+  //      residue directories exist. A per-directory scan would multiply spawns
+  //      by residue count for no additional reach.
+  //
+  // WHY `getMcpSessionDirName()` IS A GUARD AND NOT A PARAMETER. The builder
+  // REFUSES with `session-active` whenever that value is defined. This call sits
+  // above the point where `mcpTempDir` is assigned, so today it reads
+  // `undefined` and the class-wide scan proceeds. If a future edit ever moves it
+  // below that assignment, the scan STOPS HAPPENING instead of starting to match
+  // the live session's own MCP child — the failure resolves toward not killing.
+  // The guard lives in `kill-plan.ts`, where `kill-plan.test.ts` reaches it; this
+  // call site only supplies the value.
+  //
+  // NOT AWAITED, for the reason `killTree` and the teardown reap are not: this
+  // function is called from inside an RPC handler, and awaiting a child-process
+  // callback there is the event-loop starvation anti-pattern CLAUDE.md names.
+  // What this statement's POSITION guarantees is that the scan is issued before
+  // any `rm`; the COMPLETION order is not enforced, and plan 08-10 records that
+  // residual as AR-05. Losing that race costs this reaper nothing — `pgrep -f`
+  // matches the command line the kernel recorded at exec, not a path that must
+  // still resolve.
+  reapMcpOrphans(
+    sdk,
+    buildPreviousRunOrphanScanPlan({
+      platform: host?.platform,
+      currentSessionDirName: getMcpSessionDirName(),
+    }),
+    [],
+  );
+
   for (const root of getSweepRoots(hostFacts)) {
     try {
       const entries = await readdir(root);
