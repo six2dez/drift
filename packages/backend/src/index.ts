@@ -337,7 +337,64 @@ let activeSelfTestPoll: (() => void) | undefined;
 // the idle reap is SUPPRESSED. That is the safe direction, and it is the same
 // rule `hasTrackedProcessExited` and `isPidAlive` already follow — every unknown
 // in this phase resolves toward NOT killing.
+// CORRECTION, 2026-08-27 (review CR-01). The paragraph above states what this
+// counter is FOR. It did not state what it COVERED. Until this fix the one
+// increment sat inside `callMcpMethod` alone, while THREE Drift-owned spawns
+// carry an argv the reaper's pattern selects:
+//
+//   1. `callMcpMethod`'s self-test child — `node <mcpTempDir>/mcp-server.mjs`.
+//   2. `validateCaidoAuth`'s child — that same argv plus one trailing
+//      `--validate-auth`, reached from EVERY settings save and EVERY effective
+//      token change (`refreshActiveMcpRuntime`), and alive for the length of a
+//      GraphQL round trip to Caido.
+//   3. The `gemini`/`codex` `mcp add` registration child, which carries
+//      `<mcpTempDir>/mcp-server.mjs` as a POSITIONAL in its own command line
+//      (`buildMcpCliRegistrationArgv`, mcp-server-spec.ts).
+//
+// Sites 2 and 3 were uncounted, and site 2's failure arm is the expensive one: a
+// turn ending while a settings save was in flight opened the idle gate on
+// Drift's OWN auth probe, `kill -KILL` took it mid-request, `validateCaidoAuth`
+// read the empty output as a generic failure and `refreshActiveMcpRuntime`
+// called `cleanupMcpRuntime` — Drift tearing down its entire MCP runtime because
+// the user clicked Stop. The counter now covers the CLASS rather than one member
+// of it, through the two mutators below and nowhere else.
 let mcpDirectCallDepth = 0;
+
+// THE ONLY TWO STATEMENTS THAT MOVE THE COUNTER. They are functions rather than
+// inline arithmetic so the class above has exactly ONE spelling in each
+// direction: `index.source.test.ts` asserts `mcpDirectCallDepth += 1` and its
+// release each appear exactly once in this file, which is the machine form of
+// the claim. A fourth direct spawn cannot raise the depth by writing its own
+// arithmetic without turning that gate red.
+function acquireDirectMcpCall(): void {
+  mcpDirectCallDepth += 1;
+}
+
+function releaseDirectMcpCall(): void {
+  mcpDirectCallDepth -= 1;
+}
+
+// The guard for a direct MCP spawn Drift AWAITS, as distinct from the one it
+// watches through events. `spawnAndWait` never rejects — it RESOLVES carrying
+// the exit code, including for a spawn that never started — so the `finally`
+// below is reached on every path this helper can take. That makes the release
+// here STRONGER than `callMcpMethod`'s event-bound one: it does not depend on a
+// `close` Caido's runtime may not deliver while an RPC is awaiting.
+//
+// Every `spawnAndWait` whose argv carries the MCP server script path must go
+// through here. That is not a convention: the census in `index.source.test.ts`
+// counts the `spec.args` and `addPlan.args` occurrences per enclosing function
+// and balances them against the file total, so a fourth such spawn added
+// outside this helper goes red.
+async function withDirectMcpCall<T>(run: () => Promise<T>): Promise<T> {
+  acquireDirectMcpCall();
+  try {
+    return await run();
+  } finally {
+    releaseDirectMcpCall();
+  }
+}
+
 let mcpTempDir: string | undefined;
 let mcpAuthState: McpAuthState = "unknown";
 let mcpAuthMessage = "";
@@ -1528,9 +1585,16 @@ function renderHttpContextAttachment(httpContext: HttpContextPayload | undefined
 // AUTHORIZATION/INVALID_TOKEN classification and the two fallbacks — is
 // unchanged, because the transport changed and the protocol did not.
 async function validateCaidoAuth(spec: McpServerSpec): Promise<CaidoValidationResult> {
-  const result = await spawnAndWait(spec.command, [...spec.args, "--validate-auth"], {
-    env: spec.env,
-  });
+  // GUARDED (CR-01). This argv is `node <mcpTempDir>/mcp-server.mjs
+  // --validate-auth` — byte-identical to `callMcpMethod`'s child plus one
+  // trailing flag — so the idle orphan reap selects it. Unguarded, a turn ending
+  // inside this await got the probe SIGKILLed and the empty output read back as
+  // a failed validation, whose arm tears down the whole MCP runtime.
+  const result = await withDirectMcpCall(() =>
+    spawnAndWait(spec.command, [...spec.args, "--validate-auth"], {
+      env: spec.env,
+    }),
+  );
   const output = result.stdout.trim() || result.stderr.trim();
 
   try {
@@ -2338,7 +2402,7 @@ async function callMcpMethod(
     // above this line means no process exists to protect; placing the increment
     // here means such a throw leaks nothing, because the counter was never
     // raised.
-    mcpDirectCallDepth += 1;
+    acquireDirectMcpCall();
     // THE ONE RELEASE, guarded so the arithmetic has exactly one site in each
     // direction. Called from BOTH the `close` and the `error` handler below,
     // because either can be the last thing this child does and neither is
@@ -2360,7 +2424,7 @@ async function callMcpMethod(
     const releaseDirectCall = (): void => {
       if (directCallReleased) return;
       directCallReleased = true;
-      mcpDirectCallDepth -= 1;
+      releaseDirectMcpCall();
     };
 
     // NOT a BoundedBuffer, and it must not become one. This is a line-DRAIN
@@ -3228,9 +3292,19 @@ async function registerMcpWithCli(
     platform: host?.platform,
     comspec: getComspec(),
   });
-  const result = await spawnAndWait(addPlan.file, addPlan.args, {
-    windowsVerbatimArguments: addPlan.windowsVerbatimArguments,
-  });
+  // GUARDED (CR-01). `argv` comes from `buildMcpCliRegistrationArgv`, which ends
+  // `…, nodeExecutable, mcpScriptPath` for gemini and `…, --, nodeExecutable,
+  // mcpScriptPath` for codex — so THIS process's own command line carries
+  // `<mcpTempDir>/mcp-server.mjs` and the reaper's pattern matches it. A reaped
+  // registration leaves the provider unattached with a spurious non-zero exit,
+  // the same class as the AR-06 removal failures. The pre-clean spawns above are
+  // deliberately NOT wrapped: their argv is `mcp remove drift --scope …` and
+  // carries no script path.
+  const result = await withDirectMcpCall(() =>
+    spawnAndWait(addPlan.file, addPlan.args, {
+      windowsVerbatimArguments: addPlan.windowsVerbatimArguments,
+    }),
+  );
   // THREE SCALARS, and no stderr — the CLI name, the resolved binary and the
   // exit code. This log line used to interpolate `result.stderr`, and the
   // skip-reason below used to as well; 07-02 wired `skippedMcpCliReasons` to the

@@ -989,20 +989,96 @@ describe("index.ts wires the orphan reap at every counted site and nowhere else 
   // counter that drifts — in the decrement direction it would open the gate on a
   // live self-test.
   //
-  // RED INPUT: add a second increment or a second release, or move the increment
-  // out of `callMcpMethod`, and this fails.
-  it("increments and releases the direct-call depth exactly once each, inside callMcpMethod", () => {
+  // WIDENED 2026-08-27 (review CR-01). The arithmetic moved OUT of
+  // `callMcpMethod` and into the two shared mutators, because the counter has to
+  // cover a CLASS of three Drift-owned spawns rather than the one member that
+  // happened to be written first. The exact-one totals are unchanged and are now
+  // the stronger claim: one spelling of the increment and one of the release for
+  // the whole file, wherever they are called from.
+  //
+  // RED INPUT: add a second increment or a second release anywhere, move either
+  // out of its mutator, or drop `callMcpMethod`'s acquire, and this fails.
+  it("increments and releases the direct-call depth exactly once each, through the shared mutators", () => {
     expect(code.match(/mcpDirectCallDepth \+= 1/g) ?? []).toHaveLength(1);
     expect(code.match(/mcpDirectCallDepth -= 1/g) ?? []).toHaveLength(1);
+
+    const acquire = topLevelDeclarationSlice(code, "acquireDirectMcpCall");
+    expect(acquire).not.toBe("");
+    expect(acquire.match(/mcpDirectCallDepth \+= 1/g) ?? []).toHaveLength(1);
+
+    const release = topLevelDeclarationSlice(code, "releaseDirectMcpCall");
+    expect(release).not.toBe("");
+    expect(release.match(/mcpDirectCallDepth -= 1/g) ?? []).toHaveLength(1);
 
     const slice = topLevelDeclarationSlice(code, "callMcpMethod");
     expect(slice).not.toBe("");
     expect(slice).toContain("spawnWithEnv(");
-    expect(slice.match(/mcpDirectCallDepth \+= 1/g) ?? []).toHaveLength(1);
+    expect(slice.match(/acquireDirectMcpCall\(\)/g) ?? []).toHaveLength(1);
 
     // Released from BOTH handlers, because either can be this child's last
     // event and neither is guaranteed to fire under Caido's runtime.
     expect(slice.match(/releaseDirectCall\(\)/g) ?? []).toHaveLength(2);
+  });
+
+  // 5b. THE CR-01 CENSUS — every spawn whose argv carries the MCP server script
+  // path sits inside a direct-call guard, BY ENCLOSING FUNCTION AND NEVER BY A
+  // BARE TOTAL, the same shape as case 1 above and for the same reason.
+  //
+  // The script path reaches a spawn argv through exactly two expressions in this
+  // file: `spec.args` (whose element 0 IS the path, set by `buildMcpServerSpec`)
+  // and `addPlan.args` (built from `buildMcpCliRegistrationArgv`, which ends with
+  // the path as a positional). Both populations are enumerated per function and
+  // balanced against the file total, so a FOURTH script-path-bearing spawn added
+  // anywhere goes red here instead of being absorbed by a whole-file count — the
+  // failure that let `validateCaidoAuth` and the `mcp add` registration sit
+  // outside the counter for the whole of this phase.
+  //
+  // `tryRegisterMcpForProviders` is enumerated with 1 and needs NO guard: its
+  // `spec.args[0]` is a READ, not a spawn. It is counted so the total balances,
+  // which is what keeps the sum honest rather than exempting it.
+  //
+  // RED INPUT: delete `withDirectMcpCall(` from `validateCaidoAuth` or
+  // `registerMcpWithCli`, or add a `spec.args`-bearing spawn to a fourth
+  // function, and this fails naming it.
+  it("routes every script-path-bearing spawn through a direct-call guard", () => {
+    const specArgsSites = {
+      validateCaidoAuth: 1,
+      callMcpMethod: 1,
+      tryRegisterMcpForProviders: 1,
+    };
+    let enumerated = 0;
+    for (const [name, expected] of Object.entries(specArgsSites)) {
+      const slice = topLevelDeclarationSlice(code, name);
+      // Non-vacuity per function, per case 1's rule: an empty slice counts 0 and
+      // would silently satisfy any expectation that happened to be 0.
+      expect(slice).not.toBe("");
+      expect({ name, hits: (slice.match(/spec\.args/g) ?? []).length }).toEqual({
+        name,
+        hits: expected,
+      });
+      enumerated += expected;
+    }
+    expect(code.match(/spec\.args/g) ?? []).toHaveLength(enumerated);
+
+    // The registration argv, its own population of one.
+    const register = topLevelDeclarationSlice(code, "registerMcpWithCli");
+    expect(register).not.toBe("");
+    expect(register.match(/addPlan\.args/g) ?? []).toHaveLength(1);
+    expect(code.match(/addPlan\.args/g) ?? []).toHaveLength(1);
+
+    // THE GUARD ITSELF, at the two AWAITED sites. `withDirectMcpCall(` matches
+    // the two CALLS and not the declaration — that is spelled
+    // `withDirectMcpCall<T>(` — so this total is the call count, not the call
+    // count plus one.
+    const validate = topLevelDeclarationSlice(code, "validateCaidoAuth");
+    expect(validate).not.toBe("");
+    expect(validate.match(/withDirectMcpCall\(/g) ?? []).toHaveLength(1);
+    expect(register.match(/withDirectMcpCall\(/g) ?? []).toHaveLength(1);
+    expect(code.match(/withDirectMcpCall\(/g) ?? []).toHaveLength(2);
+
+    // And the declaration exists, so this case cannot pass by the guard having
+    // been deleted along with both of its call sites.
+    expect(code).toContain("async function withDirectMcpCall<T>(");
   });
 
   // 6. THE MARKER HAS ONE SPELLING. The directory Drift CREATES and the pattern
