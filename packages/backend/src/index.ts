@@ -95,7 +95,13 @@ import { getPersistenceDbHandle, type PersistenceDbHandle } from "./persistence"
 // module header carries the A1/A6 verdicts the mechanism rests on.
 import {
   buildKillTreePlan,
+  buildOrphanKillPlan,
+  buildSessionOrphanScanPlan,
+  classifyOrphanScanOutcome,
   hasTrackedProcessExited,
+  type KillTreePlan,
+  MCP_TEMP_DIR_PREFIX,
+  parseOrphanScanPids,
   shouldDetachProviderSpawn,
   type KillRung,
 } from "./kill-plan";
@@ -273,6 +279,18 @@ const POSIX_PATH_SEARCH_TIMEOUT_MS = 1000;
 //
 // Revised on the Phase 9/10 real-machine report, not here.
 const WIN32_PATH_SEARCH_TIMEOUT_MS = 5000;
+
+// The orphan enumerator's time budget. The POSIX PATH-search number is REUSED
+// rather than a third figure invented: both are a short-lived spawn of a
+// base-system utility that answers from kernel state, and `pgrep`'s output
+// scales with MATCHES (expected 0-3), not with the size of the process table.
+//
+// An enumeration that has not answered within it is treated as UNAVAILABLE and
+// is not retried. That is deliberate: this scan runs on a teardown path, it is
+// best-effort by construction, and a retry would double the spawn count there
+// for an answer nothing waits on. `classifyOrphanScanOutcome`'s `scan-timeout`
+// arm is where that decision is asserted.
+const ORPHAN_SCAN_TIMEOUT_MS = POSIX_PATH_SEARCH_TIMEOUT_MS;
 
 // ── State ───────────────────────────────────────────────────────────
 
@@ -3432,6 +3450,187 @@ async function sweepStaleMcpCliRegistrations(sdk: BackendSDK): Promise<void> {
   }
 }
 
+// The staged session's temp-directory NAME — the marker the orphan reaper
+// identifies Drift's own MCP children by. `undefined` when no runtime is staged,
+// which `buildSessionOrphanScanPlan` refuses with `bad-marker` rather than
+// composing a pattern from nothing.
+//
+// `path.basename` rather than a hand-rolled split: this value is only ever read
+// on the POSIX arm (the win32 scan refuses before the marker is looked at), so
+// the Linux-flavoured resolution `kill-plan.ts` avoids `path` for is not a
+// hazard here.
+function getMcpSessionDirName(): string | undefined {
+  if (mcpTempDir === undefined) return undefined;
+  return path.basename(mcpTempDir);
+}
+
+// THE ORPHAN REAP — the I/O boundary, and nothing else.
+//
+// It takes an ALREADY-BUILT scan plan so that every decision this mechanism
+// makes lives in `kill-plan.ts`, where a test can reach it, and this function
+// keeps only the spawning. That split is the same one `killTree` and
+// `buildKillTreePlan` already have, and for the same reason: `index.ts` declares
+// no `caido:plugin` alias and cannot be imported by any test this project can
+// run (Pitfall 3).
+//
+// WHY IT EXISTS AT ALL. `killTree` walks `activeProcesses`, so it can only reach
+// a process Drift SPAWNED. UAT gap 4 measured a `node <temp>/drift-mcp-<token>/
+// mcp-server.mjs` alive on 2026-08-27 holding a live CAIDO_TOKEN with
+// `activeSessions: 0`, parented by a Codex binary Drift never spawned and absent
+// from `activeProcesses`. No termination path in this file could reach it. This
+// one can, because it identifies its target by the TARGET'S OWN ARGV rather than
+// by a handle Drift holds or by a process group the CLI chose (A6, falsified).
+//
+// FIRE-AND-FORGET, returning `void` and awaiting nothing — the same contract
+// `killTree` carries and for the same recorded reason (OQ-4). Awaiting here
+// would suspend an RPC handler on a child-process callback and a timer that
+// Caido's runtime does not reliably deliver during an await, which is the
+// event-loop starvation anti-pattern CLAUDE.md names.
+function reapMcpOrphans(
+  sdk: BackendSDK,
+  plan: KillTreePlan,
+  excludePids: number[],
+): void {
+  if (plan.kind === "none") {
+    sdk.console.log(`[drift lifecycle] no orphan reap: ${plan.reason}`);
+    return;
+  }
+
+  // EVERY outcome routes through here, including the ordinary one, so
+  // `classifyOrphanScanOutcome` is consulted exactly once per scan and this
+  // function contains no second copy of its four-arm ladder — a duplicated
+  // ladder is one the unit test does not cover.
+  const settleScan = (result: {
+    spawnThrew: boolean;
+    exitCode: number | null | undefined;
+    timedOut: boolean;
+    stdout: string;
+  }): void => {
+    const outcome = classifyOrphanScanOutcome({
+      spawnThrew: result.spawnThrew,
+      exitCode: result.exitCode,
+      timedOut: result.timedOut,
+      pids: parseOrphanScanPids({ stdout: result.stdout, excludePids }),
+    });
+
+    // ONE line, SCALARS ONLY: the outcome kind, its reason, the exit code and
+    // the COUNT of pids signalled. No path, no argv, no environment value and no
+    // pid — the T-04-04 rendering rule `killTree`'s header states, and a pid
+    // here would be the one value that could correlate this line with a user's
+    // process table.
+    if (outcome.kind === "noop") {
+      sdk.console.log(
+        `[drift lifecycle] orphan reap: kind=noop reason=${outcome.reason} exit=${String(result.exitCode)} killed=0`,
+      );
+      return;
+    }
+
+    let signalled = 0;
+    for (const pid of outcome.pids) {
+      const killPlan = buildOrphanKillPlan({ pid, platform: host?.platform });
+      if (killPlan.kind === "none") continue;
+      try {
+        const killer: ChildProcessWithoutNullStreams = spawn(
+          killPlan.file,
+          killPlan.args,
+          {
+            stdio: ["pipe", "pipe", "pipe"],
+            windowsVerbatimArguments: killPlan.windowsVerbatimArguments,
+          },
+        );
+        // Drained and discarded so neither pipe can fill and stall the killer —
+        // the same treatment `killTree` gives its own.
+        killer.stdout?.on("data", () => undefined);
+        killer.stderr?.on("data", () => undefined);
+        killer.on("error", () => undefined);
+        signalled += 1;
+      } catch {
+        /* unspawnable killer; counted as not signalled */
+      }
+    }
+
+    sdk.console.log(
+      `[drift lifecycle] orphan reap: kind=reap exit=${String(result.exitCode)} killed=${String(signalled)}`,
+    );
+  };
+
+  let settled = false;
+  let out = createBoundedBuffer({
+    maxChars: SPAWN_STDOUT_MAX_CHARS,
+    retention: "head",
+  });
+
+  // C-8 / § Pitfall 9: `spawn()` throws SYNCHRONOUSLY for an unspawnable file,
+  // and a host with no `pgrep` is exactly that. An escaping throw would surface
+  // as a failed RPC on a teardown path, so the throw is caught and classified as
+  // `enumerator-unavailable` — such a host is left precisely as well served as
+  // it is at HEAD, because this reaper removes no pre-existing termination path.
+  let scanner: ChildProcessWithoutNullStreams;
+  try {
+    scanner = spawn(plan.file, plan.args, {
+      stdio: ["pipe", "pipe", "pipe"],
+      windowsVerbatimArguments: plan.windowsVerbatimArguments,
+    });
+  } catch {
+    settleScan({
+      spawnThrew: true,
+      exitCode: undefined,
+      timedOut: false,
+      stdout: "",
+    });
+    return;
+  }
+
+  // The settled-flag + setTimeout + child.kill shape copied from
+  // `resolveCommand`, not reinvented: the timer is cleared on close and on
+  // error, and the flag makes whichever fires first the only one that settles.
+  const timer = setTimeout(() => {
+    if (settled) return;
+    settled = true;
+    try {
+      scanner.kill("SIGKILL");
+    } catch {
+      /* ignore */
+    }
+    settleScan({
+      spawnThrew: false,
+      exitCode: undefined,
+      timedOut: true,
+      stdout: "",
+    });
+  }, ORPHAN_SCAN_TIMEOUT_MS);
+
+  scanner.stdout?.on("data", (d: Buffer) => {
+    out = appendBounded(out, d.toString());
+  });
+  scanner.stderr?.on("data", () => undefined);
+  scanner.on("error", () => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(timer);
+    settleScan({
+      spawnThrew: true,
+      exitCode: undefined,
+      timedOut: false,
+      stdout: "",
+    });
+  });
+  scanner.on("close", (code) => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(timer);
+    // The retained HEAD, never renderBoundedBuffer: above the cap the rendered
+    // value splices a truncation marker between head and tail, and this value is
+    // about to be parsed into numbers. Same rule as `resolveCommand`'s path read.
+    settleScan({
+      spawnThrew: false,
+      exitCode: code,
+      timedOut: false,
+      stdout: out.head,
+    });
+  });
+}
+
 async function cleanupMcpRuntime(
   sdk: BackendSDK,
   authState: McpAuthState = "unknown",
@@ -3516,6 +3715,38 @@ async function cleanupMcpRuntime(
     }
   }
 
+  // THE ORPHAN REAP, ABOVE THE REMOVAL — SC-4's statement order, extended to the
+  // mechanism that does not depend on `activeProcesses`. The loop above reaches
+  // every child Drift SPAWNED; this reaches every `mcp-server.mjs` staged from
+  // THIS session's temp directory whatever spawned it, which is the class UAT
+  // gap 4 measured alive with a live token and no turn behind it.
+  //
+  // WHY IT SITS ABOVE THE REMOVAL. Same reason the kill loop does: the directory
+  // removed below holds the env-source documents that carried the Caido token,
+  // and deleting a token-bearing file is not revocation — the token is in the
+  // surviving process's MEMORY. Killing the process that read it is.
+  //
+  // WHY THE COMPLETION ORDER IS NOT ENFORCED. Nothing here is awaited, so the
+  // scan may still be running when `rm` below returns. Awaiting it would suspend
+  // an RPC handler on a child-process callback and a timer Caido's runtime does
+  // not reliably deliver during an await — the starvation anti-pattern CLAUDE.md
+  // names, and the reason `killTree` is fire-and-forget in the first place.
+  //
+  // Losing that race costs this reaper NOTHING, and that is a property it has
+  // and `killTree` does not: it identifies its target by the TARGET'S OWN ARGV,
+  // which is fixed at the target's exec and is unaffected by the directory
+  // disappearing underneath it. `pgrep -f` matches the command line the kernel
+  // recorded, not a path that must still resolve. Plan 08-10 records the
+  // completion-order residual as AR-05.
+  reapMcpOrphans(
+    sdk,
+    buildSessionOrphanScanPlan({
+      platform: host?.platform,
+      sessionDirName: getMcpSessionDirName(),
+    }),
+    [],
+  );
+
   if (mcpTempDir !== undefined) {
     try {
       await rm(mcpTempDir, { recursive: true, force: true });
@@ -3553,7 +3784,7 @@ async function sweepOrphanedMcpTempDirs(
       const entries = await readdir(root);
       await Promise.all(
         entries
-          .filter((name) => name.startsWith("drift-mcp-"))
+          .filter((name) => name.startsWith(MCP_TEMP_DIR_PREFIX))
           .map((name) => path.join(root, name))
           .filter((dir) => dir !== mcpTempDir)
           .map((dir) => rm(dir, { recursive: true, force: true }).catch(() => undefined)),
@@ -3645,7 +3876,7 @@ async function startMcpServer(sdk: BackendSDK): Promise<Result<McpServerInfo>> {
   // this replaces hid the possibility from the type checker.
   const tempDir = path.join(
     getTempRoot(probe.value),
-    `drift-mcp-${genShortToken()}`,
+    `${MCP_TEMP_DIR_PREFIX}${genShortToken()}`,
   );
   mcpTempDir = tempDir;
 

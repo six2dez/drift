@@ -73,6 +73,23 @@ import { type Platform } from "./platform";
 // rung and says so at its own branch below.
 export type KillRung = "term" | "kill";
 
+// Every reason a plan builder in this module can REFUSE, in one union so the
+// `none` arm has a single vocabulary rather than one per builder. Widened by
+// plan 08-06 from the original lone `no-pid`; every existing consumer only ever
+// reads `plan.reason` into a log line, so no call site changes shape.
+//
+//   * `no-pid`                — the pid is unusable (see `isUnusablePid`).
+//   * `unsupported-platform`  — win32, at a builder that has no Windows arm.
+//   * `bad-marker`            — the session directory name failed its shape
+//                               check, so no scan pattern was composed at all.
+//   * `session-active`        — a class-wide scan was asked for while a live
+//                               session's own MCP child would match it.
+export type KillPlanRefusal =
+  | "no-pid"
+  | "unsupported-platform"
+  | "bad-marker"
+  | "session-active";
+
 // One decision, four projections — the discriminated union CLAUDE.md names as
 // the house convention, keyed on `kind`. The `spawn` arm mirrors `SpawnPlan`'s
 // three projections exactly (`file`, `args`, `windowsVerbatimArguments`) so
@@ -81,7 +98,7 @@ export type KillRung = "term" | "kill";
 // still exposed an argv could be spawned by a call site that forgot to switch on
 // `kind`, which is the SC-1 guard defeating itself.
 export type KillTreePlan =
-  | { kind: "none"; reason: "no-pid" }
+  | { kind: "none"; reason: KillPlanRefusal }
   | {
       kind: "spawn";
       file: string;
@@ -97,6 +114,21 @@ export type KillTreePlan =
 // preference (T-08-03).
 export const DEFAULT_TASKKILL = "taskkill.exe";
 
+// THE pid refusal, spelled ONCE. Both `buildKillTreePlan` and
+// `buildOrphanKillPlan` call this rather than each carrying its own four-part
+// check, because two copies of a fail-closed guard are two copies that can
+// diverge — and the one that diverges is the one nobody re-read.
+//
+// The four rejected shapes each have their own reason, and none of them is
+// hypothetical: `undefined` is what `ChildProcess.pid` reads once the child has
+// been reaped; `0` means "every process in MY OWN group" on POSIX, i.e. Drift
+// signalling itself; a NEGATIVE value is already a group reference, so accepting
+// one would let a caller aim at a group nobody asked for. A non-integer (NaN,
+// 1.5) cannot be a pid at all.
+function isUnusablePid(pid: number | undefined): boolean {
+  return pid === undefined || !Number.isInteger(pid) || pid <= 0;
+}
+
 // The ONLY way a pid becomes a termination spawn on this codebase.
 //
 // BRANCH ORDER IS PART OF THE CONTRACT: refusal, then win32, then POSIX with
@@ -108,22 +140,11 @@ export function buildKillTreePlan(input: {
   rung: KillRung;
 }): KillTreePlan {
   // REFUSAL FIRST, per the fail-closed branch order `planMcpCliRegistration`
-  // established. SC-1's "guarded against an undefined pid" lives here and
-  // NOWHERE else, and that is precisely what makes it testable: `index.ts`
-  // cannot be imported under vitest, so a guard written at the call site is a
-  // guard no assertion can reach (Pitfall 3).
-  //
-  // The three rejected shapes each have their own reason, and none of them is
-  // hypothetical: `undefined` is what `ChildProcess.pid` reads once the child
-  // has been reaped; `0` means "every process in MY OWN group" on POSIX, i.e.
-  // Drift signalling itself; a NEGATIVE value is already a group reference, so
-  // accepting one would let a caller aim at a group nobody asked for. A
-  // non-integer (NaN, 1.5) cannot be a pid at all.
-  if (
-    input.pid === undefined ||
-    !Number.isInteger(input.pid) ||
-    input.pid <= 0
-  ) {
+  // established. SC-1's "guarded against an undefined pid" lives in
+  // `isUnusablePid` above and NOWHERE else, and that is precisely what makes it
+  // testable: `index.ts` cannot be imported under vitest, so a guard written at
+  // the call site is a guard no assertion can reach (Pitfall 3).
+  if (isUnusablePid(input.pid)) {
     return { kind: "none", reason: "no-pid" };
   }
 
@@ -292,4 +313,318 @@ export function shouldDetachProviderSpawn(
   platform: Platform | undefined,
 ): boolean {
   return platform !== "win32";
+}
+
+// ── The orphan reap: identity without a handle and without a group ──
+//
+// Everything above answers "how do I kill a process I SPAWNED". Everything below
+// answers a harder question this phase's UAT forced open on 2026-08-27: how do I
+// kill a token-bearing `mcp-server.mjs` that Drift did NOT spawn, whose parent
+// Drift did not spawn either, and on which Drift holds no handle at all (UAT gap
+// 4)? `killTree` cannot: it walks `activeProcesses`, and such a process is not
+// in it.
+//
+// THE IDENTITY IS THE ARGV, and it is three things rather than one: Drift's own
+// per-session temp directory name (`drift-mcp-` plus a session-unique hex
+// token), the MCP server script name, and THEIR ADJACENCY — the directory
+// immediately containing the script. That triple appears verbatim on the command
+// line of every MCP server Drift's own staging produced and on nothing else on
+// the machine. It is deliberately NOT image-name matching: a scan that could
+// select a `node` process not started from a drift-mcp directory is forbidden
+// (T-08-21), which is why the marker's SHAPE is validated here, before any
+// pattern is composed, rather than trusted from the caller.
+//
+// GD-01 — this path must remain independent of PROCESS GROUPS. A6 was measured
+// FALSE (see the CORRECTION block at the top of this file), so a group reference
+// cannot be relied on to reach the child. Every operand rendered below is a
+// single POSITIVE pid. If a future edit reintroduces a negative operand here it
+// has reintroduced the falsified assumption, and `kill-plan.test.ts` carries the
+// case that goes red when it does.
+
+// The two halves of the marker, spelled ONCE in this codebase. `index.ts`
+// imports both rather than repeating either, so the directory Drift CREATES and
+// the pattern the reaper SEARCHES FOR cannot drift apart — which they silently
+// would if the prefix lived as a bare literal at each site.
+export const MCP_TEMP_DIR_PREFIX = "drift-mcp-";
+export const MCP_SERVER_SCRIPT_NAME = "mcp-server.mjs";
+
+// The accepted token body. `genShortToken` (`index.ts`) emits 20 lowercase hex
+// characters; the range is widened at both ends so a future token length change
+// does not silently turn every scan into a `bad-marker` refusal, and bounded at
+// both ends so an unbounded run of hex cannot be presented as a marker.
+const MCP_TOKEN_MIN_CHARS = 8;
+const MCP_TOKEN_MAX_CHARS = 64;
+
+// Lowercase hex, by hand rather than by `RegExp`. The point is not economy: a
+// character this predicate accepts is a character that will be embedded in the
+// enumerator's PATTERN, so the accept set and the "no metacharacter can reach
+// the enumerator" claim (T-08-22) are the same statement. Written as an explicit
+// range test, that statement is readable in one line.
+function isLowerHexChar(character: string): boolean {
+  return (
+    (character >= "0" && character <= "9") ||
+    (character >= "a" && character <= "f")
+  );
+}
+
+// THE BLAST-RADIUS GUARD (T-08-21, and the answer OQ-3 asked for). A marker that
+// is empty, prefix-only, too short, too long, upper-cased, or carrying a path
+// separator or a regular-expression metacharacter is REFUSED, and no pattern is
+// composed at all. That refusal is what makes it impossible for a corrupted or
+// absent `mcpTempDir` to degrade into a scan that selects processes at large:
+// there is no "fall back to a looser pattern" arm, because a looser pattern is
+// the failure this guard exists to prevent.
+function isValidSessionDirName(name: string): boolean {
+  if (!name.startsWith(MCP_TEMP_DIR_PREFIX)) return false;
+  const token = name.slice(MCP_TEMP_DIR_PREFIX.length);
+  if (token.length < MCP_TOKEN_MIN_CHARS) return false;
+  if (token.length > MCP_TOKEN_MAX_CHARS) return false;
+  for (const character of token) {
+    if (!isLowerHexChar(character)) return false;
+  }
+  return true;
+}
+
+// The script half of the pattern, with its dot escaped so it matches a literal
+// dot rather than any character. Derived from the constant rather than spelled a
+// second time, so renaming the script cannot leave a stale pattern behind.
+function escapedScriptName(): string {
+  return MCP_SERVER_SCRIPT_NAME.split(".").join("\\.");
+}
+
+// The one place a scan pattern is composed. Both scan builders route through it,
+// so the two anchors and their adjacency are guaranteed present in every pattern
+// this module can produce — a builder that composed its own could omit one.
+function composeOrphanScanPattern(tokenBody: string): string {
+  return `${MCP_TEMP_DIR_PREFIX}${tokenBody}/${escapedScriptName()}`;
+}
+
+// The enumerator. `pgrep` and not `ps`, for three reasons recorded in
+// `08-06-PLAN.md` § Enumeration strategy and worth keeping here because the
+// tempting substitution is `ps`: `pgrep` returns one integer per line and so has
+// no parsing surface over argv the user's own processes influence; it exits 1
+// with empty output when nothing matched, which is a DISTINGUISHABLE outcome the
+// no-op ladder branches on, where `ps` exits 0 whether or not the row is there;
+// and its output scales with MATCHES (expected 0-3) rather than with the size of
+// the process table. It is a base-system utility on macOS and on every Linux
+// distribution Drift supports, so no dependency is added.
+const ORPHAN_SCAN_FILE = "pgrep";
+// `-f` matches against the FULL COMMAND LINE. Without it `pgrep` matches only
+// the process NAME, which for `node <dir>/mcp-server.mjs` is `node` — the exact
+// mistake `08-SPIKE.md` § Step 3 corrects for `ps -eo comm`, and it would turn
+// this scan into the image-name matching the threat model forbids.
+const ORPHAN_SCAN_FULL_COMMAND_LINE_FLAG = "-f";
+// End-of-options, so a pattern is read as an OPERAND even if some future marker
+// shape could begin with a dash. Same role as `--` in the POSIX kill argv above.
+const END_OF_OPTIONS = "--";
+
+// The SESSION scan: find the MCP children of ONE staged session, named by its
+// own temp directory.
+//
+// Branch order is part of the contract here as it is at `buildKillTreePlan`:
+// platform refusal, then marker refusal, then the accepted path.
+export function buildSessionOrphanScanPlan(input: {
+  platform: Platform | undefined;
+  sessionDirName: string | undefined;
+}): KillTreePlan {
+  // win32 gets NO ENUMERATOR, and that is a decision rather than an omission:
+  // `tasklist` does not print command lines, `wmic` is removed from current
+  // Windows, and spawning PowerShell from the plugin is a surface this phase
+  // will not open. It is also not a gap in the Windows termination path —
+  // `taskkill /t` walks `ParentProcessId` and is INDIFFERENT to process groups,
+  // so A6 was never a Windows question. What remains unreachable there is the
+  // foreign-parented orphan class, recorded as AR-04 by plan 08-10.
+  //
+  // The literal "win32" ONLY: `undefined` falls through to the POSIX arm, the
+  // same CMP-01 rule `buildKillTreePlan` states.
+  if (input.platform === "win32") {
+    return { kind: "none", reason: "unsupported-platform" };
+  }
+
+  if (
+    input.sessionDirName === undefined ||
+    !isValidSessionDirName(input.sessionDirName)
+  ) {
+    return { kind: "none", reason: "bad-marker" };
+  }
+
+  return {
+    kind: "spawn",
+    file: ORPHAN_SCAN_FILE,
+    args: [
+      ORPHAN_SCAN_FULL_COMMAND_LINE_FLAG,
+      END_OF_OPTIONS,
+      // The validated marker is used WHOLE: it already carries the prefix, so
+      // recomposing it from the prefix plus a slice would be a second spelling
+      // of the same string.
+      `${input.sessionDirName}/${escapedScriptName()}`,
+    ],
+    // FALSE, and stated rather than omitted for the same reason both arms of
+    // `buildKillTreePlan` state it: nothing in this argv was escaped by this
+    // module, and the flag is inert off win32 in any case.
+    windowsVerbatimArguments: false,
+  };
+}
+
+// The PREVIOUS-RUN scan: find MCP children left by a run that is over, named by
+// the token CLASS rather than by one token. Plan 08-07 is its only consumer.
+export function buildPreviousRunOrphanScanPlan(input: {
+  platform: Platform | undefined;
+  currentSessionDirName: string | undefined;
+}): KillTreePlan {
+  if (input.platform === "win32") {
+    return { kind: "none", reason: "unsupported-platform" };
+  }
+
+  // THE ARM THAT KEEPS THIS SAFE. A class-wide pattern matches the LIVE
+  // session's own MCP child as readily as a dead run's, so it may only ever run
+  // when no runtime is staged. Refusing here rather than filtering pids
+  // afterwards is deliberate: a filter is a second thing that can be got wrong,
+  // and the cost of getting it wrong is killing the MCP server of the turn the
+  // user is watching.
+  if (input.currentSessionDirName !== undefined) {
+    return { kind: "none", reason: "session-active" };
+  }
+
+  return {
+    kind: "spawn",
+    file: ORPHAN_SCAN_FILE,
+    args: [
+      ORPHAN_SCAN_FULL_COMMAND_LINE_FLAG,
+      END_OF_OPTIONS,
+      composeOrphanScanPattern(
+        `[0-9a-f]{${String(MCP_TOKEN_MIN_CHARS)},${String(MCP_TOKEN_MAX_CHARS)}}`,
+      ),
+    ],
+    windowsVerbatimArguments: false,
+  };
+}
+
+// The enumerator's stdout, turned into pids — the only place text from another
+// process becomes a number this codebase will signal (T-08-23).
+export function parseOrphanScanPids(input: {
+  stdout: string;
+  excludePids: number[];
+}): number[] {
+  const seen = new Set<number>();
+  const pids: number[] = [];
+  // Carriage-return-tolerant: split on the newline and trim the remainder, so a
+  // "123\r\n" line yields 123 rather than a parse of "123\r".
+  for (const rawLine of input.stdout.split("\n")) {
+    const line = rawLine.trim();
+    if (line === "") continue;
+    const parsed = Number.parseInt(line, 10);
+    if (!Number.isInteger(parsed)) continue;
+    // THE FLOOR IS 1, NOT 0, and both excluded values have their own reason: `0`
+    // is a process-GROUP reference on POSIX (signalling it would signal Drift's
+    // own group) and `1` is init. Neither can ever be a Drift MCP child, so
+    // neither is a value this list may carry — and a floor of 0 would let the
+    // group reference back in through the parser after the builders spent this
+    // whole module refusing it.
+    if (parsed <= 1) continue;
+    if (input.excludePids.includes(parsed)) continue;
+    if (seen.has(parsed)) continue;
+    seen.add(parsed);
+    pids.push(parsed);
+  }
+  return pids;
+}
+
+// One orphan, one kill. The operand is a POSITIVE single pid.
+export function buildOrphanKillPlan(input: {
+  pid: number | undefined;
+  platform: Platform | undefined;
+}): KillTreePlan {
+  // The SHARED refusal, first, in the same branch-order-is-contract style
+  // `buildKillTreePlan` uses. Proven from BOTH callers in `kill-plan.test.ts`.
+  if (isUnusablePid(input.pid)) {
+    return { kind: "none", reason: "no-pid" };
+  }
+
+  if (input.platform === "win32") {
+    return { kind: "none", reason: "unsupported-platform" };
+  }
+
+  return {
+    kind: "spawn",
+    file: "kill",
+    args: [
+      // No graceful rung, deliberately. This path only ever runs against a
+      // process Drift has ALREADY decided must not survive — a token-bearing MCP
+      // server with no turn behind it — so a two-rung ladder would double the
+      // spawn count for no observable difference.
+      "-KILL",
+      END_OF_OPTIONS,
+      // POSITIVE. This operand names a SINGLE PROCESS and deliberately NOT a
+      // process group. Assumption A6 — "the provider CLI's MCP child sits in the
+      // CLI's process group" — was measured FALSE on 2026-08-27: codex pid 43921
+      // sat in pgid 43752 while its `mcp-server.mjs` child pid 44284 sat in pgid
+      // 44284, its own group. A group reference cannot reach a child that made
+      // its own group, which is exactly why this whole path exists. Rendering
+      // this operand negative would reintroduce the falsified assumption.
+      String(input.pid),
+    ],
+    windowsVerbatimArguments: false,
+  };
+}
+
+// What the enumerator's outcome MEANS — the four no-op arms and the one reaping
+// arm, as a pure function.
+//
+// IT IS A FUNCTION FOR ONE REASON AND THE REASON IS TESTABILITY. `reapMcpOrphans`
+// lives in `index.ts`, which declares no `caido:plugin` alias and cannot be
+// imported by any test this project can run, so a four-arm ladder written inline
+// there is a decision no assertion can reach — the same argument that put the pid
+// refusal in `buildKillTreePlan` rather than at its call site (Pitfall 3).
+// `08-06-PLAN.md` must_haves truth 4 names all four arms; this function is where
+// they are reachable.
+export type OrphanScanOutcome =
+  | { kind: "reap"; kill: true; pids: number[] }
+  | { kind: "noop"; kill: false; reason: OrphanScanNoopReason };
+
+export type OrphanScanNoopReason =
+  | "enumerator-unavailable"
+  | "scan-timeout"
+  | "scan-failed"
+  | "no-match";
+
+export function classifyOrphanScanOutcome(input: {
+  spawnThrew: boolean;
+  exitCode: number | null | undefined;
+  timedOut: boolean;
+  pids: number[];
+}): OrphanScanOutcome {
+  // `spawn` throws SYNCHRONOUSLY for an unspawnable file, which is what a host
+  // with no `pgrep` produces. Such a host is exactly as well served as it is at
+  // HEAD: the reaper is strictly additive and removes no termination path.
+  if (input.spawnThrew) {
+    return { kind: "noop", kill: false, reason: "enumerator-unavailable" };
+  }
+
+  // Treated as unavailable rather than retried. A retry would double the spawn
+  // count on a teardown path for a scan that is best-effort by construction.
+  if (input.timedOut) {
+    return { kind: "noop", kill: false, reason: "scan-timeout" };
+  }
+
+  // Exit 1 is `pgrep`'s DOCUMENTED "no process matched", and it is deliberately
+  // NOT distinguished from any other non-zero exit: both outcomes reap nothing,
+  // so a separate reason would be a distinction with no consequence, and one
+  // more arm for a future edit to get wrong. `undefined` — the code a killed or
+  // never-closed child leaves — takes the same arm, fail-closed.
+  if (input.exitCode === undefined || input.exitCode === null) {
+    return { kind: "noop", kill: false, reason: "scan-failed" };
+  }
+  if (input.exitCode !== 0) {
+    return { kind: "noop", kill: false, reason: "scan-failed" };
+  }
+
+  if (input.pids.length === 0) {
+    return { kind: "noop", kill: false, reason: "no-match" };
+  }
+
+  // THE ONLY arm that kills, and it is reached only by exit 0 carrying at least
+  // one pid the parser accepted. The DEFAULT of this ladder is `noop`: any input
+  // combination it does not recognise kills nothing.
+  return { kind: "reap", kill: true, pids: input.pids };
 }
