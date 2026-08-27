@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 8
+open_count: 9
 waived_count: 0
 fixed_count: 9
-total_count: 17
-last_updated: 2026-08-27T12:53:54.797Z
+total_count: 18
+last_updated: 2026-08-27T13:06:17.978Z
 ---
 
 # Broken Windows Ledger
@@ -32,6 +32,7 @@ last_updated: 2026-08-27T12:53:54.797Z
 | 15 | 08 | unrun-verify | packages/backend/src/index.ts |  | reapMcpOrphans / reapSessionOrphansIfIdle wiring is asserted only by source text; whether Caido's LLRT sandbox can spawn pgrep at all is unmeasured, so both reaps may degrade silently to the enumerator-unavailable no-op while every gate stays green | open |  | 2026-08-27T12:30:13.421Z |  |
 | 16 | 08 | deviation | .planning/phases/08-process-lifecycle/08-07-PLAN.md | 193 | Ninth vacuous gate: Task 1 criterion 'grep -c never processes ... is 0' returned 0 at HEAD before any edit; the quoted sentence lives in 08-05-PLAN.md / 08-RESEARCH.md, never in index.ts | open |  | 2026-08-27T12:30:13.533Z |  |
 | 17 | 08 | deviation | packages/backend/src/platform.ts |  | 08-08 Task 1 acceptance criterion 'grep -c process.env platform.ts is 0' is VACUOUS: returns 7 at HEAD before any edit (all seven are comment mentions of the rule the module follows). Intent verified instead by comment-stripped grep = 0, before and after. Tenth vacuous gate in Phase 8. | open |  | 2026-08-27T12:53:54.797Z |  |
+| 18 | 08 | deviation | packages/backend/src/index.ts |  | Plan 08-09's exact-count criterion grep -c '0o700' index.ts is comment-sensitive: a 'why' comment mentioning the octal moves it with no behavioural change. Satisfied by rephrasing; executable (comment-stripped) count measured separately at 4 -> 4. Specify over the comment-stripped stream if it recurs. | open |  | 2026-08-27T13:06:17.978Z |  |
 
 ````json
 [
@@ -237,6 +238,18 @@ last_updated: 2026-08-27T12:53:54.797Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-08-27T12:53:54.797Z",
+    "resolved_at": null
+  },
+  {
+    "id": 18,
+    "kind": "deviation",
+    "phase": "08",
+    "file": "packages/backend/src/index.ts",
+    "line": null,
+    "description": "Plan 08-09's exact-count criterion grep -c '0o700' index.ts is comment-sensitive: a 'why' comment mentioning the octal moves it with no behavioural change. Satisfied by rephrasing; executable (comment-stripped) count measured separately at 4 -> 4. Specify over the comment-stripped stream if it recurs.",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-08-27T13:06:17.978Z",
     "resolved_at": null
   }
 ]

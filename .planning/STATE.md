@@ -4,16 +4,16 @@ milestone: v1.0
 current_phase: 8
 current_phase_name: Process Lifecycle
 status: needs_review
-stopped_at: Completed 08-08-PLAN.md
-last_updated: "2026-08-27T12:55:59.203Z"
+stopped_at: Completed 08-09-PLAN.md
+last_updated: "2026-08-27T13:05:41.371Z"
 last_activity: 2026-08-24
 last_activity_desc: Phase 08 verified — human_needed, no blockers
-state_head: 0a49d758171d1f4c0f3f06631b26fdb029b1c67f
+state_head: b2b8c531873bb9a7c668fdeaf895ed8bcb1976ea
 progress:
   total_phases: 13
   completed_phases: 5
   total_plans: 50
-  completed_plans: 48
+  completed_plans: 49
 milestone_name: milestone
 ---
 
@@ -76,6 +76,7 @@ Progress: [███░░░░░░░] 30% (3 of 10 milestone phases)
 | Phase 08 P06 | 25 min | 3 tasks | 5 files |
 | Phase 08 P07 | 12 min | 3 tasks | 4 files |
 | Phase 08 P08 | 22 min | 3 tasks | 9 files |
+| Phase 08 P09 | 9 min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -217,6 +218,9 @@ Recent decisions affecting current work:
 - [Phase 08]: Phase 7's CR-01 cmd.exe mitigation had been INERT on every real install since it shipped, defeated by the empty process shim rather than by an edit. Scope for a readParentEnv consumer is decided on OUTCOME: a bare executable name resolved through Windows' search order is a security defect (fixed here); a missing candidate path or variable is a functionality degradation (residuals — Phase 10 and Phase 9).
 - [Phase 08]: TENTH vacuous gate in Phase 8: 08-08 Task 1's criterion 'grep -c process.env platform.ts is 0' returns 7 at HEAD before any edit — all seven are comment mentions. Recurrence of the 03-02 rule that every exact-count check over a file required to carry 'why' comments must be anchored or comment-filtered.
 - [Phase 08]: index.ts and platform.test.ts are NOT Prettier-clean at HEAD; running prettier --write on them reformats 1230 and 59 pre-existing lines and can silently zero exact-count grep gates (the 04-10 failure). eslint-config-prettier only disables stylistic rules, so hand-formatting is safe. Do not run Prettier on these files.
+- [Phase 08]: All five MCP temp-directory writes carry an unconditional 0o600, with no platform guard (T-04-30), and no execute bit anywhere. — LLRT's set_mode is a total no-op off unix and Node ignores mode on Windows, so a guard would double the branch count for zero behaviour change while risking a POSIX regression. mcp-server.mjs is READ by node, never executed by the OS, so an execute bit would be a permission granted for no purpose.
+- [Phase 08]: The execute-bit gate is a callArgumentTexts scan, not a grep, and the rejected grep was re-measured on a violating tree rather than trusted. — writeMcpContextFile's writeFile is a MULTI-LINE call, so an injected mode 0o700 lands on a line carrying no writeFile token. Measured: the rejected pipeline returns 0 while a real execute bit sits at the exact site G-05 was filed against; the scan goes red and names it.
+- [Phase 08]: The Windows position on POSIX modes is an ACCEPTED trade-off (T-08-43) recorded at the source, not an open hole. — POSIX modes are ignored on Windows, so none of the five options changes anything there. What protects the files instead is os.tmpdir() resolving beneath the user's profile (AppData\Local\Temp), which Windows already ACLs to that user. CLAUDE.md asks for an equivalent or an explicit acceptance; this is the acceptance.
 
 ### Pending Todos
 
@@ -260,8 +264,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-27T12:55:42.671Z
-Stopped at: Completed 08-08-PLAN.md
+Last session: 2026-08-27T13:05:19.200Z
+Stopped at: Completed 08-09-PLAN.md
 Resume file: None
 
 **Live on the public remote: nothing of ours.** Plan 03-04 tore down all three `scratch/*` branches (`ci-proof-windows-probe`, `ci-proof-windows-probe-negative`, `ci-proof-windows-gate-negative`) locally and remotely. Asserted with a `test -z` discrimination over the captured glob (`scratch-glob-empty=0`) plus the full unfiltered listing, which now shows only `main` at `2d8cf16` and the pre-existing, unrelated `fix/security-hotfixes` at `0cd81f3`. `origin/main` was never pushed by this phase and is still `2d8cf16`; local `main` is 23 commits ahead and deliberately unpushed. **Re-verified 2026-08-13 (plan 03-05):** the remote still lists only `main` `2d8cf16` and the pre-existing `fix/security-hotfixes` `0cd81f3`, and all eight Phase 3 run records (4 probe + 4 `CI` control) still resolve with their recorded conclusions — which is what makes the URLs in `03-FINDINGS.md` valid citations after the branches were deleted. The probe **artifacts** do not survive: they expire 2026-09-12, which is why D-11 required the committed findings document.
