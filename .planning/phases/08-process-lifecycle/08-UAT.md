@@ -3,7 +3,7 @@ status: testing
 phase: 08-process-lifecycle
 source: 08-01-SUMMARY.md, 08-02-SUMMARY.md, 08-03-SUMMARY.md, 08-04-SUMMARY.md, 08-05-SUMMARY.md
 started: 2026-08-24T22:40:00Z
-updated: 2026-08-27T07:30:00Z
+updated: 2026-08-27T09:30:00Z
 gate_overrides:
   - gate: api-coverage.verify-pre
     decided: 2026-08-24
@@ -126,7 +126,28 @@ evidence: >-
 ### 2. A6 — a real provider CLI's MCP child sits in the group the kill reaches
 source: 08-01-SUMMARY.md D3
 expected: During a live Drift turn, `ps -eo pid,ppid,pgid,args | grep -E 'mcp-server\.mjs|--mcp-config' | grep -v grep` shows the `node …mcp-server.mjs` row's **pgid** equal to the **pid** of the `claude` row carrying `--mcp-config`.
-result: [pending]
+result: issue
+reported: |
+  2026-08-27, corrected command, real macOS install:
+      PID  PPID  PGID  ARGS
+    43921 43752 43752  /Applications/ChatGPT Classic.app/Contents/Resources/codex -c fe
+    44284 43921 44284  /opt/homebrew/bin/node /var/folders/.../drift-mcp-9b48c5c2275914bc4fd0/mcp-server.mjs
+severity: major
+evidence: >-
+  **A6 IS FALSIFIED.** The MCP child (44284) has pgid 44284 — its own process group —
+  while its parent CLI (codex, 43921) sits in group 43752. A6 was stated as "the provider
+  CLIs do not themselves place their MCP child in a different process group"; that is now
+  measured FALSE. A group signal aimed at the CLI's group cannot reach the token-bearing
+  child, so for this provider LIF-02 is NOT closed by process-group signalling — even
+  though A1 (test 1) is green. The single-pid rung kept per OQ-2 does not help either:
+  it signals the CLI, not the child.
+scope_and_caveats: >-
+  Measured on ONE provider (Codex) and on an instance Drift did NOT spawn (see G-04), so
+  Drift's own `detached: true` was not in play for the CLI. That does not weaken the
+  observation — the child creating its own group is a property of how the CLI launches it,
+  not of how the CLI itself was started — but Claude Code, the ACTIVE provider, remains
+  unmeasured. Re-run against a Drift-spawned Claude turn before generalising to all
+  providers.
 attempt_1: |
   2026-08-27. The originally-specified command returned nine `claude` rows and NO
   mcp-server row. Not a result — the command was unrunnable. See G-03.
@@ -182,8 +203,8 @@ result: [pending]
 
 total: 10
 passed: 1
-issues: 0
-pending: 9
+issues: 1
+pending: 8
 at_risk: 1
 degraded_as_designed: 1
 skipped: 0
@@ -236,6 +257,65 @@ blocked: 0
     - "A SystemRoot source that does not depend on the sandbox's process.env — or an explicit, recorded acceptance that the bare-name fallback is the shipping Windows path, with T-08-03 re-rated accordingly"
     - "The same question asked of every other readParentEnv() consumer (selectComspec/COMSPEC at :601, getWindowsNamedRoots and isNvmWindowsInstalled at :1672-1676, buildSpawnEnv at :653) — Phase 7's cmd.exe absolute-path mitigation reads the same empty shim and is likely inert for the same reason"
   debug_session: ""  # Filled by diagnosis
+
+- truth: "No orphaned token-bearing process survives a turn (the Phase 8 GOAL)"
+  status: failed
+  reason: >-
+    Measured 2026-08-27. A `node .../drift-mcp-9b48c5c2275914bc4fd0/mcp-server.mjs`
+    process (pid 44284) is alive and holding a live CAIDO_TOKEN, with **no Drift turn in
+    existence** — the same diagnostics run reports `activeSessions: 0`. Its parent is
+    `/Applications/ChatGPT Classic.app/Contents/Resources/codex` (pid 43921), NOT the
+    `/opt/homebrew/bin/codex` that `mcpRegisteredCliPaths` shows Drift registered and
+    would spawn. Drift therefore has no handle on it: it is absent from `activeProcesses`,
+    so `killTree` can never reach it, and no cancel, timeout, session close or
+    `cleanupMcpRuntime` sweep will terminate it.
+  severity: major
+  test: 2
+  source: "2026-08-27, ps on a real macOS Caido install"
+  why_the_phase_missed_it: >-
+    Phase 8 modelled orphans as processes Drift SPAWNED and failed to reap — every
+    mechanism it built (killTree, the eight rewired sites, SC-4's kill-before-sweep)
+    operates on `activeProcesses`. This orphan arrives by a different route: Drift's
+    `mcp add drift` registration persists in the CLI's own config, and ANY instance of
+    that CLI on the machine can launch Drift's MCP server with a live token on its own
+    initiative. OQ-3 deferred the start-up orphan-PROCESS sweep as AR-02 on blast-radius
+    grounds; this is the same residual reached by registration rather than by leftovers.
+    Same family as the gemini `mcp remove` failures in the same diagnostics
+    (`mcpCliRemovalFailures: gemini: 2 failed`), where Drift could not withdraw a
+    token-bearing registration it had created.
+  scope: >-
+    Arguably Phase 7 (registration) rather than Phase 8 (lifecycle) — but it falsifies
+    Phase 8's GOAL SENTENCE as written, so it belongs on this record whichever phase
+    eventually owns the fix.
+  root_cause: ""     # Filled by diagnosis
+  artifacts:
+    - path: "packages/backend/src/index.ts"
+      issue: "killTree/cleanupMcpRuntime operate only over activeProcesses; MCP servers launched by a non-Drift CLI instance from the registered config are invisible to every termination path"
+  missing:
+    - "A decision on whether Drift's registered MCP config should be usable by CLI instances Drift did not spawn, and if so how those processes are reaped"
+    - "Re-examination of AR-02 (OQ-3) now that the residual has a measured instance, not a hypothetical one"
+  debug_session: ""
+
+- truth: "Sensitive temp files carrying Caido context are mode 0600 (CLAUDE.md:123)"
+  status: failed
+  reason: >-
+    `mcp-context.json` is written at index.ts:1181-1184 with no `mode` option, so it lands
+    at 0644 (`-rw-r--r--`, observed on disk 2026-08-27). CLAUDE.md:123 states
+    "Sensitive temp files (MCP config, context file): 0o600 (rw owner only)".
+    The 0700 parent directory covers it in practice on POSIX, so this is
+    defense-in-depth being one layer thinner than documented rather than an exposure —
+    but on Windows POSIX modes are ignored entirely (the constraint driving this whole
+    milestone), where the directory mode contributes nothing.
+  severity: minor
+  test: null
+  source: "2026-08-27, ls -la of a live drift-mcp temp dir + source read"
+  scope: "MCP runtime bootstrap (Phase 4/5 territory), not Phase 8. Recorded so it is not lost."
+  artifacts:
+    - path: "packages/backend/src/index.ts:1181"
+      issue: "writeFile(contextFilePath, ...) omits { mode: 0o600 }"
+  missing:
+    - "Pass { mode: 0o600 } at the write, or record an explicit accepted trade-off"
+  debug_session: ""
 
 - truth: "The A6 verification procedure recorded across the phase's artifacts can actually produce a reading"
   status: failed
