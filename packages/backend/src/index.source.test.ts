@@ -1044,3 +1044,116 @@ describe("index.ts wires the orphan reap at every counted site and nowhere else 
     expect(code.match(/MCP_TEMP_DIR_PREFIX/g) ?? []).toHaveLength(3);
   });
 });
+
+// ── G-01: the derived Windows system root, at every consumer and nowhere else ──
+//
+// WHAT THIS BLOCK IS REALLY GUARDING. `readParentEnv()` returns an EMPTY record
+// on every real Caido install — measured 2026-08-27, `parentEnvKeyCount: 0` —
+// so three consumers whose empty-environment outcome was a BARE executable name
+// now take a derived root instead. `platform.ts` and `kill-plan.ts` prove the
+// LADDER from literal inputs; nothing but a source scan can prove the WIRING,
+// because `index.ts` cannot be imported by any test this project can run.
+//
+// This is the CR-01 failure shape asserted directly (T-08-36): a
+// security-relevant parameter whose own unit test passes and which no production
+// call site ever supplies. The compiler catches that one for these three, since
+// the member is required — but only in `src`. It cannot catch it in a test file,
+// because `packages/backend/tsconfig.json` excludes `./src/**/*.test.ts`.
+describe("index.ts derives a Windows system root and passes it at every consumer (G-01)", () => {
+  // RED INPUT: add a fourth call site, or drop one, and this fails. A NEW
+  // consumer of the derived root is a decision that should be read by a human,
+  // not absorbed silently by a passing suite — the rule the COMSPEC block above
+  // already applies to `buildSpawnPlan`.
+  it("has the one declaration plus exactly the three call sites", () => {
+    expect(code.match(/getWindowsSystemRootFallback\(/g) ?? []).toHaveLength(4);
+    expect(code).toContain("function getWindowsSystemRootFallback(");
+  });
+
+  // Asserted PER CONSUMER rather than as an aggregate, so a single missing site
+  // is identifiable from the failure message instead of "one of three".
+  //
+  // RED INPUT: delete `systemRootFallback` from any one of the three argument
+  // lists and exactly that consumer's expectation fails, naming it.
+  it("passes systemRootFallback at each named consumer", () => {
+    for (const consumer of [
+      "selectComspec",
+      "getWhichCommand",
+      "buildKillTreePlan",
+    ]) {
+      const calls = callArgumentTexts(code, consumer);
+      expect(calls, `${consumer} call sites`).toHaveLength(1);
+      expect(calls[0] ?? "", `${consumer} arguments`).toContain(
+        "systemRootFallback: getWindowsSystemRootFallback()",
+      );
+    }
+  });
+
+  // The D-P4 injected-boundary shape, one level up: the derivation happens ONCE,
+  // at the I/O boundary, and the three consumers receive its result. A call site
+  // deriving its own root would put the win32 decision in three places again —
+  // which is the duplication this plan removed from `getWhichCommand` and
+  // `buildKillTreePlan`.
+  //
+  // RED INPUT: inline `deriveWindowsSystemRoot({ tmpdir: host?.tmpdir })` at any
+  // call site and the count goes from 1 to 2.
+  it("derives the root in exactly one place, inside the boundary function", () => {
+    expect(code.match(/deriveWindowsSystemRoot\(/g) ?? []).toHaveLength(1);
+
+    const slice = topLevelDeclarationSlice(code, "getWindowsSystemRootFallback");
+    expect(slice).not.toBe("");
+    expect(slice).toContain("deriveWindowsSystemRoot({ tmpdir: host?.tmpdir })");
+  });
+
+  // THE CENSUS, and it is the reason this block is worth its weight. Every
+  // consumer of `readParentEnv()` inherits an empty record on a real install.
+  // Three of them were security defects and are fixed here; two are recorded
+  // residuals with owning phases. A SIXTH consumer added later would inherit the
+  // same emptiness silently — so the count is pinned, and moving it forces
+  // whoever moves it to answer the in-scope/out-of-scope question written at
+  // `readParentEnv`'s own declaration.
+  //
+  // MEASURED IN THIS TASK rather than copied from the plan: 13 occurrences in
+  // the comment-stripped source — the declaration plus twelve call sites.
+  //
+  // RED INPUT: add a thirteenth `readParentEnv()` call site and this fails.
+  it("pins the readParentEnv consumer census at its measured count", () => {
+    expect(code.match(/readParentEnv\(/g) ?? []).toHaveLength(13);
+  });
+
+  // The positive companion, the rule T-08-06's gate already follows: without it
+  // the census above goes green the moment somebody deletes `readParentEnv`
+  // outright — a gate that passes hardest when there is nothing left to guard.
+  //
+  // RED INPUT: delete the declaration, or stop passing the environment at any
+  // named consumer, and this fails.
+  it("still routes every named consumer through that one boundary read", () => {
+    expect(code).toContain("function readParentEnv(");
+    for (const consumer of [
+      "selectComspec",
+      "getWhichCommand",
+      "buildKillTreePlan",
+    ]) {
+      const calls = callArgumentTexts(code, consumer);
+      expect(calls[0] ?? "", `${consumer} environment source`).toContain(
+        "env: readParentEnv()",
+      );
+    }
+    // The two OUT-OF-SCOPE consumers, enumerated rather than ignored. Their
+    // empty-environment outcome is a missing candidate path or a child with
+    // fewer variables — never a bare name executed — so they are residuals with
+    // owning phases (10 and 9), recorded at `readParentEnv`'s declaration.
+    //
+    // BY COUNT, not by `toContain`, and the difference was measured rather than
+    // assumed: each of these shapes occurs at TWO sites, so an existence check
+    // is satisfied by either one and cannot see the other regress. Constructing
+    // that exact mutation — reflowing ONE `getWindowsNamedRoots` site — left a
+    // `toContain` form of this assertion GREEN. The counts below go red for it.
+    expect(
+      code.split("getWindowsNamedRoots({ env: readParentEnv() })").length - 1,
+    ).toBe(2);
+    expect(
+      code.split("isNvmWindowsInstalled({ env: readParentEnv() })").length - 1,
+    ).toBe(2);
+    expect(code.split("parentEnv: readParentEnv()").length - 1).toBe(4);
+  });
+});

@@ -604,10 +604,47 @@ function readWindowsEnvPresence(): Record<string, boolean> {
 // runtime that does not declare the global. Caido's @caido/quickjs-types declares
 // no `process` at all.
 //
-// The two consumers are buildMcpServerSpec's `parentEnv` (which merges it into
-// every MCP spawn env — finding L-4) and buildProbeReport's `parentEnv` (which
-// COUNTS it). Neither renders a value, and this function must never be used to
-// log one (T-04-04).
+// THIS RETURNS AN EMPTY RECORD ON EVERY REAL CAIDO INSTALL. That is a
+// measurement, not a caveat: the 2026-08-27 diagnostics from a shipping install
+// report `parentEnvKeyCount: 0`, with `parentEnvPathEntryCount: absent`. It
+// arrives alongside three other absences from the same restricted `process`
+// shim — `process.kill`, `process.version` and `process.versions` are all
+// missing too. Four absences are a sandbox POLICY rather than a host quirk, and
+// a policy is very unlikely to differ by platform, so the emptiness is expected
+// to hold on Windows as well. The reading was taken on darwin; the Windows
+// consequence is UNMEASURED and stays that way until Phase 9's first
+// `windows-latest` leg.
+//
+// THE SCOPE RULE, in one sentence, because every consumer below inherits that
+// emptiness and they do not all inherit the same severity: a consumer of this
+// function is a SECURITY defect when its empty-environment outcome is a BARE
+// EXECUTABLE NAME resolved through Windows' search order, and a FUNCTIONALITY
+// degradation when the outcome is a missing candidate path or a missing
+// variable. The first is spoofable (T-08-03); the second is a worse user
+// experience.
+//
+// FIXED, plan 08-08 — the three whose outcome was a bare name, all closed by one
+// derived root that does not come from here (`getWindowsSystemRootFallback`):
+//   * selectComspec       → cmd.exe      (T-08-33; Phase 7 CR-01, the branch
+//                                         that carries a live CAIDO_TOKEN)
+//   * getWhichCommand     → where.exe    (T-08-34)
+//   * buildKillTreePlan   → taskkill.exe (T-08-03, the reported gap G-01)
+//
+// RESIDUALS, recorded with owners rather than silently dropped — neither
+// resolves a bare name, so neither is a spoofing surface:
+//   * getWindowsNamedRoots / isNvmWindowsInstalled → fewer absolute candidate
+//     paths for command resolution. Owner: PHASE 10 (Windows Polish /
+//     not-on-PATH detection), which already owns that user-visible symptom.
+//   * buildSpawnEnv({ parentEnv }) → a spawned child receives only Drift's own
+//     variables. Owner: PHASE 9, where the first Windows leg runs; it needs a
+//     real reading rather than a code change, and it demonstrably works on
+//     macOS today on the same install that reported the empty environment.
+//
+// `index.source.test.ts` pins the consumer census, so a NEW consumer cannot be
+// added without moving a count and forcing that scope question to be answered.
+//
+// No consumer renders a value, and this function must never be used to log one
+// (T-04-04).
 function readParentEnv(): Record<string, string | undefined> {
   const processRef = globalThis as typeof globalThis & {
     process?: { env?: Record<string, string | undefined> };
@@ -1742,6 +1779,13 @@ async function resolveCommand(
         platform: host?.platform,
         pathResolution,
         homeDirs: getKnownHomeDirs(),
+        // RESIDUAL, owner PHASE 10 (G-01). That record is EMPTY on a real
+        // install, so both of these read nothing: the outcome is FEWER absolute
+        // candidate paths, and a Windows user with nvm or fnm may be told a
+        // command is unresolvable. That is a functionality degradation, NOT a
+        // bare name resolved through a search order — which is why plan 08-08
+        // fixed the three consumers whose outcome WAS a bare name and left
+        // these two to the phase that already owns the not-on-PATH symptom.
         roots: getWindowsNamedRoots({ env: readParentEnv() }),
         // CR-02's gate on the one drive-qualified literal in the catalogue.
         // Read HERE, from the same readParentEnv() the roots come from, so the
@@ -2149,6 +2193,15 @@ async function requireMcpServerSpec(options?: {
       // it through buildSpawnEnv, which is the single parent-merge point: a
       // drift-only dict would be green on every runner this project has and
       // broken only under Caido's LLRT (finding L-4).
+      //
+      // RESIDUAL, owner PHASE 9 (G-01). That record is EMPTY on a real install,
+      // so the merge contributes nothing and the child receives only Drift's own
+      // variables. No bare name is resolved and no search order is consulted, so
+      // this is a BEHAVIOURAL question rather than the spoofing surface plan
+      // 08-08 closed — and it needs a real `windows-latest` reading rather than
+      // a code change, which is Phase 9's first leg. It demonstrably works on
+      // macOS today: 18 tools registered and `authState: valid` on the very
+      // install that reported the empty environment.
       parentEnv: readParentEnv(),
     }),
   );
@@ -2846,6 +2899,10 @@ async function getNodeExecutable(): Promise<string | undefined> {
     execPath: processRef.process?.execPath,
     pathResolution: await resolveCommand("node"),
     homeDirs: getKnownHomeDirs(),
+    // RESIDUAL, owner PHASE 10 (G-01) — the second site of the same pair. Empty
+    // on a real install, so the outcome is fewer absolute candidate paths for
+    // the node lookup, never a bare name executed. See readParentEnv's header
+    // for the in-scope/out-of-scope rule this is an application of.
     roots: getWindowsNamedRoots({ env: readParentEnv() }),
     // CR-02's gate. Same source as `roots` and the same rule: the environment
     // is read at this I/O boundary, never inside the pure builder.
@@ -4842,6 +4899,10 @@ async function sendCliMessage(
       try {
         proc = spawnWithEnv(spawnPlan.file, spawnPlan.args, {
           env: buildSpawnEnv({
+            // RESIDUAL, owner PHASE 9 (G-01) — the CLI child's own block, and
+            // the second half of the same question. Empty on a real install;
+            // see readParentEnv's header for why that is a degradation rather
+            // than the bare-name spoofing surface 08-08 fixed.
             parentEnv: readParentEnv(),
             driftVars: injectedDriftVars,
           }),
