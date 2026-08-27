@@ -1157,3 +1157,84 @@ describe("index.ts derives a Windows system root and passes it at every consumer
     expect(code.split("parentEnv: readParentEnv()").length - 1).toBe(4);
   });
 });
+
+// G-05. Five writes into the MCP temp directory shipped with no `mode` option
+// and landed at 0644, against CLAUDE.md's rule that sensitive temp files are
+// 0o600. The gap was filed against ONE of them — `mcp-context.json`, the only
+// one anybody had run `ls -la` on — and the other four were found by tracing the
+// omission rather than by observing it. This census is what makes the SIXTH one
+// impossible to add silently: a `writeFile` added to `index.ts` without a mode
+// moves a number here, and moving it forces whoever moved it to say why.
+//
+// MEASURED IN THIS TASK on 2026-08-27 against `index.ts` as delivered by this
+// plan's Task 1, not copied from the plan: SEVEN `writeFile(` call sites, of
+// which SIX carry a `mode:` option.
+describe("index.ts states an explicit mode at every writeFile but the one named exemption (G-05)", () => {
+  // The census, stated as a total and a difference rather than as two
+  // independent literals, so the two numbers cannot drift apart quietly.
+  //
+  // THE ONE EXEMPTION IS NAMED, and it is `saveJson`'s plugin-data backup —
+  // `path.join(pluginPath, ...)`. That write lives OUTSIDE the temp root, in
+  // Caido's own plugin data directory, carries settings and chat history rather
+  // than the session token, and is outside G-05's scope. It is exempt on
+  // purpose, not by oversight, which is why it is spelled out here instead of
+  // being absorbed into a round number.
+  //
+  // RED INPUT, in both directions and both verified by construction:
+  //   - add a `writeFile` into the temp directory without a mode → the
+  //     difference becomes two and this fails;
+  //   - remove one of Task 1's five `mode:` options → same failure.
+  it("carries a mode at every writeFile except exactly one", () => {
+    const writes = callArgumentTexts(code, "writeFile");
+    expect(writes).toHaveLength(7);
+
+    const withMode = writes.filter((args) => args.includes("mode:"));
+    expect(withMode).toHaveLength(writes.length - 1);
+  });
+
+  // The positive companion, and it is not ceremony. Without it the case above
+  // goes green two ways that both LOOK like a fix: delete the exempt write
+  // outright (7 → 6, 6 → 5, difference still one), or move a temp-directory
+  // write into the exempt shape. Naming the exemption positively closes both.
+  //
+  // RED INPUT: delete the plugin-data write, or give a second `writeFile` a
+  // `pluginPath` argument, and this fails.
+  it("names that one exemption positively rather than assuming it", () => {
+    const writes = callArgumentTexts(code, "writeFile");
+    const exempt = writes.filter((args) => args.includes("pluginPath"));
+    expect(exempt).toHaveLength(1);
+    expect(exempt[0] ?? "").not.toContain("mode:");
+  });
+
+  // THE EXECUTE-BIT ASSERTION, and it is a `callArgumentTexts` scan rather than
+  // a grep for a reason that is not obvious and WILL tempt a later reader into
+  // "simplifying" it back into one line. Do not.
+  //
+  // `index.ts`'s `writeMcpContextFile` write is a MULTI-LINE `writeFile(` call:
+  // its arguments run across four lines, so an injected `mode: 0o700` lands on a
+  // line carrying no `writeFile` token at all. Every line-oriented pipeline
+  // therefore misses it — including the one this plan originally drafted
+  // (`grep -n '0o700' … | grep -v mkdir | grep -c writeFile`), which was
+  // falsifiable at four of the five temp-directory sites and blind at the fifth.
+  // The fifth is the site gap G-05 was filed against, so the grep form was blind
+  // at precisely the place the criterion existed to watch. Verified empirically
+  // on 2026-08-27 by injecting that exact violation at that exact site and
+  // watching the pipeline return 0 while the tree was in a violating state.
+  //
+  // `callArgumentTexts` balances parentheses, so it sees the whole argument list
+  // however it is wrapped. It also never reads comments — it extracts argument
+  // text, not lines — which is the second thing the grep form needed a pipe
+  // stage for.
+  //
+  // RED INPUT: add `{ mode: 0o700 }` to ANY `writeFile` call, including the
+  // multi-line one, and this fails.
+  it("grants no execute bit at any writeFile, however the call is wrapped", () => {
+    const writes = callArgumentTexts(code, "writeFile");
+    expect(writes).not.toHaveLength(0);
+    for (const [index, args] of writes.entries()) {
+      expect(args, `writeFile call site #${String(index)}`).not.toContain(
+        "0o700",
+      );
+    }
+  });
+});
