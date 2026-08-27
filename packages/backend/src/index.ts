@@ -1283,9 +1283,22 @@ async function writeMcpContextFile(): Promise<string | undefined> {
       } catch {
         // Use the current in-memory override when the file does not exist yet.
       }
+      // 0o600: this file carries the project id, the history filter and the
+      // context override. It is the site gap G-05 was filed against, observed on
+      // disk at 0644. The owner-only parent already blocks other local users, so
+      // this is the second layer — and it is the one that survives a temp directory
+      // that ALREADY EXISTED, because `mkdir` with `recursive` does not apply a
+      // mode to a directory it did not create, and the post-creation assertion
+      // that covers that case is skipped on win32.
+      //
+      // Unconditional, with no platform guard (T-04-30): LLRT's set_mode is a
+      // total no-op off unix and Node silently ignores mode on Windows, so a
+      // guard would double the branch count for zero behaviour change while
+      // risking a POSIX regression.
       await writeFile(
         contextFilePath,
         serializeMcpRuntimeContext(currentCaidoHistoryContext, currentCaidoContextOverride),
+        { mode: 0o600 },
       );
     });
   await mcpContextWriteChain;
@@ -1374,8 +1387,14 @@ async function createSessionRuntimeFiles(sessionId: string): Promise<{
   await mkdir(mcpTempDir, { recursive: true, mode: 0o700 });
   const activityFilePath = path.join(mcpTempDir, `mcp-activity-${sessionId}.jsonl`);
   const approvalsFilePath = path.join(mcpTempDir, `mcp-approvals-${sessionId}.json`);
-  await writeFile(activityFilePath, "");
-  await writeFile(approvalsFilePath, "{}\n");
+  // 0o600 on both, and the two files carry DIFFERENT risks rather than one
+  // shared one. The activity log carries tool activity drawn from the user's
+  // own Caido history, so its risk is disclosure. The approvals file's risk is
+  // the WRITE side rather than the read side: `mcp-server.mjs` polls this file
+  // synchronously before it executes a sensitive tool, so another local user
+  // able to write it could PRE-APPROVE one. Unconditional, per T-04-30.
+  await writeFile(activityFilePath, "", { mode: 0o600 });
+  await writeFile(approvalsFilePath, "{}\n", { mode: 0o600 });
   const files = { activityFilePath, approvalsFilePath };
   sessionRuntimeFiles.set(sessionId, files);
   return files;
@@ -1473,7 +1492,15 @@ async function writeApprovalDecision(
     approved,
     decidedAt: Date.now(),
   };
-  await writeFile(approvalsFilePath, `${JSON.stringify(current, null, 2)}\n`);
+  // 0o600, matching the create in createSessionRuntimeFiles. Stated at the
+  // rewrite as well as at the create because this call REPLACES the file's
+  // contents on every decision, and a mode stated only once would not survive a
+  // runtime whose write unlinks first. Same WRITE-side risk as the create: a
+  // locally writable approvals file is a pre-approval channel for a sensitive
+  // MCP tool. Unconditional, per T-04-30.
+  await writeFile(approvalsFilePath, `${JSON.stringify(current, null, 2)}\n`, {
+    mode: 0o600,
+  });
 }
 
 function renderHttpContextAttachment(httpContext: HttpContextPayload | undefined): string {
@@ -4154,10 +4181,35 @@ async function startMcpServer(sdk: BackendSDK): Promise<Result<McpServerInfo>> {
   // returning Ok(()) on non-unix and Node silently ignores mode on Windows, so a
   // platform !== "win32" guard would double the branch count for zero behaviour
   // change while risking a POSIX regression (T-04-30).
+  //
+  // THE STAGED COPY IS THE MOST SEVERE of the five temp-directory writes, and it
+  // is NOT the one G-05 was filed against — which is why the gap asked its
+  // question in the general form rather than at the one site someone looked at.
+  // This file is CODE: the launch path runs it under node with `CAIDO_TOKEN` in
+  // its environment, so a locally writable copy is local code execution carrying
+  // that token. Everything below it in severity is disclosure; this one is
+  // execution.
+  //
+  // NO EXECUTE BIT — owner read/write only, never owner-all. `mcp-server.mjs` is
+  // READ by the node process that runs it and is never executed by the operating
+  // system, so an execute bit would be a permission granted for no purpose.
+  //
+  // THE WINDOWS TRADE-OFF, recorded here rather than left implicit (T-08-43).
+  // POSIX mode bits are ignored on Windows, so none of the five owner-only
+  // options this file now states changes anything there. What protects these
+  // files on Windows instead is that os.tmpdir() resolves to the per-user temp
+  // directory beneath the user's profile — AppData\Local\Temp — which Windows
+  // already ACLs to that user. That is the Windows-appropriate equivalent
+  // CLAUDE.md's file-permission constraint asks for; it holds by construction
+  // rather than by anything Drift does. This is therefore an ACCEPTED trade-off,
+  // not an open hole, and it is written down because the constraint asks for
+  // either an equivalent or an explicit acceptance, and this is the acceptance.
   const written = await withFsRetry(
     async () => {
       await mkdir(tempDir, { recursive: true, mode: 0o700 });
-      await writeFile(mcpScriptLocal, await readFile(mcpScript, "utf-8"));
+      await writeFile(mcpScriptLocal, await readFile(mcpScript, "utf-8"), {
+        mode: 0o600,
+      });
     },
     {
       onRetry: (info) => {
