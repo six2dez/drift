@@ -314,7 +314,7 @@ Plans:
   4. Session finalize / `stopMcpServer` kills all tracked pids before sweeping the temp dir, so token-bearing processes die before their env-source files are removed.
   5. macOS/Linux cancellation and timeout semantics visible to the user are unchanged and existing tests stay green.
 
-**Plans**: 5/5 plans executed
+**Plans**: 10 plans (5/5 executed; 5 gap-closure plans added 2026-08-27 from `08-UAT.md`)
 
 Plans:
 **Wave 1**
@@ -333,6 +333,30 @@ Plans:
 **Wave 4** *(blocked on Wave 3 completion)*
 
 - [x] 08-05-PLAN.md — Phase close: amend SC-2 in place, the sixth pure-helper row, the validation task-ID fill with its seed corrections, `08-SECURITY.md`, and the real-hardware confirmation (LIF-01, LIF-02)
+
+---
+
+*Gap closure (added 2026-08-27 from `08-UAT.md`; five gaps plus three verifier advisories). UAT measured **A1 closed favourably** and **A6 FALSIFIED**, and found a token-bearing MCP orphan Drift never spawned. Maintainer decisions **GD-01** (build a mechanism that does not depend on A6) and **GD-02** (G-04 is fixed in Phase 8, not deferred) govern this set.*
+
+**Gap Wave 1** *(gap-closure set; wave numbers are scoped to `/gsd-execute-phase 8 --gaps-only`)*
+
+- [ ] 08-06-PLAN.md — Tracer: reap Drift's own MCP children by temp-dir identity — the argv-marker scan/parse/kill path, one wired site, a behavioural proof with two blast-radius controls, and the A1/A6 marked correction in `kill-plan.ts` (LIF-02, LIF-01)
+
+**Gap Wave 2** *(blocked on Gap Wave 1)*
+
+- [ ] 08-07-PLAN.md — Expand to the remaining orphan classes: the start-up previous-run reap that closes AR-02/OQ-3, the idle-gated cancel/close/timeout reap that closes LIF-02 without A6, and six source gates (LIF-02, LIF-01)
+
+**Gap Wave 3** *(blocked on Gap Wave 2)*
+
+- [ ] 08-08-PLAN.md — G-01: a Windows system root that does not come from the empty sandbox environment, applied to `taskkill.exe`, `where.exe` and `cmd.exe` (Phase 7's identical hole), with the scope boundary written into the source (LIF-01, LIF-02)
+
+**Gap Wave 4** *(blocked on Gap Wave 3)*
+
+- [ ] 08-09-PLAN.md — G-05: owner-only mode at all five temp-directory writes — including the staged `mcp-server.mjs`, the most severe and the one nobody observed — plus a census that fails closed (LIF-02, LIF-01)
+
+**Gap Wave 5** *(blocked on Gap Wave 4)*
+
+- [ ] 08-10-PLAN.md — Contract corrections: A1/A6 marked corrections in all four carriers, the unrunnable A6 command, SC-2's stale clause, the LIF requirement status, ledger entry 11, residuals AR-04/AR-05/AR-06, and `COVERAGE.md` (LIF-01, LIF-02)
 
 **Research flag**: RESOLVED 2026-08-24 by `08-RESEARCH.md`. The primitives are indeed standard; the **mechanism** was not. `detached: true` is source-verified honoured by Caido's LLRT fork (`command.process_group(0)`), but the canonical group-signalling spelling `process.kill(-pid, sig)` **throws** there — LLRT types `pid` as `u32` and rquickjs range-checks through `f64`, raising `Underflow` before `libc::kill` is reached — while working perfectly under Node, the only vehicle any CI leg in this repository runs. SC-2 is amended in place by plan 08-05 accordingly (see the criterion's own note).
 
