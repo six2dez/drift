@@ -244,25 +244,101 @@ them is rhetorical:
 a cancel, no token-bearing MCP child survives — on the runtime users run. It does **not** close A1 or
 A6 as *mechanism* claims, for the confounder in (2):
 
-- **A1 — OPEN, not measured.** Whether the shipped Caido LLRT honours the process-group spawn option.
-  It rests on source analysis of `caido/dependency-llrt@caido` at the pinned commit `a5b021c`, and on
-  nothing that was ever executed.
-- **A6 — OPEN, not measured.** Whether a real provider CLI keeps its MCP child inside its own group.
-  If any CLI calls `setsid()` on that child, the group signal misses it.
+**CORRECTED 2026-08-27 — both assumptions are now MEASURED, and they did not both come back the
+same way.** The superseded 2026-08-24 text is preserved below as a block quote and is not deleted.
 
-Both stay open as broken-windows ledger entry **11** (`unmet-truth`), untouched by this reading. The
-consequence they carry is unchanged: plan 08-03 took the number of sites depending on A1 from **two
-to nine**, so if the shipped LLRT does not honour the option, the group operand names a group that
-was never created — a **nine-site POSIX regression** — and **every CI leg stays green through it**,
-because every leg runs Node and Node honours the option. Phase 5 finding L-4 recurring verbatim.
-OQ-2's single-pid rung, which fires first inside `killTree` at all nine sites (`proc.kill(` = 3 in
-the census, deliberately, with a source comment naming A1 and forbidding its deletion), degrades a
-total regression into a partial one; it does not prevent one.
+- **A1 — CLOSED FAVOURABLY, measured 2026-08-27.** The shipped Caido LLRT *does* honour the
+  process-group spawn option: `spikeDetachedGroupKill: "grandchild-died (detached honoured)"` on
+  darwin 25.6.0, probe build `68199fa`, rebuilt from the recoverable commit and run during UAT
+  (`08-UAT.md` test 1). The source analysis of `caido/dependency-llrt@caido` at pinned commit
+  `a5b021c` is now **corroborated by execution on the runtime users run**, not standing alone.
+- **A6 — FALSIFIED, measured 2026-08-27.** A real provider CLI does **not** keep its MCP child
+  inside its own group. Measured on a real macOS install (`08-UAT.md` test 2): the CLI (codex,
+  pid **43921**) sat in process group 43752, while its own `mcp-server.mjs` child (pid **44284**)
+  sat in group **44284**. A group signal aimed at the CLI's group cannot reach the token-bearing
+  child, and OQ-2's single-pid rung does not rescue it — that rung signals the CLI, not the child.
 
-**What would re-open or strengthen this.** Re-open: any report of a surviving `mcp-server.mjs` after
-a cancel. Strengthen to a measurement: run `08-SPIKE.md`'s four-step procedure — the probe is
-recoverable at commit `68199fa` — which yields the A1 verdict, the A6 pgid/pid pair and a recorded
-before/after pair in one sitting, and would settle the confounder outright.
+**What each verdict does to the consequence recorded here.** The nine-site POSIX regression this
+section feared — the group operand naming a group that was never created, green on every CI leg —
+is **retired by A1's closure**. The risk moved to A6, which the section rated lower. The mechanism
+that answers A6 is not the group operand and not OQ-2's rung; it is the **argv-marker orphan reap**
+plans **08-06** and **08-07** shipped, which identifies its target by the target's own command line
+and is therefore independent of process groups by construction. OQ-2's rung survives with a
+**corrected justification** — defence against a future Caido that rebases its LLRT fork, not
+against an unmeasured one. One measurement closes a version, not a dependency.
+
+**What is still NOT measured, stated so the closure is not read wider than it is.** One build, one
+platform, one provider. **Claude Code — the active provider — remains unmeasured**, and the codex
+reading was taken on an instance Drift did not spawn (UAT gap G-04). The **Control** was never
+taken, so the T-08-14 attestation above is still an isolated zero with the CLI-cleanup confounder
+unexcluded. Broken-windows ledger entry **11** is therefore rewritten to the measured state rather
+than closed.
+
+> **SUPERSEDED 2026-08-24 (preserved, not deleted — the `07-VALIDATION.md` convention):**
+>
+> - **A1 — OPEN, not measured.** Whether the shipped Caido LLRT honours the process-group spawn option.
+>   It rests on source analysis of `caido/dependency-llrt@caido` at the pinned commit `a5b021c`, and on
+>   nothing that was ever executed.
+> - **A6 — OPEN, not measured.** Whether a real provider CLI keeps its MCP child inside its own group.
+>   If any CLI calls `setsid()` on that child, the group signal misses it.
+>
+> Both stay open as broken-windows ledger entry **11** (`unmet-truth`), untouched by this reading. The
+> consequence they carry is unchanged: plan 08-03 took the number of sites depending on A1 from **two
+> to nine**, so if the shipped LLRT does not honour the option, the group operand names a group that
+> was never created — a **nine-site POSIX regression** — and **every CI leg stays green through it**,
+> because every leg runs Node and Node honours the option. Phase 5 finding L-4 recurring verbatim.
+> OQ-2's single-pid rung, which fires first inside `killTree` at all nine sites (`proc.kill(` = 3 in
+> the census, deliberately, with a source comment naming A1 and forbidding its deletion), degrades a
+> total regression into a partial one; it does not prevent one.
+
+**What would re-open or strengthen this. UPDATED 2026-08-27 — steps 1-3 have now been run; step 4
+has not.** Re-open: any report of a surviving `mcp-server.mjs` after a cancel — and one such report
+already exists, though by a different route (UAT gap G-04: pid 44284 alive with `activeSessions: 0`,
+launched by a CLI instance Drift never spawned). Strengthen to a measurement: run `08-SPIKE.md`
+step 4 against the **pre-fix** build (recoverable at `68199fa`) for the Control, and re-run step 3
+against a **Drift-spawned Claude Code** turn so A6 covers the active provider. Those two readings
+are what remain; the A1 verdict and the A6 pgid/pid pair are taken.
+
+### The sandbox finding — what four readings from one real install actually established
+
+**Added 2026-08-27.** This is the single mechanism behind UAT gaps G-01 and G-02, and it is a
+security finding in its own right because two of this phase's mitigations read the shim it
+describes.
+
+Four independent readings, same real macOS install, probe build `68199fa`:
+
+| Reading | Value |
+|---|---|
+| `typeof process.kill` | `undefined` |
+| `parentEnvKeyCount` (`process.env`) | `0` |
+| `processVersion` (`process.version`) | `unavailable` |
+| `versionsNode` / `versionsLlrt` (`process.versions`) | `unavailable` |
+
+**These are not four coincidences. Caido's plugin sandbox re-exports a heavily restricted
+`process` shim, not LLRT's own `process` module.** `08-RESEARCH.md` § *Q2* source-read
+`modules/llrt_process/src/lib.rs:197-199` and found `process.set("kill", …)` — that describes
+**LLRT**. It does not describe what the plugin sandbox hands a backend bundle. The distinction
+was never drawn before this reading, and the research that read the runtime's source was
+therefore answering a different question than the one that mattered. A single absent value could
+have been a host quirk; four absences are a **policy**, and a policy is very unlikely to differ
+on Windows.
+
+**Consequence 1 — T-08-03's rating.** `buildKillTreePlan`'s win32 arm reads `SystemRoot` from
+that same empty shim, which made the bare-name `taskkill.exe` fallback the **expected** Windows
+path rather than a remote contingency. T-08-03 is re-rated **high** accordingly and mitigated by
+plan 08-08's derived system root — see the register row.
+
+**Consequence 2 — SC-2's stated reason is incomplete, though its conclusion holds. A marked
+correction, not a scramble.** ROADMAP SC-2 bans `process.kill(-pid, …)` because rquickjs converts
+through `f64` to `u32` and a negative pid raises `Underflow`. On this build that failure is
+**unreachable**: the call would fail as `TypeError: process.kill is not a function` first. The
+ban is still correct, the comment-stripped static gate still earns its place, and nothing about
+the shipped mechanism changes — only the stated mechanism of the failure is partial. Recorded
+here rather than by editing the criterion's `Underflow` reasoning, because that reasoning is
+accurate about the runtime it describes and would become false if rewritten.
+
+**Consequence 3 — T-08-04 degrades to identity-only on Caido.** See § *G-02 — recorded, not
+fixed* below.
 
 ---
 
@@ -284,9 +360,15 @@ restated — a restatement is where a caveat gets softened. Its five items, **by
 1. It will not prove `index.ts`'s wiring — no test executes `cancelCliMessage`, `closeCliSession`,
    `cleanupMcpRuntime` or the timeout handler.
 2. It will not prove Caido's LLRT — `detached` and `process.kill`'s `u32` typing are source-verified
-   and never executed. **A1 and A6 were added to this list by Phase 8, and were not closed.**
-3. It will not prove that any real CLI's MCP child is in the killed group — A6 is untested by
-   construction.
+   and never executed. **CORRECTED 2026-08-27: the `detached` half IS now proven on the shipped
+   runtime by measurement (A1); the `u32`-typing half is not, and is moot because the sandbox
+   exposes no `process.kill` at all.** *(Superseded 2026-08-24 clause: "**A1 and A6 were added to
+   this list by Phase 8, and were not closed.**")*
+3. It will not prove that any real CLI's MCP child is in the killed group — **CORRECTED
+   2026-08-27: no longer an absence. A6 was measured by hand outside CI and came back FALSE**
+   (codex pid 43921 / pgid 43752; `mcp-server.mjs` pid 44284 / pgid 44284). It remains untested
+   *in CI*, by construction, and untested for Claude Code on any vehicle. *(Superseded 2026-08-24
+   clause: "A6 is untested by construction.")*
 4. It will not prove SC-3 on Windows behaviourally — and in this phase not even the CI job has run.
 5. It will not prove the `/T` residual is bounded in practice — AR-01.
 
@@ -341,7 +423,12 @@ if the mechanism were absent* — never by the gate itself.
       measurement — no counts captured, no pre-fix control on the same machine, timeout path not
       exercised. Read § *T-08-01 — closed by attestation* before treating this zero as equivalent to
       Phase 7's
-- [ ] A1 and A6 closed as mechanism claims — **not reached, and not touched by the T-08-14 reading.**
-      Ledger entry **11** stays open; `08-SPIKE.md` holds the runnable procedure
+- [~] A1 and A6 closed as mechanism claims — **PARTIALLY REACHED, 2026-08-27.** A1 is **closed
+      favourably by measurement**; A6 is **measured and FALSIFIED** for one provider (codex), with
+      Claude Code still unmeasured and the Control still not taken. Ledger entry **11** is
+      rewritten to the measured state rather than closed. `08-SPIKE.md` holds both readings and
+      the remaining procedure. *(Superseded 2026-08-24 line: "- [ ] A1 and A6 closed as mechanism
+      claims — **not reached, and not touched by the T-08-14 reading.** Ledger entry **11** stays
+      open; `08-SPIKE.md` holds the runnable procedure")*
 - [ ] The `windows-latest` leg has executed — **not reached.** Ledger entry **12** stays open; two
       rows in `08-VALIDATION.md` are ⚠️ on it

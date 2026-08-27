@@ -30,7 +30,7 @@ filled: 2026-08-24
 | **Full suite command** | `pnpm exec vitest run` |
 | **Typecheck** | `pnpm -r typecheck` |
 | **Lint** | `pnpm lint` (`eslint . --max-warnings 0`) |
-| **Measured runtime** | Baseline measured 2026-08-24 at phase start: 36 test files, **534 tests — 528 passed, 6 skipped** (the 6 are `spawn-plan.win32.test.ts`, correctly skipped off win32); vitest-reported duration **971 ms**, wall clock ~1.8 s. **At phase close: 578 tests — 569 passed, 9 skipped** (the 9 are two deliberate platform gates: 6 `spawn-plan.win32.test.ts` + 3 `kill-tree.win32.test.ts`). The `Verify (Windows)` job is ~90 s end to end with `timeout-minutes: 6` (`ci.yml`). |
+| **Measured runtime** | Baseline measured 2026-08-24 at phase start: 36 test files, **534 tests — 528 passed, 6 skipped** (the 6 are `spawn-plan.win32.test.ts`, correctly skipped off win32); vitest-reported duration **971 ms**, wall clock ~1.8 s. **At phase close: 578 tests — 569 passed, 9 skipped** (the 9 are two deliberate platform gates: 6 `spawn-plan.win32.test.ts` + 3 `kill-tree.win32.test.ts`). **After the 2026-08-27 gap-closure set (plans 08-06…08-09): 686 tests — 677 passed, 9 skipped.** The skipped 9 are the same two platform gates, unchanged. The `Verify (Windows)` job is ~90 s end to end with `timeout-minutes: 6` (`ci.yml`). |
 
 **There is no `test` package script.** `package.json` defines `typecheck`, `lint`, `lint:fix`,
 `format`, `build`, `watch` only — the same correction `07-VALIDATION.md` had to make. Both CI legs
@@ -44,10 +44,17 @@ vitest**. Every behaviour that must be tested belongs in a pure module; everythi
 `functionBody` scanner) and by the compiler — strictly weaker than an executed assertion, and
 labelled as such in every row below that relies on it.
 
-**Baseline for CMP-01.** 534 tests at phase start. At phase close the count must have **grown, with
+**Baseline for CMP-01.** 534 tests at phase start. At every close the count must have **grown, with
 zero tests removed as obsolete**, verified mechanically — the check `05-REPORT.md` used for the
-263 → 290 transition. **Measured at close: 578, zero removed.** Per-plan progression: 534 → 561
-(08-02) → 569 (08-03) → 578 (08-04).
+263 → 290 transition. **Measured at the original phase close: 578, zero removed.** Per-plan
+progression: 534 → 561 (08-02) → 569 (08-03) → 578 (08-04).
+
+**Extended 2026-08-27 for the gap-closure set.** The rule is unchanged and still the point: the
+count GROWS and nothing is removed. Progression, each figure taken from the plan's own SUMMARY:
+578 (08-04) → **602** (the 08-REVIEW `--fix` pass, +24) → **642** (08-06, 633 passed / 9 skipped)
+→ **654** (08-07, 645 / 9) → **683** (08-08, 674 / 9) → **686** (08-09, 677 / 9). **Zero tests
+removed at any step, and zero gates weakened.** 686 is the floor for anything that follows;
+plan 08-10 changes no source and must therefore hold it exactly.
 
 ---
 
@@ -250,11 +257,32 @@ Both close the same way: **one `windows-latest` run**. Until then, LIF-01's Wind
 exactly the evidence it had before plan 08-04 — a unit contract over the argv (T-08-05) plus source
 analysis. Plan 08-04 built the apparatus and took no reading.
 
-A third gap sits outside this table and is recorded so it is not read as covered by it:
-**assumptions A1 and A6 are OPEN — not measured** (`08-SPIKE.md`). The Wave-0 probe was built,
-type-checked, linted and bundled, then the hardware checkpoint was waived on 2026-08-24 without
-readings. Plan 08-03 raised the number of sites depending on those assumptions from **two to nine**.
-Ledger entry **11** (`unmet-truth`).
+A third gap sits outside this table and is recorded so it is not read as covered by it.
+**CORRECTED 2026-08-27 — it is no longer an absence; it is a pair of measurements, one of them
+negative.** The Wave-0 probe was built, type-checked, linted and bundled, and its hardware
+checkpoint was waived on 2026-08-24 without readings; it was rebuilt from commit `68199fa` and
+**run on 2026-08-27** during UAT, on a real macOS Caido (darwin 25.6.0):
+
+- **A1 — CLOSED FAVOURABLY, measured.** `spikeDetachedGroupKill: "grandchild-died (detached
+  honoured)"`. The nine sites plan 08-03 made dependent on A1 are backed by execution on the
+  shipping runtime.
+- **A6 — FALSIFIED, measured.** Provider CLI codex pid **43921** in pgid 43752; its own
+  `mcp-server.mjs` child pid **44284** in pgid **44284**. A group signal aimed at the CLI's
+  group cannot reach the token-bearing child. One provider, on an instance Drift did not spawn;
+  **Claude Code remains unmeasured.**
+
+The mechanism that answers the falsification is the argv-marker orphan reap plans **08-06** and
+**08-07** shipped — identity by the target's own command line, independent of process groups by
+construction. Ledger entry **11** (`unmet-truth`) is rewritten to this measured state rather
+than closed: the Claude Code half is still unmeasured, and the Control was never taken.
+
+> **SUPERSEDED 2026-08-24 (preserved, not deleted — the `07-VALIDATION.md` convention):**
+>
+> A third gap sits outside this table and is recorded so it is not read as covered by it:
+> **assumptions A1 and A6 are OPEN — not measured** (`08-SPIKE.md`). The Wave-0 probe was built,
+> type-checked, linted and bundled, then the hardware checkpoint was waived on 2026-08-24 without
+> readings. Plan 08-03 raised the number of sites depending on those assumptions from **two to nine**.
+> Ledger entry **11** (`unmet-truth`).
 
 ---
 
@@ -268,10 +296,13 @@ Ledger entry **11** (`unmet-truth`).
 - [⚠] **Spike (strongly recommended):** the temporary diagnostics path reporting, from a **real Caido
       install on macOS/Linux**, (a) `typeof process.kill`, (b) that a `detached: true` spawn's group
       kill reaches a grandchild, and (c) the `pgid` of a real CLI's MCP child. **BUILT AND WAIVED, NOT
-      RUN** — 08-01 T-08-01 shipped the probe (`68199fa`), the maintainer waived the T-08-02 hardware
-      checkpoint, and T-08-03 removed the probe as planned. This was the **only** available closure
-      for A1 and A6; both remain OPEN. `08-SPIKE.md` preserves the four-step procedure verbatim and
-      the commit to rebuild from.
+      RUN IN WAVE 0; **RUN 2026-08-27** — 08-01 T-08-01 shipped the probe (`68199fa`), the
+      maintainer waived the T-08-02 hardware checkpoint, and T-08-03 removed the probe as planned.
+      This was the **only** available closure for A1 and A6, and it was finally taken during UAT:
+      **A1 closed favourably, A6 FALSIFIED, the Control (c) still not taken.** `08-SPIKE.md` holds
+      the readings and the procedure, and the commit to rebuild from.
+      *(Correction 2026-08-27. The superseded clause read: "This was the **only** available closure
+      for A1 and A6; both remain OPEN.")*
 
 The `wave_0_complete` flag is set true in the frontmatter because the four **code** artifacts all
 exist and the wave's gate was passed by maintainer decision. It does **not** claim item 5 was
@@ -293,12 +324,30 @@ cover* rather than restated there.
    delivers the right arguments in the right order*, by comment-stripped `awk`-scoped counts, by the
    `functionBody` statement-position scanner, and by the compiler. That is the strongest available
    substitute; it is not a test.
-2. **It will not prove Caido's LLRT.** `detached` and `process.kill`'s `u32` typing are
-   **source-verified and never executed**. Every CI leg runs Node. Assumption A2 (Phase 5's) stays
-   open, and this phase adds **A1** and **A6** to it. The Wave 0 spike was the cheapest partial
-   closure, it covered POSIX only, and **it was not run**.
-3. **It will not prove that any real CLI's MCP child is in the killed group.** No CLI binary is
-   executed anywhere in this project's CI. A6 is untested by construction.
+2. **It will not prove Caido's LLRT — PARTLY FALSE since 2026-08-27, and exactly which part
+   matters.** *The `detached` half IS proven on the shipped runtime by measurement*: A1 came back
+   `grandchild-died (detached honoured)` on a real macOS Caido (`08-SPIKE.md`). *The
+   `process.kill` `u32`-typing half is not proven* — and it is **doubly moot**, because the same
+   UAT measured `typeof process.kill` as `"undefined"`: Caido's plugin sandbox exposes no such
+   function at all, so the conversion error SC-2 cites is unreachable behind a `TypeError`. The
+   ban still holds and the static gate still earns its place; only its stated mechanism is
+   partial. No CI leg executes LLRT, so everything else in this item stands, and assumption A2
+   (Phase 5's) stays open.
+
+   > **SUPERSEDED 2026-08-24:** *It will not prove Caido's LLRT. `detached` and `process.kill`'s
+   > `u32` typing are **source-verified and never executed**. Every CI leg runs Node. Assumption
+   > A2 (Phase 5's) stays open, and this phase adds **A1** and **A6** to it. The Wave 0 spike was
+   > the cheapest partial closure, it covered POSIX only, and **it was not run**.*
+
+3. **It will not prove that any real CLI's MCP child is in the killed group — and on 2026-08-27
+   this stopped being an absence and became a NEGATIVE MEASUREMENT.** No CLI binary is executed
+   anywhere in this project's CI, so the statement still holds *of CI*. Outside CI, UAT measured
+   it by hand: codex pid **43921** in pgid 43752, its `mcp-server.mjs` child pid **44284** in
+   pgid **44284**. A6 is **FALSIFIED for that provider**; Claude Code is still untested.
+
+   > **SUPERSEDED 2026-08-24:** *It will not prove that any real CLI's MCP child is in the killed
+   > group. No CLI binary is executed anywhere in this project's CI. A6 is untested by
+   > construction.*
 4. **It will not prove SC-3 on Windows behaviourally.** A CI job proves the *spawn contract* — that
    the right `taskkill` argv is built and reaches `spawn`. It does not prove a real turn's tree came
    down. That belongs beside Phase 10 SC-5, whose text already guards the substitution trap: another
@@ -315,7 +364,7 @@ cover* rather than restated there.
 |----------|-------------|--------------|-------------------|-------------------|
 | A real cancel on macOS/Linux leaves no `node mcp-server.mjs` behind | LIF-02 / SC-3 | **Phase 8 (this one)** | **Yes — SATISFIED 2026-08-24 by maintainer ATTESTATION, not by a recorded measurement.** Plan 08-05 **T-08-14**: the maintainer replied `approved`, which under the checkpoint's contract means a zero after-Stop count against a non-zero before-Stop count — but **supplied no numeric values**, so neither count was captured. **Timeout path: not reported → recorded as NOT exercised.** Full basis and the unexcluded confounder in `08-SECURITY.md` § *T-08-01 — closed by attestation*; verbatim record in `08-05-SUMMARY.md` | Start a Claude turn in Caido, note `pgrep -f mcp-server.mjs \| wc -l`, click Stop, wait ~5 s, re-run `pgrep`. Expect zero. **Cheap, decisive, and on hardware the maintainer owns.** Compare against `08-SPIKE.md` § *Control* — which is itself **unrecorded**, so T-08-14 must establish its own before-count on the day. |
 | A real cancel on native Windows leaves no `node.exe` behind | LIF-01 / SC-3 | **Phase 10** | **No** — hardware-blocked (C-5) | Reporter or any Windows user: start a turn, cancel, check Task Manager for orphaned `node.exe`. ROADMAP Phase 10 **SC-5** owns it. |
-| LLRT honours `detached` on the shipped Caido build | A1 | **Phase 8** | **Recommended** — the Wave 0 spike | **NOT RUN — waived 2026-08-24.** Procedure preserved verbatim in `08-SPIKE.md` § *How to run this spike later*; probe recoverable at commit `68199fa`. |
+| LLRT honours `detached` on the shipped Caido build | A1 | **Phase 8** | **Recommended** — the Wave 0 spike | **RUN 2026-08-27 — A1 CLOSED FAVOURABLY.** `spikeDetachedGroupKill: "grandchild-died (detached honoured)"` on darwin 25.6.0, probe build `68199fa`. *(Superseded cell, 2026-08-24: "NOT RUN — waived 2026-08-24. Procedure preserved verbatim in `08-SPIKE.md` § How to run this spike later; probe recoverable at commit `68199fa`.")* Still open on the same procedure: **A6 against a Drift-spawned Claude Code turn** (measured FALSE for codex, pids 43921/44284) and the **Control** (never taken). |
 
 ---
 

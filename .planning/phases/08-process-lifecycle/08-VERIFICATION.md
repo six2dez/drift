@@ -18,7 +18,26 @@ behavior_unverified_items:
   - truth: "SC-2 — on POSIX the CLI's token-bearing MCP child is killed with the parent, via `detached: true` plus a spawned `kill` group signal"
     test: "Run 08-SPIKE.md's four-step procedure against a real Caido install (probe at commit 68199fa). Record `spikeDetachedGroupKill`, and the pgid of `node …mcp-server.mjs` against the pid of the `claude` process during a live turn."
     expected: "`grandchild-died (detached honoured)` for A1; equal pgid/pid for A6."
-    why_human: "The mechanism IS behaviourally proven — kill-tree.posix.test.ts executes and passes on this host with a genuine falsifying control (grandchild survives without `detached`, dies with it). But that runs under Node. The shipping runtime is Caido's LLRT, which no CI leg executes, and A1 reads OPEN — not measured in 08-SPIKE.md. Nine kill sites depend on it: if the shipped fork does not honour the option, the group operand names a group that was never created and all five CI legs stay green through it."
+    why_human: |
+      CORRECTED 2026-08-27. The mechanism IS behaviourally proven — kill-tree.posix.test.ts
+      executes and passes on this host with a genuine falsifying control (grandchild survives
+      without `detached`, dies with it). But that runs under NODE, and the shipping runtime is
+      Caido's LLRT, which no CI leg executes. A1 now reads CLOSED FAVOURABLY — measured
+      2026-08-27 (`spikeDetachedGroupKill: "grandchild-died (detached honoured)"`, darwin
+      25.6.0, probe build 68199fa), so the nine-site regression this field feared is retired.
+      THE VERDICT DOES NOT SOFTEN, and the reason is not A1: kill-tree.posix.test.ts still
+      executes NO line of index.ts and still runs under Node, so the wiring at the nine sites
+      remains unproven on the shipping runtime. A1's closure NARROWS that gap; it does not
+      remove it. And A6 was measured FALSE on 2026-08-27 (codex pid 43921 in pgid 43752, its
+      mcp-server.mjs child pid 44284 in pgid 44284), so for at least one provider the group
+      signal cannot reach the token-bearing child at all — the argv-marker reap shipped by
+      plans 08-06/08-07 is what answers that, not the group operand. human_needed stands.
+      > SUPERSEDED 2026-08-24: "The mechanism IS behaviourally proven — kill-tree.posix.test.ts
+      > executes and passes on this host with a genuine falsifying control (grandchild survives
+      > without `detached`, dies with it). But that runs under Node. The shipping runtime is
+      > Caido's LLRT, which no CI leg executes, and A1 reads OPEN — not measured in 08-SPIKE.md.
+      > Nine kill sites depend on it: if the shipped fork does not honour the option, the group
+      > operand names a group that was never created and all five CI legs stay green through it."
   - truth: "SC-3 — cancelling or timing out a turn leaves zero lingering node.exe/provider processes on either platform"
     test: "(a) Windows: as above. (b) POSIX timeout path: let a turn hit the absolute timeout on a real Caido and run `pgrep -f mcp-server.mjs | wc -l` before and after. (c) POSIX cancel: re-run the T-08-14 check capturing both numeric counts, and take the pre-fix control from commit 68199fa on the same machine."
     expected: "Non-zero before, zero after, on both the cancel and the timeout path, on both platforms; and a non-zero after-count from the pre-fix build, which is what excludes the CLI's own cleanup as the explanation."
@@ -73,15 +92,36 @@ I applied maintainer decision D-02 and made the SC-3 call rather than deferring 
 | # | Truth | Status | Evidence |
 |---|-------|--------|----------|
 | SC-1 | `killTree` terminates the whole process tree on Windows via `<SystemRoot>\System32\taskkill.exe`, both env casings, separators stripped, `/pid /t /f`, `windowsVerbatimArguments: false`, bare name last resort, pid guarded in `buildKillTreePlan` | ⚠️ PRESENT_BEHAVIOR_UNVERIFIED | **Every specified property is proven by executed tests.** `kill-plan.test.ts` runs 25 assertions green on this host: all five refusal shapes (`undefined`/NaN/`0`/`-1`/`1.5`), the rooted path, trailing-separator stripping, bare-drive reduction, `SYSTEMROOT`-only casing, the bare-name fallback, whitespace-only root, and rung-invariance. `kill-plan.ts` is imported at `index.ts:97` and called at `:5273`. **Unverified: the verb.** `kill-tree.win32.test.ts` is 3/3 pending on every host that has run it; 294 commits unpushed, no `windows-latest` run exists. |
-| SC-2 | On POSIX the MCP child is killed with the parent via `detached: true` at the provider spawn plus a spawned `kill` group signal | ⚠️ PRESENT_BEHAVIOR_UNVERIFIED | **Strongest evidence in the phase, and still short of the runtime.** `kill-tree.posix.test.ts` EXECUTES and passes here with a real falsifying control: `CONTROL: without detached, a single-pid kill leaves the grandchild alive` (1034ms), then the grandchild dying with `detached` + the production argv. It imports the production `buildKillTreePlan`/`shouldDetachProviderSpawn` and re-derives no argv. `detached: shouldDetachProviderSpawn(host?.platform)` at `index.ts:4428`. **Unverified: the vehicle.** That proof runs under Node. A1 (does the shipped LLRT honour `detached`?) reads **OPEN — not measured**; nine sites depend on it. |
+| SC-2 | On POSIX the MCP child is killed with the parent via `detached: true` at the provider spawn plus a spawned `kill` group signal | ⚠️ PRESENT_BEHAVIOR_UNVERIFIED | **Strongest evidence in the phase, and still short of the runtime.** `kill-tree.posix.test.ts` EXECUTES and passes here with a real falsifying control: `CONTROL: without detached, a single-pid kill leaves the grandchild alive` (1034ms), then the grandchild dying with `detached` + the production argv. It imports the production `buildKillTreePlan`/`shouldDetachProviderSpawn` and re-derives no argv. `detached: shouldDetachProviderSpawn(host?.platform)` at `index.ts:4428`. **Unverified: the vehicle.** That proof runs under Node, and `kill-tree.posix.test.ts` executes no line of `index.ts`. **A1 CORRECTED 2026-08-27: CLOSED FAVOURABLY — measured** (`grandchild-died (detached honoured)`, darwin 25.6.0). That narrows the gap without removing it — the wiring at the nine sites is still unproven on LLRT. **And A6 is measured FALSE** (codex pid 43921 in pgid 43752; `mcp-server.mjs` child pid 44284 in pgid 44284), so the group signal alone does not close LIF-02 for that provider. See the marked correction below this table. |
 | SC-3 | Cancelling or timing out a turn leaves zero lingering `node.exe`/provider processes **on either platform** | ⚠️ PRESENT_BEHAVIOR_UNVERIFIED | **Windows half: no evidence of any kind.** **POSIX half: a maintainer attestation** — real evidence, weaker than a measurement. `approved` on 2026-08-24 with no counts captured, no Caido version, timeout path explicitly not exercised, and the CLI's own cleanup unexcluded as an alternative explanation because the pre-fix control was waived. |
 | SC-4 | Session finalize / `stopMcpServer` kills all tracked pids before sweeping the temp dir | ✓ VERIFIED (coincidental-reliance) | **Independently re-measured, not taken from the gate.** `awk`+`grep` over comment-stripped bodies: `cleanupMcpRuntime` killTree@10 < rm@30; `closeCliSession` killTree@8 < rm@14,15; `deleteChat` killTree@9 < rm@15,16. `stopMcpServer` delegates to `cleanupMcpRuntime`, whose `LIF-01 SEAM` marker is gone (0 occurrences repo-wide) and is replaced by a real `activeProcesses` kill loop. Census re-measured: `killTree(` = 9 = 1 declaration + 8 in-scope call sites. See `coincidental_reliance_items` for the completion-ordering caveat. |
 | SC-5 | macOS/Linux cancellation and timeout semantics visible to the user are unchanged and existing tests stay green | ✓ VERIFIED | **602 tests, 593 passed, 9 skipped, 38 files / 2 skipped** — re-run by me, matching the reported state. Baseline 534 at phase start, zero tests removed. `pnpm -r typecheck` = 0, `pnpm lint` = 0. **Zero `packages/frontend` and zero `packages/shared` files touched in the entire phase** (`git log --name-only 1c7a22f..HEAD`), so the `[Cancelled]` rendering is unchanged by construction; `cancelCliMessage` keeps its synchronous `Result<void>`. The two-rung graceful→forceful ladder is preserved on POSIX. |
-| A1 | A real Caido install reports whether a `detached: true` spawn produces a killable process group | ⚠️ insufficient_spec (abstained) | 08-01 plan truth, recorded UNMET, `status: unknown`, `human_judgment: true`. Checkpoint waived 2026-08-24 without readings. |
-| A6 | A real provider CLI's `mcp-server.mjs` pgid matches the tracked CLI pid | ⚠️ insufficient_spec (abstained) | 08-01 plan truth, recorded UNMET. Rated "medium-high, and untested" before the phase; unchanged by it. |
+| A1 | A real Caido install reports whether a `detached: true` spawn produces a killable process group | ✓ **CLOSED FAVOURABLY — measured 2026-08-27** | **Corrected 2026-08-27.** No longer abstained: the probe was rebuilt from `68199fa` and run on a real macOS Caido (darwin 25.6.0) during UAT. `spikeDetachedGroupKill: "grandchild-died (detached honoured)"` (`08-UAT.md` test 1). *(Superseded 2026-08-24 cell: "⚠️ insufficient_spec (abstained) — 08-01 plan truth, recorded UNMET, `status: unknown`, `human_judgment: true`. Checkpoint waived 2026-08-24 without readings.")* |
+| A6 | A real provider CLI's `mcp-server.mjs` pgid matches the tracked CLI pid | ❌ **FALSIFIED — measured 2026-08-27** | **Corrected 2026-08-27.** No longer abstained: measured on a real macOS install (`08-UAT.md` test 2). Provider CLI codex pid **43921** in pgid 43752; its `mcp-server.mjs` child pid **44284** in pgid **44284**. The pgid does **not** match the tracked CLI pid, so this truth is **FALSIFIED** for that provider. One provider, on an instance Drift did not spawn; Claude Code unmeasured. *(Superseded 2026-08-24 cell: "⚠️ insufficient_spec (abstained) — 08-01 plan truth, recorded UNMET. Rated \"medium-high, and untested\" before the phase; unchanged by it.")* |
 | — | The pre-fix control is recorded (non-zero `pgrep` after Stop on the old code) | ⚠️ insufficient_spec (abstained) | 08-01 plan truth, recorded UNMET. Its absence is what leaves the T-08-14 confounder unexcluded. |
 
+> **MARKED CORRECTION, 2026-08-27 — the SC-2 row's A1 clause.** The cell above previously read:
+>
+> **Unverified: the vehicle.** That proof runs under Node. A1 (does the shipped LLRT honour
+> `detached`?) reads **OPEN — not measured**; nine sites depend on it.
+>
+> Superseded by the UAT readings of 2026-08-27 (`08-UAT.md` tests 1 and 2, `08-SPIKE.md`).
+> Preserved rather than overwritten, per the `07-VALIDATION.md` convention.
+
+**The verdict is UNCHANGED and this is deliberate.** A1's closure and A6's falsification move
+the *evidence*, not the *status*. `status: human_needed` stands, the score stands, and all three
+`behavior_unverified_items` stand — because the thing they are about is that the behavioural
+proof runs under Node against a module (`index.ts`) that vitest cannot import, and neither
+reading changes that. The A6 falsification, if anything, adds a reason for the human item rather
+than removing one: the mechanism SC-2 names does not reach the child on the one provider anyone
+has measured, and the mechanism that does (the argv-marker reap from plans 08-06/08-07) is
+itself covered by no executed assertion — broken-windows ledger entries 13 and 15.
+
 **Score:** 2/8 truths verified (3 present-but-behaviour-unverified, 3 abstained as insufficient_spec)
+— **as ruled on 2026-08-24, and NOT recomputed on 2026-08-27.** The two abstentions that became
+readings did so *after* this report was written, and one of the two came back **FALSIFIED**;
+re-scoring a verification report from later evidence would make it a different report. The
+readings are recorded in the rows above and the frontmatter verdict is unchanged.
 
 A low score here is a statement about **evidence**, not about workmanship. Read it next to the Anti-Patterns and Prohibitions sections, which are clean.
 
