@@ -109,6 +109,7 @@ import {
 } from "./kill-plan";
 import {
   buildSpawnEnv,
+  deriveWindowsSystemRoot,
   getSweepRoots,
   getHomeDirCandidates,
   getTempRoot,
@@ -616,6 +617,27 @@ function readParentEnv(): Record<string, string | undefined> {
   } catch {
     return {};
   }
+}
+
+// The Windows system root, for the three consumers whose environment-sourced
+// root is EMPTY on every real install (G-01).
+//
+// SYNCHRONOUS by requirement, not by preference: `killTree` is synchronous by
+// construction — it is called from `cancelCliMessage`, whose signature recorded
+// decision OQ-4 fixes — so it cannot await a fallback lookup.
+//
+// `host` is the CACHED RUN-05 probe value, so this is a property read rather
+// than a second `os` call: Phase 4 D-02 gives `probeRuntime` the backend's one
+// guarded `os` read and that rule is unchanged here. Before the probe runs
+// `host` is `undefined` and this returns the empty string, which lands the
+// consumers on the same bare-name last resort they reach today.
+//
+// The value is DATA for a spawn and is never rendered: `readParentEnv`'s
+// contract forbids logging an environment value, and a system path derived at
+// the same boundary is one, by the same T-04-04 reasoning `getComspec`'s comment
+// below already states.
+function getWindowsSystemRootFallback(): string {
+  return deriveWindowsSystemRoot({ tmpdir: host?.tmpdir });
 }
 
 // The absolute Windows interpreter that EVERY buildSpawnPlan call site passes.
@@ -1572,6 +1594,11 @@ async function resolveCommand(
       const searchCommand = getWhichCommand({
         platform: host?.platform,
         env: readParentEnv(),
+        // G-01. The environment above is EMPTY on a real install, so without
+        // this rung the win32 arm resolves a BARE "where.exe" through Windows'
+        // search order (T-08-34). Required member: the compiler forces every
+        // call site to state an answer.
+        systemRootFallback: getWindowsSystemRootFallback(),
       });
       const pathResolution = await new Promise<string | undefined>((resolve) => {
         // UX-04 / Phase 10 owns what this line adds on Windows: a spawn from a

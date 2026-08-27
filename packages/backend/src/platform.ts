@@ -220,6 +220,148 @@ export function getSweepRoots(input: {
   return roots;
 }
 
+// The Windows system root, DERIVED from the host temp directory's drive letter
+// rather than read from the environment.
+//
+// WHY THIS EXISTS AT ALL — and this is a MEASUREMENT, not a worry. The
+// 2026-08-27 diagnostics from a shipping Caido install report
+// `parentEnvKeyCount: 0`: the environment the backend sees is EMPTY. It arrives
+// alongside three other absences from the same restricted `process` shim
+// (`kill`, `version`, `versions`), and four absences are a sandbox POLICY rather
+// than a host quirk — a policy very unlikely to differ by platform. So every
+// environment-sourced Windows system root in this codebase (`getWhichCommand`'s,
+// `buildKillTreePlan`'s, `selectComspec`'s) resolves to nothing on a real
+// install and falls through to a BARE executable name, which Windows resolves
+// through a search order that includes the working directory Caido's plugin host
+// chose (T-08-03). That is the shipping path, not the exceptional one — while
+// every CI leg stays green, because Node populates the environment.
+//
+// `os.tmpdir()` is the ONE non-environment source of a Windows path this runtime
+// offers, and it is confirmed working on the very install that reported the
+// empty environment (`runtimeOsPlatform: ok (gating)`, with `mcpTempDir`
+// correctly resolved beneath it). On Windows it is drive-qualified, so the drive
+// letter is readable and `<drive>:\Windows` follows.
+//
+// THIS IS A DERIVATION, NOT A MEASUREMENT, and it is written as one. `TEMP` can
+// be redirected to a drive other than the one Windows is installed on, in which
+// case the root derived here is WRONG (T-08-35, accepted). The asymmetry is the
+// entire argument: a wrong ABSOLUTE path fails the spawn LOUDLY, with a
+// file-not-found a diagnostics report shows, whereas a bare name resolves
+// SILENTLY through a search order that includes a directory Drift does not
+// choose — on a security tester's machine. A loud wrong answer beats a quiet
+// compromised one, and the bare name stays reachable and tested BENEATH this
+// rung, which is what makes SC-1's "last resort" clause true rather than merely
+// written.
+//
+// The literal "Windows" is NOT the kind of hardcode `getWhichCommand`'s header
+// rejects. That header rejects a drive-QUALIFIED literal, because the drive is
+// the part that actually varies between machines — and the drive is exactly what
+// is read at runtime here. The directory name beneath it is fixed by the OS.
+//
+// No `platform` parameter, deliberately: the derivation is SHAPE-based, every
+// POSIX temp root falls out empty on its own, and a platform gate would create a
+// second place the win32 decision is written.
+export function deriveWindowsSystemRoot(input: {
+  tmpdir: string | undefined;
+}): string {
+  const tmpdir = typeof input.tmpdir === "string" ? input.tmpdir.trim() : "";
+  if (tmpdir === "") return "";
+
+  // Explicit character tests rather than a regular expression — the same rule
+  // `isAbsolutePath` and `getTempRoot` already follow, and for the same reason:
+  // the win32 spellings have to stay readable and assertable from a POSIX host.
+  const first = tmpdir[0] ?? "";
+  const isDriveLetter =
+    (first >= "A" && first <= "Z") || (first >= "a" && first <= "z");
+  if (!isDriveLetter || tmpdir[1] !== ":") return "";
+
+  // A drive-RELATIVE prefix ("C:", "C:tmp") is not a rooted path and derives
+  // nothing, matching `isAbsolutePath`'s treatment of the identical string. A
+  // UNC path never reaches this line: its first character is a separator rather
+  // than a letter, so it carries no drive letter to derive from at all.
+  const third = tmpdir[2] ?? "";
+  if (third !== "\\" && third !== "/") return "";
+
+  return `${first.toUpperCase()}:\\Windows`;
+}
+
+// The file to hand `spawn` for a Windows SYSTEM binary — `taskkill.exe`,
+// `where.exe`, `cmd.exe` — resolved through ONE ladder written in ONE place.
+//
+// The ladder: the injected environment under the native casing, then the
+// SCREAMING casing, first non-empty trimmed value winning; then `fallbackRoot`
+// (see `deriveWindowsSystemRoot` above); then, only when both are empty after
+// stripping, the BARE `binary`. The bare rung is the documented last resort
+// (T-08-03) and is kept reachable and tested rather than deleted — it is simply
+// no longer the FIRST thing an empty environment reaches, which is the whole
+// point of the rung between.
+//
+// CONSOLIDATED, not merely extracted. `getWhichCommand`'s win32 arm carried this
+// ladder and `buildKillTreePlan`'s win32 arm carried a second copy of it, comment
+// for comment. Two copies of a security decision are two copies that can diverge,
+// and the one that diverges is the one nobody re-read — so the reasoning travels
+// with the code rather than being paraphrased at either former site.
+export function resolveWindowsSystemBinary(input: {
+  env: Record<string, string | undefined>;
+  fallbackRoot: string;
+  binary: string;
+}): string {
+  // A NON-STRING `fallbackRoot` is coerced to empty BEFORE the ladder runs, and
+  // this is required rather than defensive padding. `packages/backend/tsconfig.json`
+  // excludes `./src/**/*.test.ts`, so the compiler never checks a test call site,
+  // and vitest transpiles one without type-checking it. A test that was not
+  // updated to pass the new required member therefore arrives here at RUNTIME
+  // carrying the absent-value primitive JavaScript hands a missing argument.
+  // Without this coercion, composing the path below interpolates that
+  // primitive's NAME as text and yields a plausible-looking absolute path that
+  // resolves to nothing — in the one function whose entire purpose is to stop a
+  // bare name reaching Windows' search order. With it, the input falls through
+  // to the bare name: still wrong, but LOUDLY wrong and documented.
+  //
+  // The asymmetry is specific rather than general, and worth stating so nobody
+  // "simplifies" it away: `buildKillTreePlan`'s win32 arm already reached its
+  // bare-name constant on an EMPTY root, so today's empty value was always safe.
+  // The absent one would not have been.
+  const fallbackRoot =
+    typeof input.fallbackRoot === "string" ? input.fallbackRoot : "";
+
+  // Casing: Windows' own environment lookup is case-insensitive, so on the real
+  // platform one spelling would do. The unit test runs on Linux, where a plain
+  // object lookup is case-SENSITIVE, so both spellings are read — native first,
+  // first non-empty trimmed value winning — and the test asserts the canonical
+  // one. getWindowsNamedRoots below reads its mixed-case variables the same way.
+  let systemRoot = "";
+  for (const name of ["SystemRoot", "SYSTEMROOT"]) {
+    const value = input.env[name]?.trim();
+    if (value === undefined || value === "") continue;
+    systemRoot = value;
+    break;
+  }
+
+  // The DERIVED rung, between the measurement and the bare name. Trimmed by the
+  // same present-but-empty rule the environment read applies, so a whitespace-
+  // only fallback counts as absent rather than composing a rootless path.
+  if (systemRoot === "") systemRoot = fallbackRoot.trim();
+
+  // Strip every trailing separator before joining, so a root that already
+  // carries one does not produce a doubled separator. Unlike getTempRoot's
+  // strip there is no bare-drive guard, and deliberately: a segment is being
+  // APPENDED here rather than a root preserved, so reducing "D:\" to "D:"
+  // yields the correct "D:\System32\…" instead of a doubled separator.
+  let root = systemRoot;
+  while (root.length > 0) {
+    const last = root[root.length - 1];
+    if (last !== "\\" && last !== "/") break;
+    root = root.slice(0, -1);
+  }
+
+  // Explicit string logic with the win32 separator spelled here, not joinPath:
+  // this is one fixed join, and routing it through the other decision helper
+  // would make platform.ts's two helpers mutually dependent for no gain.
+  if (root === "") return input.binary;
+  return `${root}\\System32\\${input.binary}`;
+}
+
 // The binary that answers "where does this command live on PATH", and — on
 // Windows — the absolute path it is invoked by.
 //
@@ -247,14 +389,19 @@ export function getSweepRoots(input: {
 // fallback arm must be reachable and tested rather than treated as dead code,
 // and it is.
 //
-// Casing: Windows' own environment lookup is case-insensitive, so on the real
-// platform one spelling would do. The unit test runs on Linux, where a plain
-// object lookup is case-SENSITIVE, so both spellings are read — native first,
-// first non-empty trimmed value winning — and the test asserts the canonical
-// one. getWindowsNamedRoots below reads its mixed-case variables the same way.
+// UPDATED 2026-08-27 (G-01), and the update is the point rather than a tidy-up:
+// the question above is now ANSWERED, unfavourably. The environment Caido's
+// backend actually sees is EMPTY, so the bare name was not a rarely-reached
+// fallback here — it was the expected Windows answer. `systemRootFallback` is
+// the rung that sits between, and it is a REQUIRED member so the compiler forces
+// every call site to state one (T-08-36, the CR-01 failure shape). The casing
+// ladder, the trailing-separator strip and the reasoning behind both now live in
+// `resolveWindowsSystemBinary` above, which `buildKillTreePlan`'s win32 arm calls
+// as well — one implementation instead of two copies that can diverge.
 export function getWhichCommand(input: {
   platform: Platform | undefined;
   env: Record<string, string | undefined>;
+  systemRootFallback: string;
 }): { command: string; args: (cmd: string) => string[] } {
   const args = (cmd: string) => [cmd];
 
@@ -264,32 +411,14 @@ export function getWhichCommand(input: {
   // POSIX arm is the one that keeps a PATH-only binary resolving on macOS and
   // Linux during a pre-probe provider check, which is CMP-01 surface.
   if (input.platform === "win32") {
-    let systemRoot = "";
-    for (const name of ["SystemRoot", "SYSTEMROOT"]) {
-      const value = input.env[name]?.trim();
-      if (value === undefined || value === "") continue;
-      systemRoot = value;
-      break;
-    }
-
-    // Strip every trailing separator before joining, so a root that already
-    // carries one does not produce a doubled separator. Unlike getTempRoot's
-    // strip there is no bare-drive guard, and deliberately: a segment is being
-    // APPENDED here rather than a root preserved, so reducing "D:\" to "D:"
-    // yields the correct "D:\System32\…" instead of a doubled separator.
-    let root = systemRoot;
-    while (root.length > 0) {
-      const last = root[root.length - 1];
-      if (last !== "\\" && last !== "/") break;
-      root = root.slice(0, -1);
-    }
-
-    // Explicit string logic with the win32 separator spelled here, not
-    // joinPath: this is one fixed two-segment join, and routing it through the
-    // other decision helper would make platform.ts's two helpers mutually
-    // dependent for no gain.
-    if (root === "") return { command: "where.exe", args };
-    return { command: `${root}\\System32\\where.exe`, args };
+    return {
+      command: resolveWindowsSystemBinary({
+        env: input.env,
+        fallbackRoot: input.systemRootFallback,
+        binary: "where.exe",
+      }),
+      args,
+    };
   }
   return { command: "which", args };
 }
