@@ -781,3 +781,266 @@ describe("index.ts pins every process-termination site to a counted inventory (L
     expect(code.match(/child\.kill\(/g)).toHaveLength(1);
   });
 });
+
+// ── The orphan reap: the census, both orderings, and the guarantees ──
+//
+// Plan 08-06 shipped `reapMcpOrphans` and ONE wired call site, and recorded in
+// its own SUMMARY that neither the boundary nor the call site is reachable by any
+// executed assertion — `index.ts` cannot be imported, so the truth was rated
+// `verification: backstop` and routed to human UAT. This block is the cheap
+// strengthening that SUMMARY named: it cannot prove the reap works, but it can
+// prove the wiring exists, sits in the right functions, sits in the right ORDER
+// relative to the removals, and is never awaited. Every assertion below states
+// the input that makes it red, because this phase has already caught gates whose
+// stated red input did not exist.
+//
+// A NOTE ON `functionBody` AND WHY ONE ASSERTION BELOW DOES NOT USE IT.
+// `functionBody` finds a body by taking the first `{` after the parameter list.
+// For a declaration whose RETURN TYPE is an inline object type — `async function
+// callMcpMethod(...): Promise<{ response: JsonRpcResponse; durationMs: number }>`
+// — that first brace belongs to the return type, so the "body" it returns is the
+// TYPE, not the code. Measured, not assumed: it returns a slice containing
+// neither `mcpDirectCallDepth` nor any statement. Rather than widen the shared
+// scanner every existing gate above depends on, the depth-symmetry case below
+// uses its own declaration-to-next-declaration slice with its own non-vacuity
+// guards. If a future edit widens `functionBody` to skip return-type
+// annotations, this local helper can go — but re-run the SC-4 blocks above first.
+function topLevelDeclarationSlice(source: string, name: string): string {
+  let start = -1;
+  for (const prefix of ["async function ", "function "]) {
+    const index = source.indexOf(`${prefix}${name}(`);
+    if (index !== -1) {
+      start = index;
+      break;
+    }
+  }
+  if (start === -1) return "";
+
+  // The next declaration at column 0. Searched from AFTER this one's own first
+  // line, so the declaration itself cannot terminate its own slice.
+  const rest = source.slice(start + 1);
+  const candidates = [
+    rest.indexOf("\nasync function "),
+    rest.indexOf("\nfunction "),
+  ].filter((index) => index !== -1);
+  if (candidates.length === 0) return "";
+  return rest.slice(0, Math.min(...candidates));
+}
+
+describe("index.ts wires the orphan reap at every counted site and nowhere else (LIF-02 / AR-02)", () => {
+  // 1. THE CENSUS, BY ENCLOSING FUNCTION NAME AND NEVER BY A BARE TOTAL. A
+  // whole-file count is satisfied by ANY redistribution of the same number of
+  // calls across the wrong functions, which is precisely the failure a census
+  // exists to catch. Each function is named against its expected count, INCLUDING
+  // the zero.
+  //
+  // RED INPUT: drop the reap from any named function and that function's
+  // assertion goes red naming it. Add one to an unnamed function and the
+  // sum-versus-total assertion goes red, because the enumerated set no longer
+  // accounts for every call in the file.
+  //
+  // The rejected alternative, recorded so it is not reinstated: an earlier draft
+  // proposed `grep -c 'activeProcesses.delete('` == `grep -c
+  // 'reapSessionOrphansIfIdle('`. That is coincidence-shaped. It reads 5 == 5
+  // only because one side counts five real deletions and the other counts one
+  // declaration plus four calls, over two different populations. Adding a
+  // legitimate `activeProcesses.delete(` inside `cleanupMcpRuntime` — which
+  // CORRECTLY gets no idle reap — would turn it red for a correct change, and
+  // deleting a declaration while adding a call would keep it green for a wrong
+  // one. Equal totals over two different populations is not a contract.
+  it("calls the reap boundary from exactly the three functions that own a reap", () => {
+    const sites = {
+      cleanupMcpRuntime: 1,
+      sweepOrphanedMcpTempDirs: 1,
+      reapSessionOrphansIfIdle: 1,
+    };
+    let enumerated = 0;
+    for (const [name, expected] of Object.entries(sites)) {
+      const body = functionBody(code, name);
+      // Non-vacuity, per function: an empty body makes the match below `null`
+      // and the count 0, which would silently satisfy a zero-expectation.
+      expect(body).not.toBe("");
+      expect(body.match(/reapMcpOrphans\(/g) ?? []).toHaveLength(expected);
+      enumerated += expected;
+    }
+    // The unnamed-function guard. Total occurrences minus the declaration must
+    // equal what the enumeration accounts for; a call added anywhere else fails
+    // here rather than being absorbed.
+    const total = (code.match(/reapMcpOrphans\(/g) ?? []).length;
+    const declaration = (code.match(/function reapMcpOrphans\(/g) ?? []).length;
+    expect(declaration).toBe(1);
+    expect(total - declaration).toBe(enumerated);
+  });
+
+  it("calls the idle reap from exactly the four session sites, and never from cleanup", () => {
+    // The ZERO is as load-bearing as the ones. `cleanupMcpRuntime` runs its own
+    // UNCONDITIONAL teardown reap (the case above), and its kill loop empties
+    // `activeProcesses` on the way past — so an idle-gated second call there
+    // would find the gate OPEN and issue a duplicate scan of the same marker on
+    // every teardown. Not harmful, and that is exactly why it must not be there:
+    // it would read as a safeguard while being a second spawn doing nothing the
+    // first did not.
+    const sites = {
+      deleteChat: 1,
+      sendCliMessage: 1,
+      cancelCliMessage: 1,
+      closeCliSession: 1,
+      cleanupMcpRuntime: 0,
+    };
+    let enumerated = 0;
+    for (const [name, expected] of Object.entries(sites)) {
+      const body = functionBody(code, name);
+      expect(body).not.toBe("");
+      expect(body.match(/reapSessionOrphansIfIdle\(/g) ?? []).toHaveLength(
+        expected,
+      );
+      enumerated += expected;
+    }
+    const total = (code.match(/reapSessionOrphansIfIdle\(/g) ?? []).length;
+    const declaration = (
+      code.match(/function reapSessionOrphansIfIdle\(/g) ?? []
+    ).length;
+    expect(declaration).toBe(1);
+    expect(total - declaration).toBe(enumerated);
+  });
+
+  // 2. THE START-UP ORDERING (AR-02 / recorded decision OQ-3). The directories
+  // `sweepOrphanedMcpTempDirs` removes are the env-source documents that carried
+  // CAIDO_TOKEN into these very processes. Removing them first destroys the
+  // forensic trail and withdraws nothing, because the token is in the surviving
+  // process's memory.
+  //
+  // RED INPUT: move the reap below the root loop. Verified by constructing that
+  // exact variant — the reap's statement index moves from 3 to 543 while the
+  // first `rm(` stays at 329, and the comparison below fails.
+  it("sweepOrphanedMcpTempDirs kills previous-run orphans before it removes any directory", () => {
+    const body = functionBody(code, "sweepOrphanedMcpTempDirs");
+
+    // The non-vacuity guard the SC-4 blocks above all carry, and for the reason
+    // this phase measured: an empty body makes every `indexOf` -1 and every
+    // ordering comparison vacuously satisfiable.
+    expect(body).not.toBe("");
+    expect(body.indexOf("reapMcpOrphans(")).not.toBe(-1);
+    expect(body.indexOf("rm(")).not.toBe(-1);
+    expect(body.indexOf("reapMcpOrphans(")).toBeLessThan(body.indexOf("rm("));
+
+    // The scan plan is built from the CLASS-wide builder, and it is handed the
+    // current session directory name — which is the GUARD, not a parameter:
+    // `buildPreviousRunOrphanScanPlan` refuses with `session-active` whenever
+    // that value is defined, so a future edit that moves this call below the
+    // `mcpTempDir` assignment stops the scan instead of pointing it at the live
+    // session's own child. RED INPUT: pass `undefined` literally here and this
+    // fails.
+    const calls = callArgumentTexts(body, "buildPreviousRunOrphanScanPlan");
+    expect(calls).toHaveLength(1);
+    expect(calls[0] ?? "").toContain(
+      "currentSessionDirName: getMcpSessionDirName()",
+    );
+  });
+
+  // 3. THE TEARDOWN ORDERING. Sits BESIDE the existing kill-before-sweep case
+  // rather than replacing it: both the `killTree` loop and the reap must precede
+  // every `rm(`, and they cover different populations — the loop reaches what
+  // Drift spawned, the reap reaches what it did not.
+  //
+  // RED INPUT: move the reap below the `rm(mcpTempDir)` block and this fails
+  // while the neighbouring `killTree` case stays green, which is the point of
+  // asserting them separately.
+  it("cleanupMcpRuntime reaps before it removes the temp dir, alongside the kill loop", () => {
+    const body = functionBody(code, "cleanupMcpRuntime");
+
+    expect(body).not.toBe("");
+    expect(body.indexOf("reapMcpOrphans(")).not.toBe(-1);
+    expect(body.indexOf("killTree(")).not.toBe(-1);
+    expect(body.indexOf("rm(")).not.toBe(-1);
+    expect(body.indexOf("reapMcpOrphans(")).toBeLessThan(body.indexOf("rm("));
+    expect(body.indexOf("killTree(")).toBeLessThan(body.indexOf("rm("));
+  });
+
+  // 4. FIRE-AND-FORGET, exactly as the shipped `await killTree` gate is. Awaiting
+  // either reap would suspend an RPC handler on a child-process callback and a
+  // timer Caido's runtime does not reliably deliver during an await — the
+  // starvation anti-pattern CLAUDE.md names — and for
+  // `reapSessionOrphansIfIdle` it would additionally force `cancelCliMessage`
+  // and `closeCliSession` async, changing signatures recorded decision OQ-4
+  // fixes.
+  //
+  // COMMENT-STRIPPING IS LOAD-BEARING, not tidy: the fire-and-forget rule is
+  // explained in `index.ts` comments that quote the awaited spelling, so an
+  // unstripped scan would go red against the very text preventing the defect.
+  //
+  // RED INPUT: add the `await` keyword at any reap call site and the matching
+  // count becomes non-null.
+  it("never awaits either reap, and still calls both", () => {
+    expect(code.match(/await\s+reapMcpOrphans/g)).toBeNull();
+    expect(code.match(/await\s+reapSessionOrphansIfIdle/g)).toBeNull();
+
+    // The positive companion, the rule T-08-06's gate already follows: without
+    // it this case goes green the moment somebody deletes the whole mechanism —
+    // a gate that passes hardest when there is nothing left to guard.
+    expect(code).toContain("reapMcpOrphans(");
+    expect(code).toContain("reapSessionOrphansIfIdle(");
+  });
+
+  // 5. THE DEPTH COUNTER'S SYMMETRY. `callMcpMethod` spawns `node
+  // mcp-server.mjs` directly and that child's argv is byte-identical to a CLI's
+  // MCP child, so the idle reap would select it (T-08-28). The counter is what
+  // excludes it, and a counter with two increments or two decrements is a
+  // counter that drifts — in the decrement direction it would open the gate on a
+  // live self-test.
+  //
+  // RED INPUT: add a second increment or a second release, or move the increment
+  // out of `callMcpMethod`, and this fails.
+  it("increments and releases the direct-call depth exactly once each, inside callMcpMethod", () => {
+    expect(code.match(/mcpDirectCallDepth \+= 1/g) ?? []).toHaveLength(1);
+    expect(code.match(/mcpDirectCallDepth -= 1/g) ?? []).toHaveLength(1);
+
+    const slice = topLevelDeclarationSlice(code, "callMcpMethod");
+    expect(slice).not.toBe("");
+    expect(slice).toContain("spawnWithEnv(");
+    expect(slice.match(/mcpDirectCallDepth \+= 1/g) ?? []).toHaveLength(1);
+
+    // Released from BOTH handlers, because either can be this child's last
+    // event and neither is guaranteed to fire under Caido's runtime.
+    expect(slice.match(/releaseDirectCall\(\)/g) ?? []).toHaveLength(2);
+  });
+
+  // 6. THE MARKER HAS ONE SPELLING. The directory Drift CREATES and the pattern
+  // the reaper SEARCHES FOR must be the same string, which they silently would
+  // not be if the prefix lived as a bare literal at either site. Plan 08-06
+  // replaced two such literals with `MCP_TEMP_DIR_PREFIX`; this keeps them gone.
+  //
+  // THE VALUE IS READ FROM THE CONSTANT'S DECLARATION rather than restated here,
+  // so renaming the prefix cannot leave this gate asserting a stale string.
+  //
+  // ONE occurrence survives in the comment-stripped source and it is ENUMERATED
+  // rather than exempted by a looser count: the user-facing insecure-mode message
+  // that tells a user to remove leftover `drift-mcp-*` directories by hand. That
+  // is prose shown to a human, not a marker any code matches on. RED INPUT:
+  // reintroduce the literal at either former marker site — `path.join(root,
+  // "drift-mcp-" + token)` — and the count goes from 1 to 2.
+  it("spells the temp-dir prefix once, through the shared constant", () => {
+    const prefixDeclaration = /export const MCP_TEMP_DIR_PREFIX = "([^"]+)";/.exec(
+      killPlanSource,
+    );
+    expect(prefixDeclaration).not.toBeNull();
+    const prefix = prefixDeclaration?.[1] ?? "";
+    expect(prefix).not.toBe("");
+
+    const occurrences = code.split(prefix).length - 1;
+    expect(occurrences).toBe(1);
+
+    // And that single occurrence is the human-facing remediation sentence, not a
+    // marker. Asserted by content so a NEW bare literal cannot inherit this
+    // exemption by simply replacing it.
+    const line = code
+      .split("\n")
+      .find((candidate) => candidate.includes(prefix));
+    expect(line ?? "").toContain("Remove any leftover");
+
+    // The constant is what the code actually uses, at both former literal sites
+    // plus the import — the positive companion, so this gate cannot pass by the
+    // marker having been deleted.
+    expect(code.match(/MCP_TEMP_DIR_PREFIX/g) ?? []).toHaveLength(3);
+  });
+});
