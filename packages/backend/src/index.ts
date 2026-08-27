@@ -3781,6 +3781,12 @@ function reapMcpOrphans(
   // `classifyOrphanScanOutcome` is consulted exactly once per scan and this
   // function contains no second copy of its four-arm ladder — a duplicated
   // ladder is one the unit test does not cover.
+  // THE WALL-CLOCK ORIGIN for the freshness bound (review WR-03). Read BEFORE the
+  // spawn below, so the age this function reports covers the enumerator's whole
+  // life — sampling the process table, exiting, and Drift's `close` handler
+  // finally running — rather than only the part after it started.
+  const scanStartedAt = Date.now();
+
   const settleScan = (result: {
     spawnThrew: boolean;
     exitCode: number | null | undefined;
@@ -3792,6 +3798,19 @@ function reapMcpOrphans(
       exitCode: result.exitCode,
       timedOut: result.timedOut,
       pids: parseOrphanScanPids({ stdout: result.stdout, excludePids }),
+      // THE AGE, MEASURED RATHER THAN ASSUMED. The `setTimeout` below already
+      // bounds this window when it gets to run; on a starved event loop it does
+      // not, and whichever of the timer and the `close` callback becomes runnable
+      // first decides the outcome. Handing the classifier the real elapsed time
+      // makes the bound hold in both orderings — a pid sampled arbitrarily long
+      // ago is not evidence, and `kill -KILL` on a reused number has no recourse
+      // (T-08-04's shape, on the one path that holds no handle).
+      scanAgeMs: Date.now() - scanStartedAt,
+      // THE SAME CONSTANT THE TIMER USES, deliberately, so the two bounds cannot
+      // drift apart: the wall-clock check must never refuse a scan the timer
+      // would have allowed. `index.source.test.ts` asserts this identity, since
+      // nothing in this file is reachable from a unit test.
+      scanFreshnessBudgetMs: ORPHAN_SCAN_TIMEOUT_MS,
     });
 
     // ONE line, SCALARS ONLY: the outcome kind, its reason, the exit code and

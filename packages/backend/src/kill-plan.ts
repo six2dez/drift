@@ -628,8 +628,15 @@ export function buildOrphanKillPlan(input: {
   };
 }
 
-// What the enumerator's outcome MEANS — the four no-op arms and the one reaping
-// arm, as a pure function.
+// What the enumerator's outcome MEANS — the no-op arms and the one reaping arm,
+// as a pure function.
+//
+// FOUR NO-OP ARMS AT 08-06, FIVE SINCE 2026-08-27. `scan-stale` was added by
+// review WR-03 and is documented at the FRESHNESS BOUND block below. The count is stated rather than left implicit because
+// `08-06-PLAN.md` must_haves truth 4 names four, and `08-SECURITY.md`'s T-08-24
+// row carried the same number — both are historical records of what was true
+// when they were written, and the correction travels here and in T-08-24's
+// marked amendment rather than by rewriting the plan.
 //
 // IT IS A FUNCTION FOR ONE REASON AND THE REASON IS TESTABILITY. `reapMcpOrphans`
 // lives in `index.ts`, which declares no `caido:plugin` alias and cannot be
@@ -645,14 +652,64 @@ export type OrphanScanOutcome =
 export type OrphanScanNoopReason =
   | "enumerator-unavailable"
   | "scan-timeout"
+  | "scan-stale"
   | "scan-failed"
   | "no-match";
+
+// THE FRESHNESS BOUND, and the hazard it exists for (review WR-03).
+//
+// A pid is not an identity. This module spends `hasTrackedProcessExited`'s whole
+// docblock on that fact — `isPidAlive` proves LIVENESS, and a pid the OS has
+// REASSIGNED is alive — and T-08-04 exists because a reused number handed to a
+// forceful kill takes a stranger's process. The orphan reap has the SAME hazard
+// on a path with no handle at all: `pgrep` samples the process table and exits,
+// Drift's `close` handler fires some time later, and `kill -KILL -- <pid>` is
+// spawned for numbers nobody re-verified. The operand is `-KILL` and the target
+// is a process this module's own comment says Drift "has ALREADY decided must
+// not survive", so a reused pid dies with no recourse. Drift's user population
+// runs high-fan-out tooling (`xargs -P`, `ffuf`, `nuclei`), where pid-table
+// churn in the thousands per second is ordinary.
+//
+// WHAT THIS BOUND DOES, STATED EXACTLY SO IT IS NOT MISREAD AS A CLOSURE. The
+// caller already arms a `setTimeout` for the same duration, so in the ordinary
+// case the window is bounded. What is NOT bounded is the case that matters: when
+// Caido's event loop is starved — the condition CLAUDE.md names, and the reason
+// the frontend keep-alive exists — neither the timer nor the `close` callback
+// runs, and whichever becomes runnable FIRST when the loop drains decides the
+// outcome. If `close` wins, today's code kills on pids sampled arbitrarily long
+// ago. Measuring the age on the WALL CLOCK and refusing above the budget makes
+// the bound hold whether or not the timer fired, which turns an unbounded window
+// into a stated one.
+//
+// WHAT IT DOES NOT DO: within the budget, a reused pid is still reachable. The
+// two closures the review proposed were both rejected, and the reasons are
+// recorded here rather than in a commit message nobody re-reads:
+//
+//   * `pkill -f -- <pattern>` matches and signals inside ONE process, so the
+//     window really does close — but it signals every match AT KILL TIME rather
+//     than the frozen list `pgrep` returned. A user who clicks Stop and
+//     immediately starts a new turn (the ordinary interaction) would have the
+//     NEW turn's MCP child killed, which is T-08-27 — the precise harm the idle
+//     gate exists to prevent, traded in at a far higher probability than the
+//     reuse it removes.
+//   * A `ps -p <pid> -o command=` identity re-check before the signal costs one
+//     more spawn AND one more child-process `close` delivery per orphan. Whether
+//     Caido's LLRT delivers the FIRST one is recorded in this phase as an
+//     unrun-verify residual; gating the kill on a SECOND unverified delivery
+//     multiplies the chance the orphan is never signalled at all, which is
+//     LIF-02 — the reported bug this whole mechanism exists to fix.
+//
+// So the residual is accepted and named rather than hidden: a pid reused inside
+// the budget is still signalled. The budget is the caller's scan timeout,
+// injected rather than duplicated here.
 
 export function classifyOrphanScanOutcome(input: {
   spawnThrew: boolean;
   exitCode: number | null | undefined;
   timedOut: boolean;
   pids: number[];
+  scanAgeMs: number;
+  scanFreshnessBudgetMs: number;
 }): OrphanScanOutcome {
   // `spawn` throws SYNCHRONOUSLY for an unspawnable file, which is what a host
   // with no `pgrep` produces. Such a host is exactly as well served as it is at
@@ -665,6 +722,29 @@ export function classifyOrphanScanOutcome(input: {
   // count on a teardown path for a scan that is best-effort by construction.
   if (input.timedOut) {
     return { kind: "noop", kill: false, reason: "scan-timeout" };
+  }
+
+  // THE FRESHNESS ARM, above every arm that can reach a kill. See the FRESHNESS
+  // BOUND block above this function: this is the timer's bound re-stated on the wall clock, so it holds
+  // on a starved event loop where the timer did not get to fire first.
+  //
+  // BOTH SCALARS ARE CHECKED FOR SHAPE, not just for size, and an unusable value
+  // on either resolves toward STALE — the same subtractive rule
+  // `shouldReapSessionOrphans` and `hasTrackedProcessExited` follow. A NaN age is
+  // what a caller subtracting from an unset timestamp produces, and a wrong
+  // number is not evidence that these pids are fresh. A non-positive budget is
+  // the caller's error and is likewise not evidence.
+  if (!Number.isInteger(input.scanFreshnessBudgetMs)) {
+    return { kind: "noop", kill: false, reason: "scan-stale" };
+  }
+  if (input.scanFreshnessBudgetMs <= 0) {
+    return { kind: "noop", kill: false, reason: "scan-stale" };
+  }
+  if (!Number.isFinite(input.scanAgeMs)) {
+    return { kind: "noop", kill: false, reason: "scan-stale" };
+  }
+  if (input.scanAgeMs > input.scanFreshnessBudgetMs) {
+    return { kind: "noop", kill: false, reason: "scan-stale" };
   }
 
   // Exit 1 is `pgrep`'s DOCUMENTED "no process matched", and it is deliberately

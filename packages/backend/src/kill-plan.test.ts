@@ -825,6 +825,13 @@ describe("the orphan path never renders a pid as a leading-minus operand (GD-01)
 // an executed assertion. `reapMcpOrphans` lives in `index.ts`, which no test in
 // this project can import, so the ladder was lifted out here on purpose: a
 // four-arm decision written inline there is a decision no assertion can reach.
+// A scan whose pids are FRESH — the two members review WR-03 added, spelled ONCE
+// and spread into every case below so no case can accidentally assert the
+// stale-arm behaviour while claiming to assert something else. `scanAgeMs` well
+// inside `scanFreshnessBudgetMs` is the ordinary reading: the enumerator answers
+// in single-digit milliseconds and the budget is the caller's scan timeout.
+const FRESH = { scanAgeMs: 5, scanFreshnessBudgetMs: 1000 } as const;
+
 describe("classifyOrphanScanOutcome — every unavailable-enumeration outcome is a no-op", () => {
   // RED INPUT for the whole block: make any single arm return `kill: true` and
   // that arm's case goes red; hardwire the classifier to refuse and the positive
@@ -840,6 +847,7 @@ describe("classifyOrphanScanOutcome — every unavailable-enumeration outcome is
         exitCode: undefined,
         timedOut: false,
         pids: [123],
+        ...FRESH,
       }),
     ).toEqual({
       kind: "noop",
@@ -855,6 +863,7 @@ describe("classifyOrphanScanOutcome — every unavailable-enumeration outcome is
         exitCode: undefined,
         timedOut: true,
         pids: [123],
+        ...FRESH,
       }),
     ).toEqual({ kind: "noop", kill: false, reason: "scan-timeout" });
   });
@@ -870,6 +879,7 @@ describe("classifyOrphanScanOutcome — every unavailable-enumeration outcome is
           exitCode,
           timedOut: false,
           pids: [123],
+          ...FRESH,
         }),
       ).toEqual({ kind: "noop", kill: false, reason: "scan-failed" });
     }
@@ -880,6 +890,7 @@ describe("classifyOrphanScanOutcome — every unavailable-enumeration outcome is
         exitCode: null,
         timedOut: false,
         pids: [123],
+        ...FRESH,
       }),
     ).toEqual({ kind: "noop", kill: false, reason: "scan-failed" });
   });
@@ -891,6 +902,7 @@ describe("classifyOrphanScanOutcome — every unavailable-enumeration outcome is
         exitCode: 0,
         timedOut: false,
         pids: [],
+        ...FRESH,
       }),
     ).toEqual({ kind: "noop", kill: false, reason: "no-match" });
   });
@@ -905,8 +917,100 @@ describe("classifyOrphanScanOutcome — every unavailable-enumeration outcome is
         exitCode: 0,
         timedOut: false,
         pids: [44284, 123],
+        ...FRESH,
       }),
     ).toEqual({ kind: "reap", kill: true, pids: [44284, 123] });
+  });
+
+  // ── THE FRESHNESS ARM (review WR-03) ────────────────────────────────────
+  //
+  // WHY IT IS NOT REDUNDANT WITH `scan-timeout`. The caller arms a `setTimeout`
+  // for the same duration, so when the timer runs the window is already bounded.
+  // The case this arm is for is the one where it does NOT run: on a starved
+  // Caido event loop neither the timer nor the enumerator's `close` callback
+  // fires, and whichever becomes runnable first when the loop drains decides the
+  // outcome. If `close` wins, the pids handed here were sampled arbitrarily long
+  // ago, and `kill -KILL` on a number the OS has since reassigned takes a
+  // stranger's process with no recourse (T-08-04's shape, on the one path that
+  // holds no handle).
+  //
+  // RED INPUT for every case below: delete the freshness arm and each returns
+  // `{ kind: "reap" }` instead. Verified by running exactly that deletion.
+  it("refuses to kill on a scan older than the freshness budget", () => {
+    expect(
+      classifyOrphanScanOutcome({
+        spawnThrew: false,
+        exitCode: 0,
+        timedOut: false,
+        pids: [44284],
+        scanAgeMs: 1001,
+        scanFreshnessBudgetMs: 1000,
+      }),
+    ).toEqual({ kind: "noop", kill: false, reason: "scan-stale" });
+  });
+
+  it("accepts a scan exactly AT the budget, so the bound is not off by one", () => {
+    // The boundary is asserted in BOTH directions on purpose. A `>=` here would
+    // refuse a scan the timer would have allowed, which is the reaper failing to
+    // fire when it should — the failure direction this phase cares most about.
+    expect(
+      classifyOrphanScanOutcome({
+        spawnThrew: false,
+        exitCode: 0,
+        timedOut: false,
+        pids: [44284],
+        scanAgeMs: 1000,
+        scanFreshnessBudgetMs: 1000,
+      }),
+    ).toEqual({ kind: "reap", kill: true, pids: [44284] });
+  });
+
+  it("treats an unusable age or budget as stale rather than as fresh", () => {
+    // NaN is what a caller subtracting from an unset timestamp produces, and a
+    // wrong number is not evidence that these pids are fresh. Same subtractive
+    // rule `shouldReapSessionOrphans` states: an unknown resolves toward NOT
+    // killing.
+    for (const scanAgeMs of [Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(
+        classifyOrphanScanOutcome({
+          spawnThrew: false,
+          exitCode: 0,
+          timedOut: false,
+          pids: [44284],
+          scanAgeMs,
+          scanFreshnessBudgetMs: 1000,
+        }),
+      ).toEqual({ kind: "noop", kill: false, reason: "scan-stale" });
+    }
+    for (const scanFreshnessBudgetMs of [0, -1, 1.5, Number.NaN]) {
+      expect(
+        classifyOrphanScanOutcome({
+          spawnThrew: false,
+          exitCode: 0,
+          timedOut: false,
+          pids: [44284],
+          scanAgeMs: 5,
+          scanFreshnessBudgetMs,
+        }),
+      ).toEqual({ kind: "noop", kill: false, reason: "scan-stale" });
+    }
+  });
+
+  it("keeps a NEGATIVE age reapable, because a clock that went backwards is not a stale scan", () => {
+    // `Date.now()` is not monotonic. A system clock stepped backwards between
+    // the spawn and the settle yields a negative age, and refusing on it would
+    // disable the reaper for the length of the step — the reaper erring toward
+    // never firing, which recreates the defect it exists to fix.
+    expect(
+      classifyOrphanScanOutcome({
+        spawnThrew: false,
+        exitCode: 0,
+        timedOut: false,
+        pids: [44284],
+        scanAgeMs: -5000,
+        scanFreshnessBudgetMs: 1000,
+      }),
+    ).toEqual({ kind: "reap", kill: true, pids: [44284] });
   });
 });
 

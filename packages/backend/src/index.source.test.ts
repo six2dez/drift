@@ -1138,6 +1138,45 @@ describe("index.ts wires the orphan reap at every counted site and nowhere else 
     expect(body).toContain("directDepth=${String(directMcpCallDepth)}");
   });
 
+  // 5e. THE TWO BOUNDS ON THE SAME WINDOW CANNOT DRIFT APART (review WR-03).
+  //
+  // `reapMcpOrphans` bounds the scan twice: with a `setTimeout` that kills the
+  // enumerator, and — since WR-03 — with a wall-clock age the pure classifier
+  // compares against a budget. The wall-clock check exists BECAUSE the timer may
+  // not get to run on a starved event loop, so it must never be the STRICTER of
+  // the two: a budget smaller than the timeout would refuse scans the timer would
+  // have allowed, which is the reaper failing to fire when it should.
+  //
+  // Passing the same identifier to both is the whole guarantee, and it is
+  // asserted here because nothing in `index.ts` is reachable from a unit test.
+  //
+  // RED INPUT: pass a literal, or a different constant, to either the timer or
+  // the classifier and this fails.
+  it("bounds the scan with ONE constant, at the timer and at the freshness check", () => {
+    const body = functionBody(code, "reapMcpOrphans");
+    expect(body).not.toBe("");
+    expect(body).toContain("scanFreshnessBudgetMs: ORPHAN_SCAN_TIMEOUT_MS,");
+    expect(body).toContain("}, ORPHAN_SCAN_TIMEOUT_MS);");
+    expect(body).toContain("scanAgeMs: Date.now() - scanStartedAt,");
+    // Read BEFORE the spawn, so the age covers the enumerator's whole life. A
+    // `scanStartedAt` assigned inside `settleScan` would read ~0 every time and
+    // make the bound vacuous while both assertions above stayed green.
+    expect(body.indexOf("const scanStartedAt = Date.now();")).toBeGreaterThan(-1);
+    expect(body.indexOf("const scanStartedAt = Date.now();")).toBeLessThan(
+      body.indexOf("scanner = spawn("),
+    );
+
+    // And the constant it resolves to is a POSITIVE INTEGER — the classifier
+    // treats a non-positive or non-integer budget as stale, which would disable
+    // the reap entirely.
+    const declaration = /const POSIX_PATH_SEARCH_TIMEOUT_MS = (\d+);/.exec(code);
+    expect(declaration).not.toBeNull();
+    expect(Number(declaration?.[1] ?? "0")).toBeGreaterThan(0);
+    expect(code).toContain(
+      "const ORPHAN_SCAN_TIMEOUT_MS = POSIX_PATH_SEARCH_TIMEOUT_MS;",
+    );
+  });
+
   // 6. THE MARKER HAS ONE SPELLING. The directory Drift CREATES and the pattern
   // the reaper SEARCHES FOR must be the same string, which they silently would
   // not be if the prefix lived as a bare literal at either site. Plan 08-06
