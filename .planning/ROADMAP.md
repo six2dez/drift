@@ -314,7 +314,7 @@ Plans:
   4. Session finalize / `stopMcpServer` kills all tracked pids before sweeping the temp dir, so token-bearing processes die before their env-source files are removed.
   5. macOS/Linux cancellation and timeout semantics visible to the user are unchanged and existing tests stay green.
 
-**Plans**: 11/17 plans executed (10/10 executed; 7 gap-closure plans added 2026-08-28 from `08-VERIFICATION.md`)
+**Plans**: 12/17 plans executed (10/10 executed; 7 gap-closure plans added 2026-08-28 from `08-VERIFICATION.md`)
 
 Plans:
 **Wave 1**
@@ -368,7 +368,7 @@ Plans:
 
 **Gap Wave 7** *(blocked on Gap Wave 6; three carrier plans with no file overlap, parallel — so none of them can assert the gate exits 0: whichever finishes first still sees its siblings' carriers named by ARM A)*
 
-- [ ] 08-12-PLAN.md — The probe fix as a tested pure helper: `classifyLivenessObservation` (three-valued, with an executed totality case over its whole input domain), `buildLivenessProbePlan`, `formatSpikeVerdict` — plus the A1 marked correction in `kill-plan.ts`, `index.ts` and `kill-tree.posix.test.ts` (LIF-01, LIF-02)
+- [x] 08-12-PLAN.md — The probe fix as a tested pure helper: `classifyLivenessObservation` (three-valued, with an executed totality case over its whole input domain), `buildLivenessProbePlan`, `formatSpikeVerdict` — plus the A1 marked correction in `kill-plan.ts`, `index.ts` and `kill-tree.posix.test.ts` (LIF-01, LIF-02)
 - [ ] 08-13-PLAN.md — Gap 2: amend SC-2 in place to name BOTH mechanisms and state the reap's three boundaries, retract A1 inside the 2026-08-27 amendment, and correct LIF-01/LIF-02 and their coverage rows (LIF-01, LIF-02)
 - [ ] 08-14-PLAN.md — The register and the phase documents: ledger entry 11 corrected in both representations with a new entry for the unfalsifiable probe verdict, plus `STATE.md`, `08-UAT.md` test 1, `08-VALIDATION.md` and `08-SECURITY.md`, each cleared from a captured gate run proven live rather than silent (LIF-01, LIF-02)
 
@@ -509,7 +509,7 @@ Parallelism opportunities: Phase 2 may run alongside Phase 3 (both depend only o
 | 5. Kill Shell Wrappers | 6/6 | Complete   | 2026-08-20 |
 | 6. Windows Command Resolution | 7/7 | Complete    | 2026-08-21 |
 | 7. Provider Spawn & Registration | 0/3 | Not started | - |
-| 8. Process Lifecycle | 11/17 | In Progress|  |
+| 8. Process Lifecycle | 12/17 | In Progress|  |
 | 9. CI Hardening | 0/1 | Not started | - |
 | 10. Windows Polish | 0/1 | Not started | - |
 | 11. Plugin Capability Discovery | 0/3 | Not started | - |

@@ -4,16 +4,16 @@ milestone: v1.0
 current_phase: 08
 current_phase_name: Process Lifecycle
 status: executing
-stopped_at: Completed 08-11-PLAN.md
-last_updated: "2026-08-28T08:40:28.570Z"
+stopped_at: Completed 08-12-PLAN.md
+last_updated: "2026-08-28T09:00:49.998Z"
 last_activity: 2026-08-28
 last_activity_desc: Phase 08 execution started
-state_head: bdf2234d664501c81c06d16648460bbd78e559ff
+state_head: 491c39846203392d6cfba30bf5b8ff73446c325a
 progress:
   total_phases: 13
   completed_phases: 5
   total_plans: 57
-  completed_plans: 51
+  completed_plans: 52
 milestone_name: milestone
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-06-26)
 ## Current Position
 
 Phase: 08 (Process Lifecycle) — EXECUTING
-Plan: 2 of 17
+Plan: 3 of 17
 Status: Ready to execute
 Last activity: 2026-08-28 — Phase 08 execution started
 
@@ -79,6 +79,7 @@ Progress: [███░░░░░░░] 30% (3 of 10 milestone phases)
 | Phase 08 P09 | 9 min | 2 tasks | 2 files |
 | Phase 08 P10 | 74 min | 3 tasks | 14 files |
 | Phase 08 P11 | 22 min | 3 tasks | 2 files |
+| Phase 08 P12 | 16 min | 3 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -230,6 +231,7 @@ Recent decisions affecting current work:
 - [Phase 08]: AR-05: awaiting killTree inside cleanupMcpRuntime is REJECTED, and not for convenience — awaiting a spawned killer inside an RPC handler suspends it on a child-process callback and a timer Caido's runtime does not reliably deliver during an await. That is the event-loop starvation CLAUDE.md names as an anti-pattern and the reason killTree is fire-and-forget (OQ-4). The argv-marker reap is insensitive to losing that race because pgrep -f matches the command line the kernel recorded.
 - [Phase 08]: AR-07 is recorded as a SCOPE decision, not a constraint. Do NOT write that argv cannot distinguish sessions — that claim is false for claude-cli and copilot-cli, whose args array Drift authors itself via buildMcpServerSpec. It is false for gemini-cli/codex-cli, which share one mcp add drift registration, so closing the multi-session cancel window means shipping two mechanisms rather than one.
 - [Phase 08]: AR-06 is an ACCEPTED high under block_on: high and names six2dez as DECIDER per recorded decision GD-02, not merely an owner. threats_open: 0 now carries a companion note naming it, because a high accepted silently past the phase's own blocking gate is exactly what a bare zero hides. Register rolled 21 -> 51 rows; T-08-03 re-rated medium -> high on a measured empty environment.
+- [Phase 08]: A1's 2026-08-27 verdict retracted in all three source carriers; liveness now a three-valued pure helper (classifyLivenessObservation) whose cannot-tell answer cannot be reached by a coalescing operator
 
 ### Pending Todos
 
@@ -280,8 +282,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-28T08:40:28.313Z
-Stopped at: Completed 08-11-PLAN.md
+Last session: 2026-08-28T09:00:49.785Z
+Stopped at: Completed 08-12-PLAN.md
 Resume file: None
 
 **Live on the public remote: nothing of ours.** Plan 03-04 tore down all three `scratch/*` branches (`ci-proof-windows-probe`, `ci-proof-windows-probe-negative`, `ci-proof-windows-gate-negative`) locally and remotely. Asserted with a `test -z` discrimination over the captured glob (`scratch-glob-empty=0`) plus the full unfiltered listing, which now shows only `main` at `2d8cf16` and the pre-existing, unrelated `fix/security-hotfixes` at `0cd81f3`. `origin/main` was never pushed by this phase and is still `2d8cf16`; local `main` is 23 commits ahead and deliberately unpushed. **Re-verified 2026-08-13 (plan 03-05):** the remote still lists only `main` `2d8cf16` and the pre-existing `fix/security-hotfixes` `0cd81f3`, and all eight Phase 3 run records (4 probe + 4 `CI` control) still resolve with their recorded conclusions — which is what makes the URLs in `03-FINDINGS.md` valid citations after the branches were deleted. The probe **artifacts** do not survive: they expire 2026-09-12, which is why D-11 required the committed findings document.
