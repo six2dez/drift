@@ -257,91 +257,256 @@ still an isolated zero, and the CLI-cleanup confounder it carries is still unexc
 
 ---
 
-## HEAD-build readings, 2026-08-28 — STAGED, NOT YET TAKEN
+## HEAD-build readings, 2026-08-28 — TAKEN on the maintainer's hardware
 
-**Added by plan 08-16.** Everything in this section is **empty on purpose.** These four tables are
-the form the maintainer's readings get transcribed into; until that transcription happens, every
-value cell reads *not recorded* in exactly the form the Control table above uses. A cell pre-filled
-with an expected value is how a measurement becomes a transcription of somebody's expectation, and
-this phase already shipped one of those — see § *The rule this spike cost us, stated as a rule*.
+**Staged empty by plan 08-16 task 1; FILLED 2026-08-28 by plan 08-16 task 3** from readings the
+maintainer took on their own machine. Of the **24** staged value cells, **21 carry a verbatim
+transcription** and **3 carry a dated marked abstention** naming what stopped them. 21 + 3 = 24;
+there are no unexplained blanks. No cell was filled from a neighbouring cell, and no cell was
+filled from an expectation.
+
+The raw terminal output and the raw diagnostics values these cells were transcribed from are
+preserved verbatim in § *The raw readings, exactly as pasted* below. Every filled cell is
+therefore checkable against its source rather than against this document's prose — which is the
+point, because this phase's defining defect is a plausible-looking reading nobody re-derived.
+
+**Interpretation is in no cell.** It lives in § *What these readings close, and what they do not*
+beneath the tables (threat T-08-71), so a later reader can always tell measured ground from
+inference.
 
 **These readings are taken against HEAD, not against the probe build.** They need no probe and no
-patch: three of them read `pgrep`/`ps` from a terminal and one reads a diagnostics key that ships in
-HEAD. That is what separates them from the A1 re-run in § *How to run this spike later*, which
-requires `a1-probe-fix.patch` and is plan 08-17's.
+patch: three of them read `pgrep`/`ps` from a terminal and one reads a diagnostics key that ships
+in HEAD. That is what separates them from the A1 re-run in § *How to run this spike later*, which
+requires `a1-probe-fix.patch` and is plan 08-17's. **That re-run's table is still empty and is
+unchanged by anything in this section.**
 
 ### The build these readings are attributed to
 
 A reading is a claim about a specific build, so the build is named before the tables rather than
 after them.
 
+**CORRECTED 2026-08-28 — the build changed between staging and measurement, and that change is
+the reason any reading exists at all.** Task 1 staged these tables against `abfbc17`. **No reading
+could have been taken on that build.** Caido's sandbox exposes an empty `process.env`, so
+`readParentEnv()` returned `{}` and `buildSpawnEnv` handed the provider CLI only Drift's own
+variables — no `USER`. Measured 2026-08-28: `env -i claude -p` reports
+`Not logged in - Please run /login`, `env -i USER=<name> claude -p` succeeds, and `HOME`/`PATH`
+are neither sufficient nor required — the credential lives in the macOS Keychain and the lookup is
+keyed on the user name. No turn could start, so no cancel and no timeout could be measured.
+Commit `39876b5` (`derivePosixIdentity`, an identity FLOOR under `buildSpawnEnv`) fixed that
+outside this plan's scope, at the maintainer's direction; see `08-16-SUMMARY.md` § *Deviations*.
+The readings below are attributed to the build that carries it.
+
 | Field | Value |
 |---|---|
-| Built from HEAD commit | `abfbc17` (`abfbc17173be8fb4b353c89fd9f0e0700f063a30`) |
+| Built from HEAD commit | `39876b5` — **corrected**; supersedes the staged `abfbc17` attribution, preserved below |
 | Build command | `pnpm build` → exit 0, 2026-08-28 |
-| Package | `dist/plugin_package.zip`, **2,561,448 bytes** |
-| Unzipped | `dist/plugin_package/`, 5 files, **2,560,488 bytes** |
-| Probe present? | **No.** T-08-03 removed the A1 probe at `d8ccab8`; this build carries no `spike*` fields and cannot answer A1. |
-| Caido version | **not recorded — reading not yet taken.** From Caido's own About/Settings screen, not from `processVersion` (which reports `unavailable` inside the sandbox). The A1 table above has carried this as an absence since 2026-08-27; it is a claim about *the LLRT fork this specific Caido ships*, so it is asked for once here for all four tables below. |
+| Package | `dist/plugin_package.zip`, **2,563,589 bytes** — rebuilt at `39876b5` by the executor on 2026-08-28. **This is NOT the byte size of the artifact the maintainer installed**; that size was not reported and is not inferred from this one. |
+| Unzipped | `dist/plugin_package/`, 5 files, **2,562,629 bytes** — same caveat as the row above |
+| Probe present? | **No.** T-08-03 removed the A1 probe at `d8ccab8`; this build carries no `spike*` fields and cannot answer A1's causal half. |
+| Caido version | **0.58.2** — recorded 2026-08-28 from the maintainer's own About/Settings screen, not from `processVersion`. This closes the absence the A1 table above has carried since 2026-08-27. |
+| Platform | **macOS, darwin 25.6.0** |
+| Provider CLI under test | **Claude Code 2.1.250** |
+| Sampler | a 1 Hz `pgrep -f mcp-server.mjs \| wc -l` loop that also dumped a full `ps -eo pid,ppid,pgid,args` on first sighting |
+
+> **SUPERSEDED 2026-08-28 (preserved, not deleted — correct as a record of what task 1 staged on
+> its date, false as the attribution of the readings above).** The staged build table read:
+>
+> | Field | Value |
+> |---|---|
+> | Built from HEAD commit | `abfbc17` (`abfbc17173be8fb4b353c89fd9f0e0700f063a30`) |
+> | Build command | `pnpm build` → exit 0, 2026-08-28 |
+> | Package | `dist/plugin_package.zip`, **2,561,448 bytes** |
+> | Unzipped | `dist/plugin_package/`, 5 files, **2,560,488 bytes** |
+> | Probe present? | **No.** T-08-03 removed the A1 probe at `d8ccab8`; this build carries no `spike*` fields and cannot answer A1. |
+> | Caido version | **not recorded — reading not yet taken.** From Caido's own About/Settings screen, not from `processVersion` (which reports `unavailable` inside the sandbox). The A1 table above has carried this as an absence since 2026-08-27; it is a claim about *the LLRT fork this specific Caido ships*, so it is asked for once here for all four tables below. |
 
 ### Table 1 — the cancel path (UAT test 9, SC-3's POSIX half, UAT gap G-04)
 
 | Field | Value |
 |---|---|
-| Date taken | **not recorded — reading not yet taken** |
-| Provider used | **not recorded — reading not yet taken** |
-| `pgrep -f mcp-server.mjs \| wc -l` **during** the live turn | **not recorded — reading not yet taken** |
-| `pgrep -f mcp-server.mjs \| wc -l` **~5s after Stop** | **not recorded — reading not yet taken** |
-| Provider CLI process itself still alive after Stop? | **not recorded — reading not yet taken.** This is the cell that bears on the CLI-cleanup confounder, unexcluded since 2026-08-24. |
-| `activeSessions` from the same diagnostics capture | **not recorded — reading not yet taken** |
-| **Verdict** | **OPEN — not measured on this build** |
+| Date taken | **2026-08-28** |
+| Provider used | **Claude Code 2.1.250** |
+| `pgrep -f mcp-server.mjs \| wc -l` **during** the live turn | **1** — first non-zero sample `13:35:43  count=1`, and `count=1` at every sample through `13:36:12` |
+| `pgrep -f mcp-server.mjs \| wc -l` **~5s after Stop** | **0** — Stop was clicked while the count was 1, i.e. at or before `13:36:12`; the first zero sample is `13:36:13  count=0` and every one of the nine consecutive samples `13:36:13` → `13:36:21` reads `count=0`. The `~5s` instant falls inside that window. The wall-clock instant of the Stop click was itself not timestamped in the paste. |
+| Provider CLI process itself still alive after Stop? | **abstained 2026-08-28 — not measured.** The sampler ran `pgrep -f mcp-server.mjs` only, and the full `ps -eo pid,ppid,pgid,args` was dumped on FIRST SIGHTING alone; no post-Stop `ps` was re-run, and the separate parent resolution looked up `caido-cli`/`Caido`, not the provider row. **This is the cell that bears on the CLI-cleanup confounder, and that confounder therefore remains unexcluded — as it has been since 2026-08-24.** |
+| `activeSessions` from the same diagnostics capture | **0** |
+| **Verdict** | **MEASURED 2026-08-28 on the `39876b5` build — 1 during the turn, 0 after Stop.** A real before/after pair for the cancel path on this build. It is NOT a causal attribution: see § *What these readings close, and what they do not*. |
+
+> **SUPERSEDED 2026-08-28 (preserved, not deleted).** The six value cells above read
+> **not recorded — reading not yet taken** and the verdict read
+> **OPEN — not measured on this build**.
 
 ### Table 2 — the absolute-timeout path (UAT test 10, SC-3's timeout clause)
 
-**This table is filled from its OWN turn.** It is a different code path from Table 1 and it has never
-been exercised, on any build, by anybody. Nothing here is inferred from Table 1 and nothing in Table 1
-is inferred from here.
+**This table is filled from its OWN turn.** It is a different code path from Table 1 and, before
+2026-08-28, it had never been exercised on any build by anybody. Nothing here is inferred from
+Table 1 and nothing in Table 1 is inferred from here. That was checked cell by cell, not assumed.
 
 | Field | Value |
 |---|---|
-| Date taken | **not recorded — reading not yet taken** |
-| Configured `processTimeoutSeconds` for this run | **not recorded — reading not yet taken** |
-| `pgrep -f mcp-server.mjs \| wc -l` **during** the live turn | **not recorded — reading not yet taken** |
-| `pgrep -f mcp-server.mjs \| wc -l` **~5s after the timeout fired** | **not recorded — reading not yet taken** |
-| Provider CLI process itself still alive after the timeout fired? | **not recorded — reading not yet taken** |
-| Was Stop clicked? | **not recorded — reading not yet taken.** If Stop was clicked this is a second Table 1 reading, not a Table 2 reading, and it must be recorded as an abstention here. |
-| **Verdict** | **OPEN — not measured on any build, ever** |
+| Date taken | **2026-08-28** |
+| Configured `processTimeoutSeconds` for this run | **10** — set at Settings → Process → Timeout (s); the maintainer records 10 as the build's minimum |
+| `pgrep -f mcp-server.mjs \| wc -l` **during** the live turn | **1** — first non-zero sample `13:37:45  count=1`, and `count=1` at every sample through `13:37:54` |
+| `pgrep -f mcp-server.mjs \| wc -l` **~5s after the timeout fired** | **0** — first zero sample `13:37:55  count=0`, and nine consecutive zero samples through `13:38:03` |
+| Provider CLI process itself still alive after the timeout fired? | **abstained 2026-08-28 — not measured**, for the same reason as Table 1's corresponding cell: no post-timeout `ps` was re-run. |
+| Was Stop clicked? | **NO.** Verbatim: *"Stop was **NOT** clicked; the turn was left to time out."* This is therefore a Table 2 reading and not a second Table 1 reading. |
+| **Verdict** | **MEASURED 2026-08-28 on the `39876b5` build — 1 during the turn, 0 after the timeout fired. The child's lifetime is 10 samples (`13:37:45` → `13:37:54` inclusive) against a configured 10 s timeout.** This is the FIRST time this code path has been exercised on any build. |
+
+> **SUPERSEDED 2026-08-28 (preserved, not deleted).** The six value cells above read
+> **not recorded — reading not yet taken** and the verdict read
+> **OPEN — not measured on any build, ever**.
 
 ### Table 3 — is the orphan reap inert on this runtime? (ledger entries 13, 14, 15)
 
-The cheapest high-value reading in the phase: one cancel and one glance at a key that ships in HEAD.
-The value's grammar and its seven possible shapes are tabulated in § *How to run this spike later*,
-step 5.
+The cheapest high-value reading in the phase: one cancel and one glance at a key that ships in
+HEAD. The value's grammar and its seven possible shapes are tabulated in § *How to run this spike
+later*, step 5.
 
 | Field | Value |
 |---|---|
-| Date taken | **not recorded — reading not yet taken** |
-| `lastOrphanReap`, verbatim | **not recorded — reading not yet taken** |
-| `activeSessions` from the same capture | **not recorded — reading not yet taken** |
-| Elapsed between the cancel and the diagnostics capture | **not recorded — reading not yet taken** |
-| What that value establishes, in plain language | **not recorded — reading not yet taken.** Exactly one of: (a) the mechanism ran and matched nothing; (b) the mechanism ran and signalled N orphans; (c) the mechanism was refused by its own gate before any spawn; (d) the mechanism could not spawn its enumerator and is therefore **inert on this runtime**. Telling (a) apart from (d) is the entire reason the key exists — do not collapse them. |
-| **Verdict** | **OPEN — not measured** |
+| Date taken | **2026-08-28** |
+| `lastOrphanReap`, verbatim | **`kind=noop reason=scan-failed exit=1 killed=0 ageMs=24`** |
+| `activeSessions` from the same capture | **0** |
+| Elapsed between the cancel and the diagnostics capture | **abstained 2026-08-28 — not measured.** The maintainer captured the panel after the cancel run but did not time the interval, and `ageMs=24` is NOT that interval — it is `scanAgeMs`, the age of the enumerator's own pid sample (`classifyOrphanScanOutcome`, `kill-plan.ts`). Reading it as the elapsed time would be exactly the neighbour-filling this section forbids. |
+| What that value establishes, in plain language | **(a) the mechanism RAN and matched nothing — NOT (d) inert.** *This is the one derived cell in these four tables; it is a classification of the transcribed value against the source ladder, not a transcription, and it is flagged as such.* Traced in `kill-plan.ts` `classifyOrphanScanOutcome` and `index.ts`'s scanner wiring: a `spawn` that throws and `scanner.on("error")` BOTH set `spawnThrew: true` with `exitCode: undefined` and return `enumerator-unavailable`; the timeout arm sets `exitCode: undefined` and returns `scan-timeout`. **Only `scanner.on("close", code)` can supply a numeric exit code.** `formatOrphanReapRecord` renders `exit=${String(record.exitCode)}`, so `exit=1` — rather than `exit=undefined` — is only reachable through that close handler. Therefore `pgrep` **spawned, executed and exited 1**, which is its documented "no process matched"; the classifier folds exit 1 into `scan-failed` deliberately (`kill-plan.ts:825-834`: exit 1 is "NOT distinguished from any other non-zero exit"), so `scan-failed` here is not enumerator misbehaviour. Matching nothing is the correct outcome: the primary termination path had already cleaned up. |
+| **Verdict** | **MEASURED 2026-08-28 — the enumerator IS spawnable in Caido's sandbox, BY BARE NAME (`ORPHAN_SCAN_FILE = "pgrep"`, `kill-plan.ts:546`). The orphan reap is NOT inert on the shipping runtime.** |
+
+> **SUPERSEDED 2026-08-28 (preserved, not deleted).** The five value cells above read
+> **not recorded — reading not yet taken** and the verdict read **OPEN — not measured**.
 
 ### Table 4 — A6 against a Drift-spawned Claude Code turn
 
-Extends or splits the 2026-08-27 codex reading in the A6 table above, which was taken on an instance
-Drift did **not** spawn. Redact the session-unique temp-directory fragment in any pasted argv, in the
-same `drift-mcp-…/mcp-server.mjs` form the A6 table already uses (threat T-08-69).
+Extends the 2026-08-27 codex reading in the A6 table above, which was taken on an instance Drift
+did **not** spawn. The session-unique temp-directory fragment is redacted in the argv exactly as
+the maintainer pasted it (threat T-08-69). Columns are `PID PPID PGID ARGS`.
 
 | Field | Value |
 |---|---|
-| Date taken | **not recorded — reading not yet taken** |
-| Provider CLI row (pid / ppid / pgid / args) | **not recorded — reading not yet taken** |
-| `node …mcp-server.mjs` row (pid / ppid / pgid / args) | **not recorded — reading not yet taken** |
-| MCP server row's **pgid** | **not recorded — reading not yet taken** |
-| Provider row's **pid** (the row carrying `--mcp-config`) | **not recorded — reading not yet taken** |
-| Matched? | **not recorded — reading not yet taken** |
-| **Verdict for Claude Code** | **OPEN — not measured. The codex verdict above is FALSIFIED and stands; a Claude Code result either extends it or splits A6 per provider. It does not reopen the codex reading in either direction.** |
+| Date taken | **2026-08-28** |
+| Provider CLI row (pid / ppid / pgid / args) | pid **29578**, ppid 41187, pgid **29578** — `/Users/six2dez/.local/bin/claude -p --verbose --output-format stream-json --disable-slash-commands --append-system-prompt <elided> --disallowedTools <elided> --allowedTools <elided> --strict-mcp-config --mcp-config /var/folders/05/<elided>/T/drift-mcp-<token>/mcp-chat-<id>.json` |
+| `node …mcp-server.mjs` row (pid / ppid / pgid / args) | pid **29588**, ppid **29578**, pgid **29578** — `/opt/homebrew/bin/node /var/folders/05/<elided>/T/drift-mcp-<token>/mcp-server.mjs` |
+| MCP server row's **pgid** | **29578** |
+| Provider row's **pid** (the row carrying `--mcp-config`) | **29578** |
+| Matched? | **YES.** 29578 == 29578 — the MCP child sits in the provider CLI's own process group. Independently reproduced in the timeout run: provider pid **30372** / pgid **30372**, `mcp-server.mjs` pid **30395** / ppid **30372** / pgid **30372**. |
+| **Verdict for Claude Code** | **A6 HOLDS for Claude Code — measured 2026-08-28, twice.** The codex verdict above is **FALSIFIED** and **stands, unchanged, in both direction and wording**. A6 is therefore a **PER-PROVIDER SPLIT**, not a reversal: TRUE for Claude Code, FALSE for codex. This reading does not reopen, weaken or re-word the codex reading. |
+
+> **SUPERSEDED 2026-08-28 (preserved, not deleted).** The six value cells above read
+> **not recorded — reading not yet taken** and the verdict read
+> **OPEN — not measured. The codex verdict above is FALSIFIED and stands; a Claude Code result
+> either extends it or splits A6 per provider. It does not reopen the codex reading in either
+> direction.**
+
+### Table 5 — the process-group topology of Drift's own spawn (NEW, not staged by task 1)
+
+**This table was not staged.** The maintainer's readings answer a question the four staged tables
+do not ask, and discarding a measurement because no cell was waiting for it would be a worse
+failure than adding the cell. It is presented as a new reading, dated, with its scope stated.
+
+**Read the verdict row before the values.** This bears on **A1's topology half only**. A1 asks
+whether a `detached: true` spawn produces a process group *whose kill reaches a grandchild*. The
+topology half is what a `ps` listing can answer; the causal half is not, and stays OPEN.
+
+| Field | Value |
+|---|---|
+| Date taken | **2026-08-28** |
+| Instrument | `ps -eo pid,ppid,pgid,args`, run from a terminal **outside** the Caido sandbox by the sampler, plus a separate parent lookup by the orchestrator |
+| Drift-spawned provider (run 1) | pid **29578**, ppid **41187**, pgid **29578** |
+| Drift-spawned provider (run 2) | pid **30372**, ppid **41187**, pgid **30372** |
+| The parent | pid **41187**, ppid 41171, pgid **41171** — `/Applications/Caido.app/Contents/Resources/bin/caido-cli` |
+| The parent's parent | pid **41171**, ppid 1, pgid **41171** — `/Applications/Caido.app/Contents/MacOS/Caido` |
+| `pgrep -f mcp-server.mjs \| wc -l` at rest, after both runs | **0** |
+| **Verdict — topology half only** | **MEASURED 2026-08-28, and the observation is favourable: `pgid == pid` on both spawned providers, which is what `setpgid(0,0)` produces.** Had the shipped LLRT ignored `detached: true`, the child would have inherited the parent's group 41171; it did not, in either run. **The causal half of A1 — that a GROUP kill is what killed the grandchild — is NOT measured here and stays OPEN.** |
+
+**Why this reading is not the retracted one, and why it licenses nothing about the retraction.**
+The 2026-08-27 A1 reading was withdrawn because the instrument decided the verdict with
+`signalRef.process?.kill?.(pid, 0) ?? false` on a runtime where the same run measured
+`process.kill` ABSENT, so the favourable string was emitted unconditionally — the red input did
+not exist. This reading has no `process.kill` on its path at all: it is a direct `ps` observation
+taken from outside the sandbox, and an LLRT that ignored `detached` would have printed pgid 41171
+and been visible immediately. **It is nevertheless a DIFFERENT and NARROWER question than the one
+that was retracted**, and it does not license reverting any of plans 08-11..08-14's corrections,
+does not change A1's verdict, and does not fill plan 08-17's re-run table. The retraction
+machinery — `verdict-gate.sh`, the marked corrections, ledger entries 11 and 20 — stays exactly
+as it is.
+
+### The raw readings, exactly as pasted
+
+Preserved so every cell above is checkable against its source. Transcribed with no rounding, no
+tidying, no unit conversion and no reconstruction — including the sampler's own dropped sample at
+`13:35:37`, which is left in because removing it would be tidying.
+
+```
+=== RUN 1: CANCEL PATH (readings 1 and 4) ===
+=== drift-watch [cancel] started 13:35:28 — Ctrl-C to stop ===
+13:35:28  count=0
+13:35:29  count=0
+13:35:30  count=0
+13:35:31  count=0
+13:35:32  count=0
+13:35:33  count=0
+13:35:34  count=0
+13:35:35  count=0
+13:35:36  count=0
+13:35:38  count=0
+13:35:39  count=0
+13:35:40  count=0
+13:35:41  count=0
+13:35:42  count=0
+13:35:43  count=1
+--- FIRST SIGHTING: full ps detail (this is reading 4) ---
+29578 41187 29578 /Users/six2dez/.local/bin/claude -p --verbose --output-format stream-json --disable-slash-commands --append-system-prompt <elided> --disallowedTools <elided> --allowedTools <elided> --strict-mcp-config --mcp-config /var/folders/05/<elided>/T/drift-mcp-<token>/mcp-chat-<id>.json
+29588 29578 29578 /opt/homebrew/bin/node /var/folders/05/<elided>/T/drift-mcp-<token>/mcp-server.mjs
+--- end first sighting ---
+13:35:44  count=1
+   [count=1 continuously, one sample per second]
+13:36:12  count=1
+13:36:13  count=0
+   [count=0 continuously]
+13:36:21  count=0
+^C
+=== drift-watch [cancel] stopped 13:36:21 ===
+
+POST-CANCEL DIAGNOSTICS (Settings → Diagnostics → Show Diagnostics), verbatim:
+lastOrphanReap:   kind=noop reason=scan-failed exit=1 killed=0 ageMs=24
+activeSessions:   0
+
+=== RUN 2: ABSOLUTE-TIMEOUT PATH (reading 3) ===
+Configured `Settings → Process → Timeout (s)` = 10 (the build's minimum). Stop was NOT clicked;
+the turn was left to time out.
+=== drift-watch [timeout] started 13:37:27 — Ctrl-C to stop ===
+13:37:27  count=0
+   [count=0 continuously]
+13:37:44  count=0
+13:37:45  count=1
+--- FIRST SIGHTING: full ps detail ---
+30372 41187 30372 /Users/six2dez/.local/bin/claude -p --verbose --output-format stream-json --disable-slash-commands --append-system-prompt <elided> --strict-mcp-config --mcp-config /var/folders/05/<elided>/T/drift-mcp-<token>/mcp-chat-<id>.json
+30395 30372 30372 /opt/homebrew/bin/node /var/folders/05/<elided>/T/drift-mcp-<token>/mcp-server.mjs
+--- end first sighting ---
+13:37:46  count=1
+   [count=1 continuously]
+13:37:54  count=1
+13:37:55  count=0
+   [count=0 continuously]
+13:38:03  count=0
+^C
+=== drift-watch [timeout] stopped 13:38:03 ===
+
+Child lifetime 13:37:45 → 13:37:54 inclusive = 10 samples, matching the configured 10 s timeout.
+First zero sample 13:37:55. Nine consecutive zero samples observed after.
+
+=== THE PARENT, resolved separately (this is the A1 discriminator) ===
+Measured immediately after both runs, by the orchestrator:
+  PID  PPID  PGID COMM
+41187 41171 41171 /Applications/Caido.app/Contents/Resources/bin/caido-cli
+41171     1 41171 /Applications/Caido.app/Contents/MacOS/Caido
+
+And `pgrep -f mcp-server.mjs | wc -l` => 0 at rest afterwards.
+```
+
+**Provenance, stated rather than assumed.** Taken 2026-08-28 on the maintainer's machine: Caido
+**0.58.2**, macOS (darwin 25.6.0), Claude Code **2.1.250**, provider Claude Code, build HEAD
+`39876b5`.
 
 ### The abstention rule that governs filling these tables
 
