@@ -257,6 +257,118 @@ still an isolated zero, and the CLI-cleanup confounder it carries is still unexc
 
 ---
 
+## HEAD-build readings, 2026-08-28 — STAGED, NOT YET TAKEN
+
+**Added by plan 08-16.** Everything in this section is **empty on purpose.** These four tables are
+the form the maintainer's readings get transcribed into; until that transcription happens, every
+value cell reads *not recorded* in exactly the form the Control table above uses. A cell pre-filled
+with an expected value is how a measurement becomes a transcription of somebody's expectation, and
+this phase already shipped one of those — see § *The rule this spike cost us, stated as a rule*.
+
+**These readings are taken against HEAD, not against the probe build.** They need no probe and no
+patch: three of them read `pgrep`/`ps` from a terminal and one reads a diagnostics key that ships in
+HEAD. That is what separates them from the A1 re-run in § *How to run this spike later*, which
+requires `a1-probe-fix.patch` and is plan 08-17's.
+
+### The build these readings are attributed to
+
+A reading is a claim about a specific build, so the build is named before the tables rather than
+after them.
+
+| Field | Value |
+|---|---|
+| Built from HEAD commit | `abfbc17` (`abfbc17173be8fb4b353c89fd9f0e0700f063a30`) |
+| Build command | `pnpm build` → exit 0, 2026-08-28 |
+| Package | `dist/plugin_package.zip`, **2,561,448 bytes** |
+| Unzipped | `dist/plugin_package/`, 5 files, **2,560,488 bytes** |
+| Probe present? | **No.** T-08-03 removed the A1 probe at `d8ccab8`; this build carries no `spike*` fields and cannot answer A1. |
+| Caido version | **not recorded — reading not yet taken.** From Caido's own About/Settings screen, not from `processVersion` (which reports `unavailable` inside the sandbox). The A1 table above has carried this as an absence since 2026-08-27; it is a claim about *the LLRT fork this specific Caido ships*, so it is asked for once here for all four tables below. |
+
+### Table 1 — the cancel path (UAT test 9, SC-3's POSIX half, UAT gap G-04)
+
+| Field | Value |
+|---|---|
+| Date taken | **not recorded — reading not yet taken** |
+| Provider used | **not recorded — reading not yet taken** |
+| `pgrep -f mcp-server.mjs \| wc -l` **during** the live turn | **not recorded — reading not yet taken** |
+| `pgrep -f mcp-server.mjs \| wc -l` **~5s after Stop** | **not recorded — reading not yet taken** |
+| Provider CLI process itself still alive after Stop? | **not recorded — reading not yet taken.** This is the cell that bears on the CLI-cleanup confounder, unexcluded since 2026-08-24. |
+| `activeSessions` from the same diagnostics capture | **not recorded — reading not yet taken** |
+| **Verdict** | **OPEN — not measured on this build** |
+
+### Table 2 — the absolute-timeout path (UAT test 10, SC-3's timeout clause)
+
+**This table is filled from its OWN turn.** It is a different code path from Table 1 and it has never
+been exercised, on any build, by anybody. Nothing here is inferred from Table 1 and nothing in Table 1
+is inferred from here.
+
+| Field | Value |
+|---|---|
+| Date taken | **not recorded — reading not yet taken** |
+| Configured `processTimeoutSeconds` for this run | **not recorded — reading not yet taken** |
+| `pgrep -f mcp-server.mjs \| wc -l` **during** the live turn | **not recorded — reading not yet taken** |
+| `pgrep -f mcp-server.mjs \| wc -l` **~5s after the timeout fired** | **not recorded — reading not yet taken** |
+| Provider CLI process itself still alive after the timeout fired? | **not recorded — reading not yet taken** |
+| Was Stop clicked? | **not recorded — reading not yet taken.** If Stop was clicked this is a second Table 1 reading, not a Table 2 reading, and it must be recorded as an abstention here. |
+| **Verdict** | **OPEN — not measured on any build, ever** |
+
+### Table 3 — is the orphan reap inert on this runtime? (ledger entries 13, 14, 15)
+
+The cheapest high-value reading in the phase: one cancel and one glance at a key that ships in HEAD.
+The value's grammar and its seven possible shapes are tabulated in § *How to run this spike later*,
+step 5.
+
+| Field | Value |
+|---|---|
+| Date taken | **not recorded — reading not yet taken** |
+| `lastOrphanReap`, verbatim | **not recorded — reading not yet taken** |
+| `activeSessions` from the same capture | **not recorded — reading not yet taken** |
+| Elapsed between the cancel and the diagnostics capture | **not recorded — reading not yet taken** |
+| What that value establishes, in plain language | **not recorded — reading not yet taken.** Exactly one of: (a) the mechanism ran and matched nothing; (b) the mechanism ran and signalled N orphans; (c) the mechanism was refused by its own gate before any spawn; (d) the mechanism could not spawn its enumerator and is therefore **inert on this runtime**. Telling (a) apart from (d) is the entire reason the key exists — do not collapse them. |
+| **Verdict** | **OPEN — not measured** |
+
+### Table 4 — A6 against a Drift-spawned Claude Code turn
+
+Extends or splits the 2026-08-27 codex reading in the A6 table above, which was taken on an instance
+Drift did **not** spawn. Redact the session-unique temp-directory fragment in any pasted argv, in the
+same `drift-mcp-…/mcp-server.mjs` form the A6 table already uses (threat T-08-69).
+
+| Field | Value |
+|---|---|
+| Date taken | **not recorded — reading not yet taken** |
+| Provider CLI row (pid / ppid / pgid / args) | **not recorded — reading not yet taken** |
+| `node …mcp-server.mjs` row (pid / ppid / pgid / args) | **not recorded — reading not yet taken** |
+| MCP server row's **pgid** | **not recorded — reading not yet taken** |
+| Provider row's **pid** (the row carrying `--mcp-config`) | **not recorded — reading not yet taken** |
+| Matched? | **not recorded — reading not yet taken** |
+| **Verdict for Claude Code** | **OPEN — not measured. The codex verdict above is FALSIFIED and stands; a Claude Code result either extends it or splits A6 per provider. It does not reopen the codex reading in either direction.** |
+
+### The abstention rule that governs filling these tables
+
+Written here rather than only in plan 08-16, so it travels with the tables it governs.
+
+1. **A cell is filled only from a reading that was taken.** Every filled cell is a verbatim
+   transcription of what a terminal printed or what a diagnostics field said — no rounding, no
+   tidying, no unit conversion, no "approximately", no reconstruction from prose.
+2. **A cell that could not be filled gets a dated marked abstention** naming what was attempted and
+   what stopped it, e.g. *"abstained 2026-08-28 — the turn timeout is not exposed in this build's
+   settings, so no timeout could be made to elapse."* An abstention is a complete and correct
+   outcome, not a failure.
+3. **Never fill a cell from a neighbouring cell.** Tables 1 and 2 describe two different code paths;
+   SC-3 and both requirements name both; only the cancel path has ever been attested and that
+   attestation is explicitly recorded as not carrying to the timeout.
+4. **Never fill a cell from an expectation.** Not from this document, not from a plan, not from what
+   the mechanism is supposed to do.
+5. **A cannot-tell reading is recorded as cannot-tell.** An ambiguous result is not averaged, retried
+   into agreement, or resolved toward either verdict — the ambiguity is the reading.
+6. **No unexplained blanks.** Every cell in these four tables ends as either a verbatim value or a
+   dated abstention with a named blocker, and the two counts sum to the cell count.
+7. **Interpretation lives beneath the tables, in its own labelled paragraph**, never inside a cell
+   (threat T-08-71) — so a later reader can always tell measured ground from inference.
+
+
+---
+
 ## How to run this spike later
 
 The probe code is **not in HEAD** — task T-08-03 removed it, as its own plan required, because
