@@ -531,6 +531,93 @@ Written here rather than only in plan 08-16, so it travels with the tables it go
 7. **Interpretation lives beneath the tables, in its own labelled paragraph**, never inside a cell
    (threat T-08-71) — so a later reader can always tell measured ground from inference.
 
+### What these readings close, and what they do not
+
+**This is interpretation, and it is deliberately not in any cell above** (threat T-08-71). Every
+claim here is traceable to a value in § *The raw readings, exactly as pasted*; where a claim needs
+a reading nobody took, it says so instead of reaching for the nearest cell.
+
+**The cancel path — a real before/after pair, and NOT a causal attribution.** Table 1 is the first
+cancel reading this project has that carries both numbers. It replaces the 2026-08-24 attestation,
+which was an `approved` with no values behind it. What it establishes is that on build `39876b5`,
+on macOS, with Claude Code, the token-bearing `mcp-server.mjs` child is present during the turn
+and absent after Stop. What it does **not** establish is *why*. Drift's spawned group kill, the
+single-pid SIGTERM→SIGKILL ladder, the argv-marker orphan reap, and Claude Code's own cleanup of
+its MCP child are all consistent with 1 → 0, and this reading cannot separate them. The
+provider-liveness cell — the one cell that would have narrowed this — is abstained.
+
+**The CLI-cleanup confounder is STILL OPEN.** It has been unexcluded since 2026-08-24 and it is
+unexcluded now. A favourable before/after pair taken only against the post-fix build is not a
+control; the thing that would make it one is the **pre-fix Control**, taken against the build at
+`68199fa`, which is plan **08-17's** and is recorded there as an `insufficient_spec` item. Until
+that reading exists, Table 1 shows that the child is gone, not that Drift is what removed it. The
+Control table above therefore stays empty and stays honest, and `08-UAT.md` test 3 stays
+`[pending]`.
+
+**The timeout path stands entirely on its own.** Table 2 was filled from its own turn, on which
+Stop was explicitly not clicked. Its verdict borrows nothing from Table 1 and Table 1's verdict
+borrows nothing from it; that was checked cell by cell rather than assumed, which is why the
+"Was Stop clicked?" cell exists at all. This is the **first time this code path has ever been
+exercised on any build**. `08-VERIFICATION.md` records that "the timeout path — named explicitly
+by SC-3 and by both requirements — has never been exercised at all"; as of 2026-08-28 it has. The
+child's lifetime is exactly 10 one-second samples against a configured 10 s timeout, which is what
+distinguishes "the timeout ended the turn" from "the turn happened to finish": a turn that
+completed on its own would not land on the configured value. The same confounder caveat applies
+here as to Table 1 — the provider-liveness cell is abstained on this run too.
+
+**The enumerator reading is the one that decides what the rest is worth, and it came back
+favourable.** `kind=noop reason=scan-failed exit=1 killed=0 ageMs=24` means the reap **ran**.
+`exit=1` is unreachable on every path except `scanner.on("close", code)`: both `spawnThrew: true`
+paths (a synchronous `spawn` throw and `scanner.on("error")`) pass `exitCode: undefined` and are
+classified `enumerator-unavailable` before the exit-code arm is reached, and the timeout arm also
+passes `undefined`. `formatOrphanReapRecord` renders the code with `String(record.exitCode)`, so
+an unspawnable enumerator renders `exit=undefined`, never `exit=1`. **`pgrep` spawned, executed
+and exited 1** — its documented "no process matched" — inside Caido's plugin sandbox, **by bare
+name** (`ORPHAN_SCAN_FILE = "pgrep"`, `kill-plan.ts:546`). Bare-name resolution is precisely what
+`08-VERIFICATION.md` named as uncorroborated, and it is now corroborated. The orphan-reap
+mechanism plans 08-06 and 08-07 shipped is **not inert on the runtime users run**, which was
+recorded as the phase's largest open risk. It matched nothing because there was nothing to match:
+the primary termination path had already cleaned up, and `activeSessions: 0` from the same capture
+agrees.
+
+**Note the reason token is `scan-failed` and that is not a defect.** `classifyOrphanScanOutcome`
+folds exit 1 into `scan-failed` on purpose — the comment at `kill-plan.ts:825` records that exit 1
+is "NOT distinguished from any other non-zero exit", because both outcomes reap nothing and a
+separate arm would be a distinction with no consequence. Step 5's grammar table above describes
+this row as "the enumerator misbehaved or the sample went stale"; on this reading it is neither.
+That is a gap in the grammar table's prose, not in the value, and it is recorded here rather than
+silently smoothed.
+
+**A6 is a per-provider SPLIT, not a reversal.** Table 4 measures the MCP child's pgid equal to the
+provider CLI's pid for Claude Code, twice, on Drift-spawned turns. The 2026-08-27 codex reading
+measured the opposite — child pid 44284 in its own group 44284 while the CLI sat in a third group
+43752 — on an instance Drift did not spawn. **Both readings stand, and neither weakens the
+other.** The codex row and its **FALSIFIED** verdict are unchanged in wording and in direction.
+A6 is TRUE for Claude Code and FALSE for codex; gemini and copilot remain unmeasured in either
+direction. The operational consequence is unchanged too: because A6 is false for at least one
+provider, the phase cannot rely on process groups alone, which is exactly why the argv-marker
+reap — now demonstrated to run — exists.
+
+**A1: the topology half is measured, the causal half is not.** Table 5 shows `pgid == pid` on both
+Drift-spawned providers while `caido-cli` sits in group 41171 — the signature of `setpgid(0,0)`,
+and impossible if the shipped LLRT had ignored `detached: true`. This is a direct `ps` observation
+from outside the sandbox, so no `process.kill` is anywhere on its path and it cannot emit a
+favourable value unconditionally the way the withdrawn 2026-08-27 probe reading could. It is
+nevertheless only half of what A1 asks. A1 asks whether a `detached: true` spawn produces a
+process group **whose kill reaches a grandchild**; a listing can show the group exists, and cannot
+show that a group kill is what killed anything. **A1's verdict stays OPEN, its 2026-08-27 reading
+stays withdrawn, and every correction plans 08-11 through 08-14 made stays exactly as it is.** The
+re-run that addresses the causal half is plan 08-17's, with the patched three-valued probe, and
+its results table above is still empty.
+
+**Scope, stated rather than left implied.** One provider (Claude Code 2.1.250). One platform
+(macOS, darwin 25.6.0). One Caido version (0.58.2). One build (`39876b5`). One machine. Windows is
+entirely unmeasured and stays owned by Phase 9 SC-4 — and note that on win32 the scan plan refuses
+on a different arm before any spawn, so nothing here transfers. Linux is unmeasured. A6 for gemini
+and copilot is unmeasured. Three cells are abstentions, and each names its blocker rather than
+resolving toward a convenient value.
+
+
 
 ---
 

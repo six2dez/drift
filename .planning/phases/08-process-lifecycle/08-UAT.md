@@ -3,7 +3,7 @@ status: testing
 phase: 08-process-lifecycle
 source: 08-01-SUMMARY.md, 08-02-SUMMARY.md, 08-03-SUMMARY.md, 08-04-SUMMARY.md, 08-05-SUMMARY.md
 started: 2026-08-24T22:40:00Z
-updated: 2026-08-27T09:30:00Z
+updated: 2026-08-28T11:50:00Z
 gate_overrides:
   - gate: api-coverage.verify-pre
     decided: 2026-08-24
@@ -227,20 +227,64 @@ result: [pending]
 ### 9. A real cancel on macOS leaves zero mcp-server.mjs processes
 source: 08-05-SUMMARY.md D6
 expected: `pgrep -f mcp-server.mjs | wc -l` is non-zero during a live turn and **zero** ~5s after clicking Stop. Both numbers recorded, not just the second.
-result: [pending]
+result: passed
+reported: |
+  2026-08-28, HEAD build 39876b5 installed in Caido 0.58.2 on darwin 25.6.0, provider
+  Claude Code 2.1.250. 1 Hz `pgrep -f mcp-server.mjs | wc -l` sampler:
+    13:35:43  count=1    <- first non-zero; the turn is streaming
+    13:36:12  count=1    <- last non-zero; Stop was clicked while the count was 1
+    13:36:13  count=0    <- first zero
+    13:36:21  count=0    <- ninth consecutive zero
+  Diagnostics from the same capture: activeSessions: 0
+evidence: >-
+  BOTH numbers are recorded, which is what this test asks for and what the 2026-08-24
+  attestation did not supply: non-zero (1) during the live turn, zero after Stop, with nine
+  consecutive zero samples. The attestation is now a measurement. Full transcription, the raw
+  paste and the provenance are in `08-SPIKE.md` § *HEAD-build readings, 2026-08-28*, Table 1.
+scope_and_caveats: >-
+  THE CONFOUNDER NAMED IN THIS TEST'S OWN NOTE IS NOT EXCLUDED. The reading shows the
+  token-bearing child is gone; it does not show that Drift is what removed it. Drift's spawned
+  group kill, the single-pid SIGTERM->SIGKILL ladder, the argv-marker orphan reap and Claude
+  Code's own cleanup of its MCP child are all consistent with 1 -> 0. The provider-CLI liveness
+  cell is a dated abstention -- no post-Stop `ps` was re-run -- so the half of this re-test that
+  was meant to exclude the confounder was not achieved. Excluding it needs the PRE-FIX Control,
+  which is test 3, still `[pending]`, against build 68199fa, owned by plan 08-17. One provider,
+  one platform, one Caido version (0.58.2), one build.
 note: Previously satisfied by attestation on 2026-08-24 — `approved` with no numeric values supplied. Re-testing here to convert the attestation into a measurement and to exclude the confounder that the provider CLI may kill its own child.
 
 ### 10. The timeout path leaves no orphan either
 source: 08-05-SUMMARY.md D7
 expected: Let `processTimeoutSeconds` elapse instead of clicking Stop, then `pgrep -f mcp-server.mjs | wc -l` is zero. Must be reported or explicitly declared unexercised — never inferred from the cancel result.
-result: [pending]
+result: passed
+reported: |
+  2026-08-28, same build (39876b5), platform (darwin 25.6.0), Caido (0.58.2) and provider
+  (Claude Code 2.1.250) as test 9, but its OWN turn. `Settings -> Process -> Timeout (s)` = 10,
+  the build's minimum. Stop was NOT clicked; the turn was left to time out.
+  1 Hz `pgrep -f mcp-server.mjs | wc -l` sampler:
+    13:37:45  count=1    <- first non-zero; the turn is streaming
+    13:37:54  count=1    <- last non-zero; lifetime 13:37:45-13:37:54 inclusive = 10 samples
+    13:37:55  count=0    <- first zero
+    13:38:03  count=0    <- ninth consecutive zero
+evidence: >-
+  FIRST EXERCISE OF THIS CODE PATH ON ANY BUILD, BY ANYBODY. `08-VERIFICATION.md` recorded that
+  the timeout path -- named explicitly by SC-3 and by both requirements -- had never been
+  exercised at all; as of 2026-08-28 it has. The count is zero after the timeout fired. The
+  child's lifetime is exactly 10 one-second samples against the configured 10 s timeout, which
+  is what distinguishes the timeout ending the turn from the turn finishing on its own. Full
+  transcription in `08-SPIKE.md` § *HEAD-build readings, 2026-08-28*, Table 2.
+scope_and_caveats: >-
+  NOTHING HERE IS INFERRED FROM TEST 9, AND NOTHING IN TEST 9 IS INFERRED FROM HERE. That was
+  checked cell by cell rather than assumed, which is why the reading records whether Stop was
+  clicked as its own value (it was not). The same CLI-cleanup confounder applies: the
+  provider-CLI liveness cell is a dated abstention on this run too, so this shows the child is
+  gone rather than why. One provider, one platform, one Caido version, one build.
 
 ## Summary
 
 total: 10
-passed: 0
+passed: 2
 issues: 2
-pending: 8
+pending: 6
 at_risk: 1
 degraded_as_designed: 1
 skipped: 0
