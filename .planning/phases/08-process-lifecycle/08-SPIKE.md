@@ -1,16 +1,31 @@
 ---
 phase: 8
 slug: process-lifecycle
-status: partially-measured
-measured: "2026-08-27 — readings 1-4 (A1 and A6) taken on real hardware during UAT; reading 5 (the Control) was NOT taken and is still an absence"
+status: "one-reading — A6 measured (FALSIFIED); A1's reading RETRACTED 2026-08-28 and its verdict OPEN; the Control never taken"
+measured: "2026-08-27 — readings 1-4 taken on real hardware during UAT. The A6 half (readings 3-4) stands. The A1 half (readings 1-2) was RETRACTED 2026-08-28: the instrument could not produce the unfavourable answer, so the favourable one carries no information. Reading 5 (the Control) was NOT taken and is still an absence"
 vehicle: "probe build 68199fa installed in a real macOS Caido, darwin 25.6.0 — one build, one platform, one provider CLI"
 probe_commit: 68199fa
 assumptions:
-  A1: CLOSED-FAVOURABLY
+  A1: RETRACTED — reading withdrawn, verdict OPEN
   A6: FALSIFIED
 ---
 
-# Phase 8 Wave-0 spike — A1 closed favourably, A6 falsified, the Control still unmeasured
+# Phase 8 Wave-0 spike — A1's reading RETRACTED, A6 falsified, the Control still unmeasured
+
+> **SUPERSEDED 2026-08-27 (preserved, not deleted — correct as a record of what this file
+> claimed on its date, false as a live claim since 2026-08-28):**
+>
+> # Phase 8 Wave-0 spike — A1 closed favourably, A6 falsified, the Control still unmeasured
+>
+> Superseded frontmatter, preserved verbatim:
+>
+> ```
+> status: partially-measured
+> measured: "2026-08-27 — readings 1-4 (A1 and A6) taken on real hardware during UAT; reading 5 (the Control) was NOT taken and is still an absence"
+> assumptions:
+>   A1: CLOSED-FAVOURABLY
+>   A6: FALSIFIED
+> ```
 
 **CORRECTION, 2026-08-27.** This file recorded a spike that was built and never run.
 Two of its three readings have now been taken, on the maintainer's own macOS hardware,
@@ -21,16 +36,36 @@ keeping them in one file. The superseded 2026-08-24 text is preserved throughout
 convention, applied here for the same reason `packages/backend/src/spawn-plan.ts:46-80`
 keeps its own falsified prediction.
 
-**What reads what, as of 2026-08-27:**
+**SECOND CORRECTION, 2026-08-28 — A1's reading is RETRACTED.** The 2026-08-27 A1 entry
+below was not a measurement. The probe at `68199fa` decided the verdict with
+`const alive = signalRef.process?.kill?.(grandchildPid, 0) ?? false;` — and the SAME probe
+run, five lines earlier in the SAME diagnostics report, measured
+`spikeProcessKillType: "undefined"`. With `process.kill` absent the optional chain yields
+`undefined`, `?? false` makes `alive === false`, and the favourable string is emitted
+UNCONDITIONALLY. The instrument could not print the unfavourable answer on the runtime it
+was run on, so the favourable one carries **zero information**. The reading below is
+preserved because it is what the terminal printed; the verdict drawn from it is withdrawn.
+See `08-VERIFICATION.md` gap 1.
 
-- **A1 — CLOSED FAVOURABLY, by measurement.** `spikeDetachedGroupKill:
-  "grandchild-died (detached honoured)"` on darwin 25.6.0, probe build `68199fa`.
+**What reads what, as of 2026-08-28:**
+
+- **A1 — RETRACTED; verdict OPEN, not measured.** The instrument output was
+  `spikeDetachedGroupKill: "grandchild-died (detached honoured)"` on darwin 25.6.0, probe
+  build `68199fa` — a real string that could not have been any other string. A1 is back
+  where it was on 2026-08-24: unmeasured on the shipping runtime.
 - **A6 — FALSIFIED, by measurement.** The provider CLI (codex, pid **43921**) sat in
   process group 43752 while its own `mcp-server.mjs` child (pid **44284**) sat in group
   44284 — a group of its own.
 - **The Control — still NOT taken.** No pre-fix after-Stop count exists on any machine.
   `08-UAT.md` test 3 is `[pending]`, and this file must continue to say so. A fabricated
   confirmation here is the precise failure the spike existed to prevent.
+
+> **SUPERSEDED 2026-08-27 (preserved, not deleted — the A1 bullet as it read that day):**
+>
+> **What reads what, as of 2026-08-27:**
+>
+> - **A1 — CLOSED FAVOURABLY, by measurement.** `spikeDetachedGroupKill:
+>   "grandchild-died (detached honoured)"` on darwin 25.6.0, probe build `68199fa`.
 
 > **SUPERSEDED (written 2026-08-24, after the hardware checkpoint was waived):**
 >
@@ -97,7 +132,12 @@ the record.
 | `spikeProcessKillType` | `"undefined"` |
 | `spikeDetachedGroupKill` | `"grandchild-died (detached honoured)"` |
 | `spikeNote` | `"Phase 8 A1 probe — temporary, removed by T-08-03"` |
-| **Verdict** | **CLOSED FAVOURABLY — measured 2026-08-27** |
+| **Verdict** | **RETRACTED 2026-08-28 — the reading is real, the verdict drawn from it is withdrawn. A1 is OPEN, not measured.** |
+| **Why retracted** | The probe determined liveness with an optional call (`signalRef.process?.kill?.(grandchildPid, 0) ?? false`) on a primitive the same run measured ABSENT (`spikeProcessKillType: "undefined"`), coalesced the absent case to "not alive", and therefore emitted the favourable string unconditionally — the red input did not exist. |
+
+> **SUPERSEDED 2026-08-27 (preserved, not deleted — what the Verdict cell read that day):**
+>
+> | **Verdict** | **CLOSED FAVOURABLY — measured 2026-08-27** |
 
 > **SUPERSEDED 2026-08-24 (preserved, not deleted).** The four cells above read:
 >
@@ -106,13 +146,30 @@ the record.
 > | `spikeDetachedGroupKill` | **not recorded — spike not run** |
 > | **Verdict** | **OPEN — not measured** |
 
-A1 no longer rests on source analysis alone. The source is still the mechanism —
-`caido/dependency-llrt`, branch `caido`, commit
+**The two reading rows above STAY, and that is the point.** `spikeProcessKillType:
+"undefined"` and `spikeDetachedGroupKill: "grandchild-died (detached honoured)"` are what the
+instrument printed on 2026-08-27 on darwin 25.6.0. Deleting them would falsify the record. What
+is withdrawn is the inference from the second row, because the first row explains why the second
+row could not have read anything else.
+
+A1 rests on source analysis alone again, exactly as it did before 2026-08-27. The source is the
+mechanism — `caido/dependency-llrt`, branch `caido`, commit
 `a5b021c51d1521f32018d3f3f2e70291df50501d`, `modules/llrt_child_process/src/lib.rs:448, 462,
-512-521`, which calls `command.process_group(0)` on unix for a detached spawn — and it is now
-**corroborated by execution on the runtime users actually run**. The failure mode this section
+512-521`, which calls `command.process_group(0)` on unix for a detached spawn — and it has
+**never been executed under the runtime a user actually runs**. The failure mode this section
 warned about (a shipped fork that ignores `detached`, so the group reference names a group that
-was never created, while every CI leg stays green) did **not** occur.
+was never created, while every CI leg stays green) is neither confirmed nor refuted. It is
+unobserved.
+
+> **SUPERSEDED 2026-08-27 (preserved, not deleted — false as a live claim since 2026-08-28):**
+>
+> A1 no longer rests on source analysis alone. The source is still the mechanism —
+> `caido/dependency-llrt`, branch `caido`, commit
+> `a5b021c51d1521f32018d3f3f2e70291df50501d`, `modules/llrt_child_process/src/lib.rs:448, 462,
+> 512-521`, which calls `command.process_group(0)` on unix for a detached spawn — and it is now
+> **corroborated by execution on the runtime users actually run**. The failure mode this section
+> warned about (a shipped fork that ignores `detached`, so the group reference names a group that
+> was never created, while every CI leg stays green) did **not** occur.
 
 > **SUPERSEDED 2026-08-24:** *A1 rests entirely on source analysis: `caido/dependency-llrt`,
 > branch `caido`, commit `a5b021c51d1521f32018d3f3f2e70291df50501d`,
@@ -120,12 +177,25 @@ was never created, while every CI leg stays green) did **not** occur.
 > `command.process_group(0)` on unix for a detached spawn. That source was read; it was never
 > executed under the runtime a user actually runs.*
 
-**Second field, second matter.** `spikeProcessKillType` came back `"undefined"`, not
-`"function"`. That is a separate finding (UAT **G-02**) and it does **not** weaken A1: Caido's
-plugin sandbox exposes a restricted `process` shim with no kill primitive, so the signal-0
-liveness probe cannot run there. It is recorded as *degraded as designed* — see
-`08-SECURITY.md` § *G-02 — recorded, not fixed* — and the step-2 expectation below is annotated
-accordingly.
+**Second field, SAME matter — corrected 2026-08-28.** `spikeProcessKillType` came back
+`"undefined"`, not `"function"`. This was filed on 2026-08-27 as a *separate* finding (UAT
+**G-02**) that did not bear on A1. It is not separate. It is the reason A1's reading is
+withdrawn: Caido's plugin sandbox exposes a restricted `process` shim with no kill primitive,
+the probe's verdict line called that missing primitive optionally and defaulted the miss to
+"dead", and so the row directly above it was forced. The consequence for the *production* code
+is still what `08-SECURITY.md` § *G-02 — recorded, not fixed* records — `isPidAlive` guards
+`typeof killRef !== "function"` by answering "alive", so every unknown resolves toward alive and
+neither check can ever ADD a kill. The consequence for the *probe* is the opposite direction and
+nobody traced it: there, the unknown resolved toward the favourable verdict.
+
+> **SUPERSEDED 2026-08-27 (preserved, not deleted):**
+>
+> **Second field, second matter.** `spikeProcessKillType` came back `"undefined"`, not
+> `"function"`. That is a separate finding (UAT **G-02**) and it does **not** weaken A1: Caido's
+> plugin sandbox exposes a restricted `process` shim with no kill primitive, so the signal-0
+> liveness probe cannot run there. It is recorded as *degraded as designed* — see
+> `08-SECURITY.md` § *G-02 — recorded, not fixed* — and the step-2 expectation below is annotated
+> accordingly.
 
 ---
 
@@ -305,14 +375,23 @@ spike record is that a later reader can tell measured ground from assumed ground
 
 **What it CLOSES:**
 
-- **A1, closed favourably.** The shipped Caido LLRT honours `detached: true` on darwin 25.6.0.
-  The nine `killTree` sites that depend on it are backed by execution on the shipping runtime,
-  not by source analysis of a pinned commit alone.
 - **A6, closed in the NEGATIVE, for one provider.** Codex's `mcp-server.mjs` child sits in its
   own process group (44284), not the CLI's (43752). For that provider, LIF-02 is **not** closed
   by process-group signalling.
 
 **What it still does NOT close — measured on one build, one platform, one provider:**
+
+- **A1 — RETRACTED 2026-08-28, and back in this list.** The 2026-08-27 entry moved A1 into the
+  CLOSES list above; it is moved back here because the instrument that produced its reading
+  could not have printed the other answer. The A1 bullet as it read on 2026-08-27 is preserved
+  in the block quote below.
+
+> **SUPERSEDED 2026-08-27 (preserved, not deleted — this bullet sat in the CLOSES list above
+> until 2026-08-28):**
+>
+> - **A1, closed favourably.** The shipped Caido LLRT honours `detached: true` on darwin 25.6.0.
+>   The nine `killTree` sites that depend on it are backed by execution on the shipping runtime,
+>   not by source analysis of a pinned commit alone.
 
 - **Nothing about Claude Code**, which is the maintainer's active provider and the one the whole
   phase was written around. A6 is measured for Codex only.
