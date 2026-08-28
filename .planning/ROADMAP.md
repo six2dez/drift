@@ -323,7 +323,7 @@ Plans:
   4. Session finalize / `stopMcpServer` kills all tracked pids before sweeping the temp dir, so token-bearing processes die before their env-source files are removed.
   5. macOS/Linux cancellation and timeout semantics visible to the user are unchanged and existing tests stay green.
 
-**Plans**: 14/17 plans executed (10/10 executed; 7 gap-closure plans added 2026-08-28 from `08-VERIFICATION.md`)
+**Plans**: 15/17 plans executed (10/10 executed; 7 gap-closure plans added 2026-08-28 from `08-VERIFICATION.md`)
 
 Plans:
 **Wave 1**
@@ -387,7 +387,7 @@ Plans:
 
 **Gap Wave 8** *(blocked on Gap Wave 7; depends on all four carrier plans, which is what makes a green gate a fact here rather than a race)*
 
-- [ ] 08-15-PLAN.md — UD-01's resolved deliverable: a `lastOrphanReap` diagnostics key that says whether the orphan reap ran, was refused, or is inert — plus `a1-probe-fix.patch` and `verify-a1-patch.sh`, a committed probe fix proven to apply, type-check and build — **the gate goes green here**, and its red input is re-demonstrated at green (LIF-02)
+- [x] 08-15-PLAN.md — UD-01's resolved deliverable: a `lastOrphanReap` diagnostics key that says whether the orphan reap ran, was refused, or is inert — plus `a1-probe-fix.patch` and `verify-a1-patch.sh`, a committed probe fix proven to apply, type-check and build — **the gate goes green here**, and its red input is re-demonstrated at green (LIF-02)
 
 **Gap Wave 9** *(blocked on Gap Wave 8; `autonomous: false`, `gate="blocking-human"`)*
 
@@ -522,7 +522,7 @@ Parallelism opportunities: Phase 2 may run alongside Phase 3 (both depend only o
 | 5. Kill Shell Wrappers | 6/6 | Complete   | 2026-08-20 |
 | 6. Windows Command Resolution | 7/7 | Complete    | 2026-08-21 |
 | 7. Provider Spawn & Registration | 0/3 | Not started | - |
-| 8. Process Lifecycle | 14/17 | In Progress|  |
+| 8. Process Lifecycle | 15/17 | In Progress|  |
 | 9. CI Hardening | 0/1 | Not started | - |
 | 10. Windows Polish | 0/1 | Not started | - |
 | 11. Plugin Capability Discovery | 0/3 | Not started | - |

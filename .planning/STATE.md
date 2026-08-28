@@ -4,16 +4,16 @@ milestone: v1.0
 current_phase: 08
 current_phase_name: Process Lifecycle
 status: executing
-stopped_at: Completed 08-14-PLAN.md
-last_updated: "2026-08-28T09:38:51.764Z"
+stopped_at: Completed 08-15-PLAN.md
+last_updated: "2026-08-28T10:05:49.667Z"
 last_activity: 2026-08-28
 last_activity_desc: "Phase 08 gap-closure — A1 reading RETRACTED (08-VERIFICATION.md: gaps_found, 4/9)"
-state_head: 4432c0ed180e229da4125789cd01c11883b27ec6
+state_head: 4bc6e335048fd4da931668bae0c5f2bf60f9cf25
 progress:
   total_phases: 13
   completed_phases: 5
   total_plans: 57
-  completed_plans: 54
+  completed_plans: 55
 verification_status: gaps_found
 verification_score: 4/9 must-haves verified
 milestone_name: milestone
@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-06-26)
 ## Current Position
 
 Phase: 08 (Process Lifecycle) — EXECUTING (gap-closure round)
-Plan: 5 of 17
+Plan: 6 of 17
 Status: Ready to execute
 Last activity: 2026-08-28 — Phase 08 gap-closure: A1's 2026-08-27 reading RETRACTED across its carriers
 Verification: `08-VERIFICATION.md` rules **`gaps_found`, score 4/9 must-haves verified** (2026-08-27T14:35Z). This supersedes the 2026-08-24 `human_needed` / 2/8 verdict, which the report preserves as a marked correction rather than deleting.
@@ -85,6 +85,7 @@ Progress: [███░░░░░░░] 30% (3 of 10 milestone phases)
 | Phase 08 P12 | 16 min | 3 tasks | 4 files |
 | Phase 08 P13 | 24 min | 3 tasks | 2 files |
 | Phase 08 P14 | 26 min | 3 tasks | 5 files |
+| Phase 08 P15 | 25 min | 3 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -298,8 +299,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-28T09:38:08.714Z
-Stopped at: Completed 08-14-PLAN.md
+Last session: 2026-08-28T10:05:49.402Z
+Stopped at: Completed 08-15-PLAN.md
 Resume file: None
 
 **Live on the public remote: nothing of ours.** Plan 03-04 tore down all three `scratch/*` branches (`ci-proof-windows-probe`, `ci-proof-windows-probe-negative`, `ci-proof-windows-gate-negative`) locally and remotely. Asserted with a `test -z` discrimination over the captured glob (`scratch-glob-empty=0`) plus the full unfiltered listing, which now shows only `main` at `2d8cf16` and the pre-existing, unrelated `fix/security-hotfixes` at `0cd81f3`. `origin/main` was never pushed by this phase and is still `2d8cf16`; local `main` is 23 commits ahead and deliberately unpushed. **Re-verified 2026-08-13 (plan 03-05):** the remote still lists only `main` `2d8cf16` and the pre-existing `fix/security-hotfixes` `0cd81f3`, and all eight Phase 3 run records (4 probe + 4 `CI` control) still resolve with their recorded conclusions — which is what makes the URLs in `03-FINDINGS.md` valid citations after the branches were deleted. The probe **artifacts** do not survive: they expire 2026-09-12, which is why D-11 required the committed findings document.
