@@ -1410,3 +1410,141 @@ describe("index.ts states an explicit mode at every writeFile but the one named 
     }
   });
 });
+
+// The reap's outcome log lines, over the COMMENT-STRIPPED stream. Ledger entry
+// 18 records an exact-count criterion in this very file that moved when someone
+// added a "why" comment mentioning the token it counted — no behavioural change,
+// a red gate. Entries 16 and 17 are the same defect in its other direction: a
+// criterion that already returned its target value against an UNEDITED tree, so
+// it proved nothing. Both hazards are answered the same way — count over the
+// stripped stream, and measure the gate against a mutated tree rather than
+// asserting it would move.
+const REAP_OUTCOME_LOG = /\[drift lifecycle\] (?:no )?orphan reap:/g;
+const REAP_RECORD_CALL = /recordOrphanReapOutcome\(/g;
+
+// Every top-level `function` / `async function` name in the file. Used by
+// direction two below to ATTRIBUTE a stray recording call to the function that
+// contains it, rather than merely reporting that the totals disagree — a census
+// that says "something is wrong somewhere" is one nobody can act on.
+function topLevelFunctionNames(source: string): string[] {
+  const names = new Set<string>();
+  const pattern = /^(?:async )?function ([A-Za-z0-9_$]+)\(/gm;
+  let match = pattern.exec(source);
+  while (match !== null) {
+    if (match[1] !== undefined) names.add(match[1]);
+    match = pattern.exec(source);
+  }
+  return [...names];
+}
+
+describe("index.ts records every reap outcome it logs, and records nothing else (UD-01 / T-08-75)", () => {
+  // The two functions that PRODUCE a reap outcome. `reapMcpOrphans` owns three
+  // (the plan refusal, the no-op arm and the completed reap);
+  // `reapSessionOrphansIfIdle` owns the gate-closed refusal, which is the ONE
+  // arm that can suppress the reap for a whole Caido session.
+  const OUTCOME_FUNCTIONS = ["reapMcpOrphans", "reapSessionOrphansIfIdle"];
+
+  // DIRECTION ONE. Enumerated PER FUNCTION and never as a file-wide total,
+  // because a file-wide equality is satisfied by any redistribution: a fifth arm
+  // added to `reapMcpOrphans` with no recording call, plus a stray recording
+  // call added anywhere else, keeps 5 == 5 while the key silently stops
+  // reporting the new arm.
+  //
+  // RED INPUT: delete one `recordOrphanReapOutcome(` call and this fails naming
+  // the enclosing function and both counts. MEASURED, not asserted — see this
+  // plan's SUMMARY for the captured failure and the restored pass.
+  it("pairs a recording call with every outcome log line, function by function", () => {
+    for (const name of OUTCOME_FUNCTIONS) {
+      const body = functionBody(code, name);
+      // Non-vacuity, per function. An empty body counts 0 log lines and 0
+      // recording calls, and 0 === 0 would satisfy the equality below while
+      // asserting nothing whatsoever — the shape ledger entries 16 and 17 name as
+      // the ninth and tenth vacuous gates of this phase.
+      expect(body, `${name} body`).not.toBe("");
+
+      const logs = (body.match(REAP_OUTCOME_LOG) ?? []).length;
+      const records = (body.match(REAP_RECORD_CALL) ?? []).length;
+
+      expect(logs, `${name} outcome log lines`).toBeGreaterThan(0);
+      expect(
+        records,
+        `${name} logs ${String(logs)} reap outcome(s) but records ${String(records)} of them — every outcome the console reports must also reach lastOrphanReap`,
+      ).toBe(logs);
+    }
+  });
+
+  // DIRECTION TWO. A one-directional census is how a gate passes by accident:
+  // direction one is satisfied by a function that records MORE outcomes than it
+  // logs, and a recording call on an unrelated path makes the diagnostics key
+  // report an outcome that never happened.
+  //
+  // RED INPUT: add a `recordOrphanReapOutcome(` call inside any other function
+  // and this fails naming that function. MEASURED, not asserted.
+  it("records a reap outcome from nowhere except the functions that produce one", () => {
+    const offenders: string[] = [];
+    let attributed = 0;
+    for (const name of topLevelFunctionNames(code)) {
+      // The declaration of the recorder itself is not a call site, and its own
+      // body contains no call, so it needs no special case here — but the
+      // file-wide total below does subtract it.
+      const body = functionBody(code, name);
+      const records = (body.match(REAP_RECORD_CALL) ?? []).length;
+      if (records === 0) continue;
+      attributed += records;
+      if (!OUTCOME_FUNCTIONS.includes(name)) {
+        offenders.push(`${name} (${String(records)} call(s))`);
+      }
+    }
+
+    expect(
+      offenders,
+      `recordOrphanReapOutcome( is called from ${offenders.join(", ")} — a function that produces no reap outcome, so lastOrphanReap would report an outcome that never happened`,
+    ).toEqual([]);
+
+    // The unattributed guard, in the same shape the existing reap census uses.
+    // A call inside an arrow-function const, or inside a nested closure of some
+    // unrelated function, belongs to no top-level `function` declaration and so
+    // is invisible to the loop above; it shows up here as a total that the
+    // enumeration cannot account for.
+    const total = (code.match(REAP_RECORD_CALL) ?? []).length;
+    const declaration = (
+      code.match(/function recordOrphanReapOutcome\(/g) ?? []
+    ).length;
+    expect(declaration).toBe(1);
+    expect(
+      total - declaration,
+      "a recordOrphanReapOutcome( call sits in no enumerated top-level function",
+    ).toBe(attributed);
+  });
+
+  // The key reaches the support bundle EXACTLY ONCE, and has exactly one
+  // writer. Two writers is how a value drifts from the outcome it names; two
+  // keys is how a reader gets a stale one and a fresh one side by side.
+  //
+  // RED INPUT: surface the key twice, drop it from getDiagnostics entirely, or
+  // assign lastOrphanReap anywhere other than the recorder, and this fails.
+  it("surfaces the key once in getDiagnostics and writes it from one place", () => {
+    const diagnostics = functionBody(code, "getDiagnostics");
+    expect(diagnostics).not.toBe("");
+    expect(diagnostics.match(/lastOrphanReap:/g) ?? []).toHaveLength(1);
+
+    expect(code.match(/let lastOrphanReap/g) ?? []).toHaveLength(1);
+    const writer = functionBody(code, "recordOrphanReapOutcome");
+    expect(writer).not.toBe("");
+    expect(writer).toContain("lastOrphanReap = formatOrphanReapRecord(record)");
+    // One assignment in the whole file, and it is that one.
+    expect(code.match(/lastOrphanReap = /g) ?? []).toHaveLength(1);
+  });
+
+  // THE FIRE-AND-FORGET CONTRACT IS UNCHANGED BY THIS KEY. Recording is a
+  // synchronous assignment; if a future edit makes it awaitable it would suspend
+  // an RPC handler on the reap path, which is the starvation anti-pattern
+  // CLAUDE.md names and which recorded decision OQ-4 forbids for these two
+  // functions specifically.
+  //
+  // RED INPUT: write `await recordOrphanReapOutcome(` at any site.
+  it("never awaits the recording, and still records", () => {
+    expect(code.match(/await\s+recordOrphanReapOutcome/g)).toBeNull();
+    expect(code).toContain("recordOrphanReapOutcome(");
+  });
+});
