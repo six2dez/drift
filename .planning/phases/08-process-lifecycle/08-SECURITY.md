@@ -293,28 +293,57 @@ them is rhetorical:
 a cancel, no token-bearing MCP child survives — on the runtime users run. It does **not** close A1 or
 A6 as *mechanism* claims, for the confounder in (2):
 
-**CORRECTED 2026-08-27 — both assumptions are now MEASURED, and they did not both come back the
-same way.** The superseded 2026-08-24 text is preserved below as a block quote and is not deleted.
+**CORRECTED 2026-08-28, superseding the 2026-08-27 correction preserved below — ONE assumption was
+measured, not both.** A6 was measured. A1's reading is **RETRACTED**. The superseded 2026-08-24 and
+2026-08-27 texts are both preserved as block quotes and neither is deleted.
 
-- **A1 — CLOSED FAVOURABLY, measured 2026-08-27.** The shipped Caido LLRT *does* honour the
-  process-group spawn option: `spikeDetachedGroupKill: "grandchild-died (detached honoured)"` on
-  darwin 25.6.0, probe build `68199fa`, rebuilt from the recoverable commit and run during UAT
-  (`08-UAT.md` test 1). The source analysis of `caido/dependency-llrt@caido` at pinned commit
-  `a5b021c` is now **corroborated by execution on the runtime users run**, not standing alone.
+- **A1 — RETRACTED 2026-08-28, NOT measured.** The probe determined liveness with
+  `signalRef.process?.kill?.(grandchildPid, 0) ?? false` — an optional call on a primitive the SAME
+  diagnostics run measured absent (`typeof process.kill` = `"undefined"`) — and coalesced the absent
+  case to "not alive", so the reading `spikeDetachedGroupKill: "grandchild-died (detached honoured)"`
+  was emitted UNCONDITIONALLY on darwin 25.6.0, probe build `68199fa`. **The red input did not
+  exist**, so the reading carries no information about whether the grandchild died. The source
+  analysis of `caido/dependency-llrt@caido` at pinned commit `a5b021c` **stands alone again**, exactly
+  as it did before the run; it is not corroborated by execution. Retraction recorded in
+  `08-VERIFICATION.md` gap 1; the defect is broken-windows ledger entry **20**; the fixed
+  three-valued determination is `classifyLivenessObservation` (`kill-plan.ts`, plan 08-12) and the
+  re-run is owned by plan 08-17.
+
+  **The analysis that would have caught this was already in this file.** § *G-02 — recorded, not
+  fixed* traces the very same absent primitive correctly and in detail — it reasons from
+  `typeof process.kill` = `"undefined"` to what the sandbox does and does not expose, and draws a
+  conservative conclusion. Two sections of one document read the same reading; only one of them
+  read it correctly. § *G-02* is left exactly as it is, as the contrast case.
+
+  > **SUPERSEDED 2026-08-27 (preserved, not deleted):** *"CORRECTED 2026-08-27 — both assumptions
+  > are now MEASURED, and they did not both come back the same way."* and its A1 bullet:
+  > *"**A1 — CLOSED FAVOURABLY, measured 2026-08-27.** The shipped Caido LLRT does honour the
+  > process-group spawn option: `spikeDetachedGroupKill: "grandchild-died (detached honoured)"` on
+  > darwin 25.6.0, probe build `68199fa`, rebuilt from the recoverable commit and run during UAT
+  > (`08-UAT.md` test 1). The source analysis of `caido/dependency-llrt@caido` at pinned commit
+  > `a5b021c` is now corroborated by execution on the runtime users run, not standing alone."*
+  > The A6 bullet below is NOT superseded and is NOT withdrawn.
 - **A6 — FALSIFIED, measured 2026-08-27.** A real provider CLI does **not** keep its MCP child
   inside its own group. Measured on a real macOS install (`08-UAT.md` test 2): the CLI (codex,
   pid **43921**) sat in process group 43752, while its own `mcp-server.mjs` child (pid **44284**)
   sat in group **44284**. A group signal aimed at the CLI's group cannot reach the token-bearing
   child, and OQ-2's single-pid rung does not rescue it — that rung signals the CLI, not the child.
 
-**What each verdict does to the consequence recorded here.** The nine-site POSIX regression this
-section feared — the group operand naming a group that was never created, green on every CI leg —
-is **retired by A1's closure**. The risk moved to A6, which the section rated lower. The mechanism
-that answers A6 is not the group operand and not OQ-2's rung; it is the **argv-marker orphan reap**
-plans **08-06** and **08-07** shipped, which identifies its target by the target's own command line
-and is therefore independent of process groups by construction. OQ-2's rung survives with a
-**corrected justification** — defence against a future Caido that rebases its LLRT fork, not
-against an unmeasured one. One measurement closes a version, not a dependency.
+**What each verdict does to the consequence recorded here. CORRECTED 2026-08-28.** The nine-site
+POSIX regression this section feared — the group operand naming a group that was never created,
+green on every CI leg — is **NOT retired: it is live again**, because the reading that retired it is
+withdrawn and A1 is unmeasured. The risk is now on BOTH assumptions: A1 unmeasured and A6 measured
+false. The mechanism that answers A6 is not the group operand and not OQ-2's rung; it is the
+**argv-marker orphan reap** plans **08-06** and **08-07** shipped, which identifies its target by
+the target's own command line and is therefore independent of process groups by construction — and
+that mechanism is untouched by A1's retraction, because it depends on command-line identity rather
+than on process groups. OQ-2's rung survives with a **corrected justification** — defence against a
+future Caido that rebases its LLRT fork, not against an unmeasured one. One measurement closes a
+version, not a dependency.
+
+> **SUPERSEDED 2026-08-27 (preserved, not deleted):** *"The nine-site POSIX regression this
+> section feared … is **retired by A1's closure**. The risk moved to A6, which the section rated
+> lower."*
 
 **What is still NOT measured, stated so the closure is not read wider than it is.** One build, one
 platform, one provider. **Claude Code — the active provider — remains unmeasured**, and the codex
@@ -598,12 +627,23 @@ if the mechanism were absent* — never by the gate itself.
       measurement — no counts captured, no pre-fix control on the same machine, timeout path not
       exercised. Read § *T-08-01 — closed by attestation* before treating this zero as equivalent to
       Phase 7's
-- [~] A1 and A6 closed as mechanism claims — **PARTIALLY REACHED, 2026-08-27.** A1 is **closed
-      favourably by measurement**; A6 is **measured and FALSIFIED** for one provider (codex), with
-      Claude Code still unmeasured and the Control still not taken. Ledger entry **11** is
-      rewritten to the measured state rather than closed. `08-SPIKE.md` holds both readings and
-      the remaining procedure. *(Superseded 2026-08-24 line: "- [ ] A1 and A6 closed as mechanism
-      claims — **not reached, and not touched by the T-08-14 reading.** Ledger entry **11** stays
-      open; `08-SPIKE.md` holds the runnable procedure")*
+- [~] A1 and A6 closed as mechanism claims — **STILL PARTIALLY REACHED, and less far than the
+      2026-08-27 line claimed. CORRECTED 2026-08-28.** **A1 is RETRACTED and unmeasured** — its
+      2026-08-27 reading was emitted unconditionally by a probe whose liveness primitive the same
+      run measured absent. **A6 is measured and FALSIFIED** for one provider (codex) — a real
+      reading by a different instrument, not withdrawn — with Claude Code still unmeasured and the
+      Control still not taken. Ledger entry **11** is rewritten to this state rather than closed,
+      and it narrows nothing on the A1 side. `08-SPIKE.md` holds the A6 reading and the remaining
+      procedure; the A1 re-run is owned by plan 08-17.
+
+      > *Superseded 2026-08-27 line:* "- [~] A1 and A6 closed as mechanism claims — **PARTIALLY
+      > REACHED, 2026-08-27.** A1 is **closed favourably by measurement**; A6 is **measured and
+      > FALSIFIED** for one provider (codex), with Claude Code still unmeasured and the Control
+      > still not taken. Ledger entry **11** is rewritten to the measured state rather than
+      > closed. `08-SPIKE.md` holds both readings and the remaining procedure."
+      >
+      > *Superseded 2026-08-24 line:* "- [ ] A1 and A6 closed as mechanism claims — **not reached,
+      > and not touched by the T-08-14 reading.** Ledger entry **11** stays open; `08-SPIKE.md`
+      > holds the runnable procedure"
 - [ ] The `windows-latest` leg has executed — **not reached.** Ledger entry **12** stays open; two
       rows in `08-VALIDATION.md` are ⚠️ on it
