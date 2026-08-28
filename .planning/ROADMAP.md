@@ -318,11 +318,12 @@ Plans:
      > *SUPERSEDED (written 2026-08-27 by plan 08-10; the A1 reading it rests on was RETRACTED 2026-08-28):* What CHANGED the rung's justification: it was written as defence against an **unmeasured** A1, and A1 was **measured favourably on 2026-08-27** (`spikeDetachedGroupKill: "grandchild-died (detached honoured)"`, darwin 25.6.0) — so the rung now survives as defence against a **future Caido that rebases its LLRT fork**, since one measurement closes a version and not a dependency. Nothing else in this criterion is weakened.
 
      *(**Amended 2026-08-24 during Phase 8 planning**, per `08-RESEARCH.md` § *Q2*. The original wording named only "process-group signalling", whose canonical spelling is the runtime's own negative-pid form — and that spelling is **not usable** here: Caido's LLRT types `process.kill`'s `pid` parameter as a Rust `u32`, and rquickjs converts JS numbers to `u32` through `f64` with an explicit range check, so a negative pid raises an `Underflow` conversion error before `libc::kill` is ever reached. It is dangerous rather than merely inconvenient because it works perfectly under **Node**, which is the only vehicle any CI leg in this repository runs: the broken spelling would be green on all five legs and broken on every real Caido install — Phase 5 finding L-4 recurring verbatim. `detached: true` itself **is** honoured, source-verified at `caido/dependency-llrt` branch `caido` commit `a5b021c`, `modules/llrt_child_process/src/lib.rs:512-521`, which calls `command.process_group(0)` — i.e. `setpgid(0,0)`, so the child's pgid equals its pid. A **comment-stripped** static gate over `packages/backend/src` keeps the broken spelling out of the code; it is comment-stripped deliberately, because the module and orchestrator comments quote the banned form verbatim by house rule so a future reader does not reintroduce it, and a raw scan would go red against its own documentation. Same amend-in-place precedent as Phase 5 SC-1 and Phase 7 SC-2, per 05-CONTEXT.md D-02.)*
+
   3. Cancelling or timing out a turn leaves zero lingering `node.exe`/provider processes on either platform — no orphaned MCP process holding the Caido token.
   4. Session finalize / `stopMcpServer` kills all tracked pids before sweeping the temp dir, so token-bearing processes die before their env-source files are removed.
   5. macOS/Linux cancellation and timeout semantics visible to the user are unchanged and existing tests stay green.
 
-**Plans**: 12/17 plans executed (10/10 executed; 7 gap-closure plans added 2026-08-28 from `08-VERIFICATION.md`)
+**Plans**: 13/17 plans executed (10/10 executed; 7 gap-closure plans added 2026-08-28 from `08-VERIFICATION.md`)
 
 Plans:
 **Wave 1**
@@ -381,7 +382,7 @@ Plans:
 **Gap Wave 7** *(blocked on Gap Wave 6; three carrier plans with no file overlap, parallel — so none of them can assert the gate exits 0: whichever finishes first still sees its siblings' carriers named by ARM A)*
 
 - [x] 08-12-PLAN.md — The probe fix as a tested pure helper: `classifyLivenessObservation` (three-valued, with an executed totality case over its whole input domain), `buildLivenessProbePlan`, `formatSpikeVerdict` — plus the A1 marked correction in `kill-plan.ts`, `index.ts` and `kill-tree.posix.test.ts` (LIF-01, LIF-02)
-- [ ] 08-13-PLAN.md — Gap 2: amend SC-2 in place to name BOTH mechanisms and state the reap's three boundaries, retract A1 inside the 2026-08-27 amendment, and correct LIF-01/LIF-02 and their coverage rows (LIF-01, LIF-02)
+- [x] 08-13-PLAN.md — Gap 2: amend SC-2 in place to name BOTH mechanisms and state the reap's three boundaries, retract A1 inside the 2026-08-27 amendment, and correct LIF-01/LIF-02 and their coverage rows (LIF-01, LIF-02)
 - [ ] 08-14-PLAN.md — The register and the phase documents: ledger entry 11 corrected in both representations with a new entry for the unfalsifiable probe verdict, plus `STATE.md`, `08-UAT.md` test 1, `08-VALIDATION.md` and `08-SECURITY.md`, each cleared from a captured gate run proven live rather than silent (LIF-01, LIF-02)
 
 **Gap Wave 8** *(blocked on Gap Wave 7; depends on all four carrier plans, which is what makes a green gate a fact here rather than a race)*
@@ -521,7 +522,7 @@ Parallelism opportunities: Phase 2 may run alongside Phase 3 (both depend only o
 | 5. Kill Shell Wrappers | 6/6 | Complete   | 2026-08-20 |
 | 6. Windows Command Resolution | 7/7 | Complete    | 2026-08-21 |
 | 7. Provider Spawn & Registration | 0/3 | Not started | - |
-| 8. Process Lifecycle | 12/17 | In Progress|  |
+| 8. Process Lifecycle | 13/17 | In Progress|  |
 | 9. CI Hardening | 0/1 | Not started | - |
 | 10. Windows Polish | 0/1 | Not started | - |
 | 11. Plugin Capability Discovery | 0/3 | Not started | - |
