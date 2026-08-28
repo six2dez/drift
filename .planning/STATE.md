@@ -4,10 +4,12 @@ milestone: v1.0
 current_phase: 08
 current_phase_name: Process Lifecycle
 status: executing
+verification_status: gaps_found
+verification_score: "4/9 must-haves verified"
 stopped_at: Completed 08-13-PLAN.md
 last_updated: "2026-08-28T09:19:39.944Z"
 last_activity: 2026-08-28
-last_activity_desc: Phase 08 execution started
+last_activity_desc: "Phase 08 gap-closure — A1 reading RETRACTED (08-VERIFICATION.md: gaps_found, 4/9)"
 state_head: ce9bbd03818076d537d167763567a552e4e05676
 progress:
   total_phases: 13
@@ -28,10 +30,11 @@ See: .planning/PROJECT.md (updated 2026-06-26)
 
 ## Current Position
 
-Phase: 08 (Process Lifecycle) — EXECUTING
+Phase: 08 (Process Lifecycle) — EXECUTING (gap-closure round)
 Plan: 4 of 17
 Status: Ready to execute
-Last activity: 2026-08-28 — Phase 08 execution started
+Last activity: 2026-08-28 — Phase 08 gap-closure: A1's 2026-08-27 reading RETRACTED across its carriers
+Verification: `08-VERIFICATION.md` rules **`gaps_found`, score 4/9 must-haves verified** (2026-08-27T14:35Z). This supersedes the 2026-08-24 `human_needed` / 2/8 verdict, which the report preserves as a marked correction rather than deleting.
 
 Progress: [███░░░░░░░] 30% (3 of 10 milestone phases)
 
@@ -253,17 +256,23 @@ None yet. Eleven items are parked in the ROADMAP backlog (999.1-999.11): nine fr
 - Gemini-on-Windows MCP reliability has open upstream issues — treat as best-effort, gate Phase 7 on a real-machine check. Codex `${VAR}` expansion in `mcp add` needs CI confirmation.
 - RESOLVED 2026-08-12: the requirement-count discrepancy ("22 v1 requirements" vs 24 enumerated) is reconciled — REQUIREMENTS.md now enumerates and maps 43.
 - RESOLVED 2026-08-13 (quick 260813-dc7): Phase 01 verification gap G1 (SIG-01h) is closed. `readBrowserStorageItem()` was mutation-survivable in the forwarding direction — no test drove a *present* token through it, so a regression killing Caido token pickup would have shipped green. Three append-only cases added to `settings.test.ts` (forwarding, JSON-parse failure, non-string `getItem`). Falsifiability proven, not assumed: with `if (key !== "__never__") return undefined;` at `settings.ts:35` the suite reports **2 failed / 11 passed** (Test C survives by design); mutation reverted and confirmed byte-identical. Suite 131 → **134 tests**, lint still 0/0.
-- CORRECTED 2026-08-27 (measured, real macOS Caido, darwin 25.6.0, probe build 68199fa). **A1 CLOSED FAVOURABLY:** `spikeDetachedGroupKill: "grandchild-died (detached honoured)"` — the shipped LLRT does honour the detached spawn, so the nine-site POSIX regression this bullet feared cannot happen. **A6 FALSIFIED:** codex pid 43921 in pgid 43752, its own `mcp-server.mjs` child pid 44284 in pgid 44284 — a group signal aimed at the CLI's group cannot reach the token-bearing child, and OQ-2's single-pid rung does not help because it signals the CLI. The answer is the argv-marker orphan reap (plans 08-06/08-07), independent of process groups by construction. **STILL OPEN:** Claude Code — the active provider — is unmeasured, and the pre-fix Control was never taken. Procedure in 08-SPIKE.md; probe at 68199fa.
+- CORRECTED 2026-08-28 (`08-VERIFICATION.md` gap 1), superseding the 2026-08-27 text preserved below. **A1 RETRACTED — the reading was an artefact of the instrument, not a measurement.** The probe at 68199fa (`index.ts:5061`) decided liveness with `signalRef.process?.kill?.(grandchildPid, 0) ?? false`, an optional call on a primitive the SAME diagnostics run measured absent (`spikeProcessKillType: "undefined"`), so the optional chain yielded `undefined`, `?? false` forced `alive === false`, and the string `spikeDetachedGroupKill: "grandchild-died (detached honoured)"` was emitted UNCONDITIONALLY. The red input did not exist, so the reading carries no information and **the nine-site POSIX regression this bullet feared is LIVE AGAIN** — whether the shipped LLRT honours the detached spawn is unmeasured. **A6 FALSIFIED (unchanged, NOT withdrawn — measured by direct `ps` observation, a different instrument):** codex pid 43921 in pgid 43752, its own `mcp-server.mjs` child pid 44284 in pgid 44284 — a group signal aimed at the CLI's group cannot reach the token-bearing child, and OQ-2's single-pid rung does not help because it signals the CLI. The answer is the argv-marker orphan reap (plans 08-06/08-07), independent of process groups by construction. **STILL OPEN:** A1 is unmeasured and its 2026-08-27 reading is withdrawn, so the A1 re-run is outstanding — with the fixed three-valued determination (`classifyLivenessObservation`, `kill-plan.ts`, plan 08-12), re-run owned by plan 08-17; Claude Code — the active provider — is unmeasured; and the pre-fix Control was never taken. Procedure in 08-SPIKE.md; probe at 68199fa.
+
+> SUPERSEDED 2026-08-27 — preserved, not deleted. The A6 half of this text is still current; only the A1 half is withdrawn: "CORRECTED 2026-08-27 (measured, real macOS Caido, darwin 25.6.0, probe build 68199fa). **A1 CLOSED FAVOURABLY:** `spikeDetachedGroupKill: "grandchild-died (detached honoured)"` — the shipped LLRT does honour the detached spawn, so the nine-site POSIX regression this bullet feared cannot happen. **A6 FALSIFIED:** codex pid 43921 in pgid 43752, its own `mcp-server.mjs` child pid 44284 in pgid 44284 — a group signal aimed at the CLI's group cannot reach the token-bearing child, and OQ-2's single-pid rung does not help because it signals the CLI. The answer is the argv-marker orphan reap (plans 08-06/08-07), independent of process groups by construction. **STILL OPEN:** Claude Code — the active provider — is unmeasured, and the pre-fix Control was never taken. Procedure in 08-SPIKE.md; probe at 68199fa."
 
 > SUPERSEDED 2026-08-24: A1 OPEN: the shipped Caido LLRT is unverified on any real install — if its fork differs, LIF-02 is not closed and every CI leg stays green because every leg runs Node. A6 OPEN: no provider CLI's MCP child pgid was ever observed. Re-run procedure preserved in 08-SPIKE.md; probe code at commit 68199fa.
 
 - 08-04 built the Windows vehicle but took NO reading: the three win32 kill-tree cases have never executed and the reserved dead-pid exit-code block in kill-tree.win32.test.ts is empty. A windows-latest run must fill the measured code, its first stderr line and the run URL (broken-windows ledger entry 12).
-- CORRECTED 2026-08-27. Phase 8: A1 and A6 are now MEASURED (A1 closed favourably, A6 **FALSIFIED** for one provider) — ledger 11 is rewritten to that state rather than closed, because Claude Code stays unmeasured and the Control was never taken. The `windows-latest` leg still has never run (ledger 12, untouched). The T-08-14 attestation closes neither.
+- CORRECTED 2026-08-28, superseding the 2026-08-27 text preserved below. Phase 8: **A6 alone is measured** (**FALSIFIED** for one provider, by direct `ps`); **A1's 2026-08-27 reading is RETRACTED** and A1 is unmeasured. Ledger entry 11 now states the withdrawal in both of its representations and stays `open`, and the entry narrows nothing on the A1 side: the nine-site POSIX concern it was opened for is live again. The defect itself is recorded as ledger entry 20. The `windows-latest` leg still has never run (ledger 12, untouched). The T-08-14 attestation closes neither.
+
+> SUPERSEDED 2026-08-27 — preserved, not deleted: "CORRECTED 2026-08-27. Phase 8: A1 and A6 are now MEASURED (A1 closed favourably, A6 **FALSIFIED** for one provider) — ledger 11 is rewritten to that state rather than closed, because Claude Code stays unmeasured and the Control was never taken. The `windows-latest` leg still has never run (ledger 12, untouched). The T-08-14 attestation closes neither."
 
 > SUPERSEDED 2026-08-24: Phase 8: A1/A6 remain OPEN — not measured (ledger 11), and the windows-latest leg has never run (ledger 12). Neither is closed by the T-08-14 attestation.
 
 - Whether Caido plugin sandbox can spawn pgrep at all is UNMEASURED. If it cannot, both orphan reaps degrade silently to the enumerator-unavailable no-op while every source gate stays green. Needs a real Caido install (08-07 D8).
-- Phase 8 close: LIF-01 and LIF-02 are deliberately NOT complete. LIF-01 needs one windows-latest run (ledger 12). LIF-02 needs a Drift-spawned Claude Code A6 reading and the pre-fix Control (ledger 11), plus executed evidence for the orphan reap (ledger 13/15). 08-VERIFICATION.md still rules human_needed and its three human items are unchanged.
+- Phase 8 close: LIF-01 and LIF-02 are deliberately NOT complete. LIF-01 needs one windows-latest run (ledger 12). LIF-02 needs a Drift-spawned Claude Code A6 reading and the pre-fix Control (ledger 11), plus executed evidence for the orphan reap (ledger 13/15). `08-VERIFICATION.md` now rules **`gaps_found`, 4/9 must-haves verified** (superseding its 2026-08-24 `human_needed`, 2/8), and adds a fourth human item: the A1 re-run with a fixed three-valued probe.
+
+> SUPERSEDED 2026-08-24 clause in the bullet above — preserved, not deleted: "08-VERIFICATION.md still rules human_needed and its three human items are unchanged." Replaced 2026-08-28: the report was re-run on 2026-08-27T14:35Z and now rules `gaps_found` at 4/9, with a fourth human item added (the A1 re-run). Everything else in the bullet is unchanged.
 
 ### Quick Tasks Completed
 

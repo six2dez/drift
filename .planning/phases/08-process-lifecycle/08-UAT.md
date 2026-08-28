@@ -68,6 +68,15 @@ describes LLRT. It does not describe what the plugin sandbox re-exports to a bac
 bundle. The distinction was never drawn before this reading, and it is the single
 mechanism behind both gaps below.
 
+**ADDED 2026-08-28 — the finding this table was already carrying, four sections above the
+test that contradicted it.** The first row here, `typeof process.kill` = `undefined`, is
+what INVALIDATES test 1's A1 verdict below: the probe decided A1 by calling that exact
+primitive and coalescing its absence to "not alive", so the favourable string was emitted
+unconditionally. Both facts came out of the SAME probe run and were written into the SAME
+file on the SAME day, five sections apart, and **nobody joined them at the time.** That
+is the finding, and this file is where it happened. A1's reading is RETRACTED; see test 1
+and `08-VERIFICATION.md` gap 1.
+
 Two consequences, recorded rather than acted on here:
 
 1. **G-01's risk rating rises.** An empty `process.env` on darwin could have been a
@@ -108,20 +117,47 @@ but it is a live token-at-rest condition and should not be lost in a summary.
 ### 1. A1 — LLRT honours the process-group spawn option
 source: 08-01-SUMMARY.md D2
 expected: Diagnostics reports `spikeDetachedGroupKill: grandchild-died (detached honoured)`. Any other value — including `inconclusive`, `skipped`, or `error: <ctor>` — is a halt, not a retry.
-result: pass
+result: issue
 reported: |
   2026-08-27, probe build (68199fa) installed in Caido on darwin 25.6.0:
     spikeProcessKillType:   "undefined"
     spikeDetachedGroupKill: "grandchild-died (detached honoured)"
     spikeNote:              "Phase 8 A1 probe — temporary, removed by T-08-03"
+severity: major
 evidence: >-
-  **A1 is CLOSED FAVOURABLY, by measurement rather than inference.** The shipped Caido
-  LLRT honours `detached: true`: a detached spawn's group kill reached the grandchild on
-  real hardware. This is the assumption the phase's entire POSIX mechanism rests on, and
-  the one no CI leg could ever reach — every leg runs Node, which honours the option
-  regardless. Nine `killTree` sites are now backed by execution, not by source analysis
-  of a pinned commit. Ledger entry 11's A1 half is closed.
-  Second field is a separate matter — see G-02; it does NOT weaken this result.
+  **A1 IS RETRACTED (2026-08-28). The reading above is an artefact of the instrument, not a
+  measurement, and this record is where the reading first became a verdict.** The probe at
+  68199fa (`index.ts:5061`) determined liveness with
+  `signalRef.process?.kill?.(grandchildPid, 0) ?? false` — an optional call on
+  `process.kill`, the very primitive the FIRST field of this same `reported` block records
+  as `"undefined"`. With it absent the optional chain yields `undefined`, `?? false`
+  coalesces the absent case to "not alive", and the branch prints
+  `grandchild-died (detached honoured)` UNCONDITIONALLY. The other branch was unreachable:
+  the red input did not exist. So the reading carries NO information about whether the
+  grandchild died, and it cannot distinguish "the grandchild died" from "I have no way to
+  look". The nine `killTree` sites are back to resting on source analysis of a pinned
+  commit, and ledger entry 11's A1 half is NOT closed — it is open, and its nine-site
+  POSIX concern is live again.
+  **The `reported` block is unchanged and is not the error** — those three field values are
+  what the instrument printed, and the first of them is the evidence against the third.
+  **Where the fix lives:** `classifyLivenessObservation` in
+  `packages/backend/src/kill-plan.ts` (plan 08-12) is three-valued — alive / dead /
+  inconclusive — and returns `inconclusive` when the liveness primitive is unavailable
+  instead of coalescing it into a verdict. **Who re-runs it:** plan 08-17, on real
+  hardware, via 08-SPIKE.md steps 3 and 4. Retraction recorded in `08-VERIFICATION.md`
+  gap 1; defect recorded as broken-windows ledger entry 20.
+  Second field is a separate matter — see G-02; it does NOT weaken this retraction.
+
+> **SUPERSEDED 2026-08-27 evidence for test 1 — preserved verbatim, not deleted**, per the
+> `07-VALIDATION.md` marked-correction convention this phase uses throughout:
+>
+> > **A1 is CLOSED FAVOURABLY, by measurement rather than inference.** The shipped Caido
+> > LLRT honours `detached: true`: a detached spawn's group kill reached the grandchild on
+> > real hardware. This is the assumption the phase's entire POSIX mechanism rests on, and
+> > the one no CI leg could ever reach — every leg runs Node, which honours the option
+> > regardless. Nine `killTree` sites are now backed by execution, not by source analysis
+> > of a pinned commit. Ledger entry 11's A1 half is closed.
+> > Second field is a separate matter — see G-02; it does NOT weaken this result.
 
 ### 2. A6 — a real provider CLI's MCP child sits in the group the kill reaches
 source: 08-01-SUMMARY.md D3
@@ -202,8 +238,8 @@ result: [pending]
 ## Summary
 
 total: 10
-passed: 1
-issues: 1
+passed: 0
+issues: 2
 pending: 8
 at_risk: 1
 degraded_as_designed: 1
