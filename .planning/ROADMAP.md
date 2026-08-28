@@ -366,15 +366,15 @@ Plans:
 
 - [ ] 08-11-PLAN.md — Tracer: re-point `verdict-gate.sh` at A1's actual verdict with both scans given a demonstrated red input, keep ARM A's fail-closed discovery shape, then land the retraction in `08-SPIKE.md` and watch that carrier drop out of the gate's own output (LIF-01, LIF-02)
 
-**Gap Wave 7** *(blocked on Gap Wave 6; three plans with no file overlap, parallel)*
+**Gap Wave 7** *(blocked on Gap Wave 6; three carrier plans with no file overlap, parallel — so none of them can assert the gate exits 0: whichever finishes first still sees its siblings' carriers named by ARM A)*
 
 - [ ] 08-12-PLAN.md — The probe fix as a tested pure helper: `classifyLivenessObservation` (three-valued, with an executed totality case over its whole input domain), `buildLivenessProbePlan`, `formatSpikeVerdict` — plus the A1 marked correction in `kill-plan.ts`, `index.ts` and `kill-tree.posix.test.ts` (LIF-01, LIF-02)
 - [ ] 08-13-PLAN.md — Gap 2: amend SC-2 in place to name BOTH mechanisms and state the reap's three boundaries, retract A1 inside the 2026-08-27 amendment, and correct LIF-01/LIF-02 and their coverage rows (LIF-01, LIF-02)
-- [ ] 08-14-PLAN.md — The register and the phase documents: ledger entry 11 corrected in both representations with a new entry for the unfalsifiable probe verdict, plus `STATE.md`, `08-UAT.md` test 1, `08-VALIDATION.md` and `08-SECURITY.md` — the gate goes green here (LIF-01, LIF-02)
+- [ ] 08-14-PLAN.md — The register and the phase documents: ledger entry 11 corrected in both representations with a new entry for the unfalsifiable probe verdict, plus `STATE.md`, `08-UAT.md` test 1, `08-VALIDATION.md` and `08-SECURITY.md`, each cleared from a captured gate run proven live rather than silent (LIF-01, LIF-02)
 
-**Gap Wave 8** *(blocked on Gap Wave 7)*
+**Gap Wave 8** *(blocked on Gap Wave 7; depends on all four carrier plans, which is what makes a green gate a fact here rather than a race)*
 
-- [ ] 08-15-PLAN.md — UD-01's resolved deliverable: a `lastOrphanReap` diagnostics key that says whether the orphan reap ran, was refused, or is inert — plus `a1-probe-fix.patch` and `verify-a1-patch.sh`, a committed probe fix proven to apply, type-check and build (LIF-02)
+- [ ] 08-15-PLAN.md — UD-01's resolved deliverable: a `lastOrphanReap` diagnostics key that says whether the orphan reap ran, was refused, or is inert — plus `a1-probe-fix.patch` and `verify-a1-patch.sh`, a committed probe fix proven to apply, type-check and build — **the gate goes green here**, and its red input is re-demonstrated at green (LIF-02)
 
 **Gap Wave 9** *(blocked on Gap Wave 8; `autonomous: false`, `gate="blocking-human"`)*
 
