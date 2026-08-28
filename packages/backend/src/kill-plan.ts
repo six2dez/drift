@@ -1198,3 +1198,103 @@ export function formatSpikeVerdict(observation: LivenessObservation): string {
   }
   return `inconclusive: ${observation.reason} — the probe could not tell whether the target is still in the process table`;
 }
+
+// ── The reap's diagnostics value (UD-01 option C, plan 08-15) ──────────
+//
+// THE FINDING THIS EXISTS FOR, and it is the phase's own largest stated risk
+// rather than a feature note. Whether Caido's plugin sandbox can spawn the
+// process enumerator AT ALL is unmeasured. `pgrep` is spawned by bare name, and
+// the one real-hardware diagnostics run showed the existing bare-name `which`
+// lookup produce no result — so bare-name resolution in that sandbox is
+// genuinely unconfirmed rather than merely unobserved. If the spawn is refused,
+// `classifyOrphanScanOutcome` above fails CLOSED into
+// `reason=enumerator-unavailable` and the entire argv-marker orphan reap plans
+// 08-06/08-07 shipped is INERT on the shipping runtime — while every CI gate
+// stays green, because every gate in this repository asserts properties of the
+// source rather than of that sandbox. `08-VERIFICATION.md` ledger entries 14 and
+// 15 record exactly this, and call checking for it "the cheapest high-value
+// measurement in the phase: one cancel and one glance".
+//
+// Until now that reading existed only in the Caido backend console. Decision
+// UD-01 (`08-UI-SPEC.md` § B, resolved 2026-08-28 by the maintainer) answered
+// option C — a diagnostics-only key, no user-visible surface, zero frontend
+// files — and this formatter is the value that key carries. Its accepted
+// weakness is recorded rather than argued away: the diagnostics panel is
+// user-triggered and after-the-fact, so it never TELLS anyone; it only answers
+// someone who thought to ask.
+//
+// WHY THE FORMATTER IS HERE AND THE SINGLETON IS IN `index.ts`. Same split as
+// every other decision in this module: the orchestrator cannot be imported by
+// any test this project can run (Pitfall 3), so a value composed inline at the
+// call site is a value no assertion can reach. This one is pasted into public
+// GitHub issues, so that is not an acceptable state for it to be in.
+//
+// SCALARS ONLY, AND IT IS A WHITELIST RATHER THAN A SERIALIZER (T-08-75). Every
+// arm below reads NAMED fields and interpolates nothing else. A generic
+// `JSON.stringify(record)` would render whatever a future edit adds to the
+// record — a pid, a temp-directory path, an argv — into a string a user pastes
+// publicly. `kill-plan.test.ts` feeds every arm a pid-shaped number, a pid array
+// and an absolute path in fields no arm reads, and asserts none of them appears.
+// This is the same three-scalar rendering rule (T-04-04) the reap's own console
+// line already obeys.
+
+// The four shapes the reap orchestrator can produce, discriminated on `kind` in
+// the house style. Each carries ONLY the scalars its existing console line
+// carries, plus an age; every reason field is drawn from a CLOSED union already
+// defined above rather than from free prose, so a reason can never become a
+// sentence that interpolates something.
+//
+// `ageMs` is the scan's own measured age — the wall-clock value
+// `classifyOrphanScanOutcome`'s freshness bound consumes — for the two arms a
+// scan produces. For the two REFUSAL arms nothing was ever sampled, so it is 0
+// and says so rather than being omitted from those arms and read as absent data.
+export type OrphanReapRecord =
+  | { kind: "plan-refused"; reason: KillPlanRefusal; ageMs: number }
+  | {
+      kind: "gate-closed";
+      sessions: number;
+      directDepth: number;
+      ageMs: number;
+    }
+  | {
+      kind: "noop";
+      reason: OrphanScanNoopReason;
+      exitCode: number | null | undefined;
+      ageMs: number;
+    }
+  | {
+      kind: "reap";
+      exitCode: number | null | undefined;
+      killed: number;
+      ageMs: number;
+    };
+
+// THE ONE DISTINCTION THIS STRING EXISTS TO CARRY: `kind=noop
+// reason=enumerator-unavailable` (the mechanism never ran on this runtime) must
+// never render the same as `kind=noop reason=no-match` (it ran and matched
+// nothing). Every no-op renders its reason token verbatim, which is what makes
+// the whole five-member union pairwise distinct; a formatter that dropped the
+// reason to "tidy up" the line would pass every other case here and silently
+// destroy the only reading the key was added for.
+export function formatOrphanReapRecord(record: OrphanReapRecord): string {
+  if (record.kind === "plan-refused") {
+    return `kind=refused reason=${record.reason} killed=0 ageMs=${String(record.ageMs)}`;
+  }
+  if (record.kind === "gate-closed") {
+    return (
+      `kind=refused reason=gate-closed sessions=${String(record.sessions)}` +
+      ` directDepth=${String(record.directDepth)} killed=0` +
+      ` ageMs=${String(record.ageMs)}`
+    );
+  }
+  if (record.kind === "noop") {
+    return (
+      `kind=noop reason=${record.reason} exit=${String(record.exitCode)}` +
+      ` killed=0 ageMs=${String(record.ageMs)}`
+    );
+  }
+  return (
+    `kind=reap exit=${String(record.exitCode)}` +
+    ` killed=${String(record.killed)} ageMs=${String(record.ageMs)}`
+  );
+}

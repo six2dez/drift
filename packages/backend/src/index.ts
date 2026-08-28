@@ -99,8 +99,10 @@ import {
   buildPreviousRunOrphanScanPlan,
   buildSessionOrphanScanPlan,
   classifyOrphanScanOutcome,
+  formatOrphanReapRecord,
   hasTrackedProcessExited,
   type KillTreePlan,
+  type OrphanReapRecord,
   MCP_TEMP_DIR_PREFIX,
   parseOrphanScanPids,
   shouldDetachProviderSpawn,
@@ -502,6 +504,46 @@ let lastFirstWriteAttempts = 0;
 // Defender", this one answers "did a per-turn config write", and collapsing them
 // would let the hot path overwrite the start-up answer on every send.
 let lastTempWriteAttempts = 0;
+
+// THE ORPHAN REAP'S LAST OUTCOME, AND WHY ONE KEY IS WORTH A MODULE-LEVEL
+// SINGLETON HERE (decision UD-01, `08-UI-SPEC.md` § B, resolved 2026-08-28).
+//
+// THE FINDING, not a feature note. Whether Caido's plugin sandbox can spawn the
+// process enumerator AT ALL is UNMEASURED. `pgrep` and `kill` are spawned by
+// BARE NAME, and the one real-hardware diagnostics run this phase has showed the
+// existing bare-name `which` lookup produce NO result, so bare-name resolution
+// inside that sandbox is genuinely unconfirmed rather than merely unobserved. If
+// the spawn is refused, `classifyOrphanScanOutcome` fails CLOSED into
+// `reason=enumerator-unavailable` — correct behaviour, and it means the entire
+// argv-marker orphan reap plans 08-06/08-07 shipped is INERT on the shipping
+// runtime. Every CI gate stays green either way, because every gate in this
+// repository asserts properties of the SOURCE rather than of that sandbox.
+// `08-VERIFICATION.md` ledger entries 14 and 15 record exactly this as the
+// phase's own largest risk and call checking for it "the cheapest high-value
+// measurement in the phase: one cancel and one glance".
+//
+// Until this singleton existed the reading lived ONLY in the Caido backend
+// console, which is the status quo that report named as the problem: findable
+// only by someone who already knew to open it. Surfaced through
+// `getDiagnostics`, it costs one glance and travels in the support bundle a
+// reporter already pastes. Its accepted weakness is recorded rather than argued
+// away — diagnostics is user-triggered and after-the-fact, so it never TELLS
+// anyone; it only answers someone who thought to ask.
+//
+// SCALARS ONLY (T-08-75, the same T-04-04 rendering rule the reap's own console
+// line obeys): the value is built by `formatOrphanReapRecord` in `kill-plan.ts`
+// from closed reason unions, an exit code, a killed COUNT and an age. No pid, no
+// path, no argv, no environment value — a diagnostics key is a support-bundle
+// key and a support bundle is pasted into public issues.
+let lastOrphanReap: string | undefined;
+
+// The ONE writer. Every arm of the reap that logs an outcome calls this beside
+// its log line, so the console line and the diagnostics reading cannot drift
+// apart without a reviewer seeing both halves in the same hunk;
+// `index.source.test.ts` asserts that pairing in BOTH directions.
+function recordOrphanReapOutcome(record: OrphanReapRecord): void {
+  lastOrphanReap = formatOrphanReapRecord(record);
+}
 
 // PERF-02 / WR-09's evidence channel for the activity tail. The tail is the one
 // truncation site in the backend that emits NO marker into any user-visible
@@ -3774,6 +3816,14 @@ function reapMcpOrphans(
 ): void {
   if (plan.kind === "none") {
     sdk.console.log(`[drift lifecycle] no orphan reap: ${plan.reason}`);
+    recordOrphanReapOutcome({
+      kind: "plan-refused",
+      reason: plan.reason,
+      // Nothing was sampled on this path — the refusal happens before any
+      // spawn — so the age is 0 and says so, rather than being omitted and read
+      // as missing data.
+      ageMs: 0,
+    });
     return;
   }
 
@@ -3813,6 +3863,19 @@ function reapMcpOrphans(
       scanFreshnessBudgetMs: ORPHAN_SCAN_TIMEOUT_MS,
     });
 
+    // THE AGE THE DIAGNOSTICS RECORD CARRIES, read here rather than hoisted
+    // above the classifier — and the reason is a gate rather than a preference.
+    // `index.source.test.ts` § *bounds the scan with ONE constant* pins the
+    // classifier's own age expression as the LITERAL string
+    // `scanAgeMs: Date.now() - scanStartedAt,`, because that identity between
+    // the timer's bound and the wall-clock bound is what stops the freshness
+    // check becoming the stricter of the two. Hoisting it into a shared local
+    // would silently retire that assertion. So the classifier keeps its inline
+    // read and the record takes its own, microseconds later off the SAME
+    // `scanStartedAt` origin: the same interval, not a second measurement of a
+    // different one.
+    const settledAgeMs = Date.now() - scanStartedAt;
+
     // ONE line, SCALARS ONLY: the outcome kind, its reason, the exit code and
     // the COUNT of pids signalled. No path, no argv, no environment value and no
     // pid — the T-04-04 rendering rule `killTree`'s header states, and a pid
@@ -3822,6 +3885,12 @@ function reapMcpOrphans(
       sdk.console.log(
         `[drift lifecycle] orphan reap: kind=noop reason=${outcome.reason} exit=${String(result.exitCode)} killed=0`,
       );
+      recordOrphanReapOutcome({
+        kind: "noop",
+        reason: outcome.reason,
+        exitCode: result.exitCode,
+        ageMs: settledAgeMs,
+      });
       return;
     }
 
@@ -3852,6 +3921,12 @@ function reapMcpOrphans(
     sdk.console.log(
       `[drift lifecycle] orphan reap: kind=reap exit=${String(result.exitCode)} killed=${String(signalled)}`,
     );
+    recordOrphanReapOutcome({
+      kind: "reap",
+      exitCode: result.exitCode,
+      killed: signalled,
+      ageMs: settledAgeMs,
+    });
   };
 
   let settled = false;
@@ -3978,6 +4053,12 @@ function reapSessionOrphansIfIdle(sdk: BackendSDK): void {
     sdk.console.log(
       `[drift lifecycle] no orphan reap: gate-closed sessions=${String(activeSessionCount)} directDepth=${String(directMcpCallDepth)}`,
     );
+    recordOrphanReapOutcome({
+      kind: "gate-closed",
+      sessions: activeSessionCount,
+      directDepth: directMcpCallDepth,
+      ageMs: 0,
+    });
     return;
   }
 
@@ -6409,6 +6490,14 @@ async function getDiagnostics(_sdk: BackendSDK): Promise<Result<Record<string, s
       ` / negative ${String(Math.round(RESOLUTION_NEGATIVE_TTL_MS / 1000))}s`,
     activeProvider: currentSettings.activeProvider,
     sqlitePersistenceAvailable: db !== undefined ? "yes" : "no",
+    // UD-01 option C. The one key that answers whether the argv-marker orphan
+    // reap is INERT on the machine this bundle came from: `kind=noop
+    // reason=enumerator-unavailable` means the sandbox refused the enumerator
+    // spawn and the mechanism never ran, which reads differently from
+    // `reason=no-match` (it ran and matched nothing) and from `kind=reap`.
+    // Scalars only — see `lastOrphanReap`'s declaration and T-08-75.
+    lastOrphanReap:
+      lastOrphanReap ?? "none (no orphan reap has run since this plugin load)",
     activeSessions: String(activeProcesses.size),
     cliSessionsCount: String(cliSessions.size),
     lastSpawnCommand: lastSpawnArgs.join(" "),
