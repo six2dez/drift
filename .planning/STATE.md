@@ -4,11 +4,11 @@ milestone: v1.0
 current_phase: 08
 current_phase_name: Process Lifecycle
 status: executing
-stopped_at: Completed 08-15-PLAN.md
-last_updated: "2026-08-28T10:05:49.667Z"
+stopped_at: Completed 08-16-PLAN.md
+last_updated: "2026-08-28T11:55:25.092Z"
 last_activity: 2026-08-28
 last_activity_desc: "Phase 08 gap-closure — A1 reading RETRACTED (08-VERIFICATION.md: gaps_found, 4/9)"
-state_head: 4bc6e335048fd4da931668bae0c5f2bf60f9cf25
+state_head: 0edec0ef0b2474d7fc25ddd5f44c36f2c8687306
 progress:
   total_phases: 13
   completed_phases: 5
@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-06-26)
 ## Current Position
 
 Phase: 08 (Process Lifecycle) — EXECUTING (gap-closure round)
-Plan: 6 of 17
+Plan: 7 of 17
 Status: Ready to execute
 Last activity: 2026-08-28 — Phase 08 gap-closure: A1's 2026-08-27 reading RETRACTED across its carriers
 Verification: `08-VERIFICATION.md` rules **`gaps_found`, score 4/9 must-haves verified** (2026-08-27T14:35Z). This supersedes the 2026-08-24 `human_needed` / 2/8 verdict, which the report preserves as a marked correction rather than deleting.
@@ -86,6 +86,7 @@ Progress: [███░░░░░░░] 30% (3 of 10 milestone phases)
 | Phase 08 P13 | 24 min | 3 tasks | 2 files |
 | Phase 08 P14 | 26 min | 3 tasks | 5 files |
 | Phase 08 P15 | 25 min | 3 tasks | 7 files |
+| Phase 08 P16 | 22 min | 3 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -243,6 +244,10 @@ Recent decisions affecting current work:
 - [Phase 08]: Ledger entry 11 is corrected to state A1's verdict as WITHDRAWN in both of its representations, and says the nine-site POSIX concern it was opened for is LIVE AGAIN rather than sitting in a middle state that reads as partial progress.
 - [Phase 08]: Plan 08-14 asserts only that none of ITS five files is named by verdict-gate.sh, in a capture proven live (three ARM headers). The gate's exit code is recorded as an observation, never as this plan's criterion; the exit-0 assertion and the green re-demonstration belong to plan 08-15.
 - [Phase 08]: No threat disposition in 08-SECURITY.md depends on A1's verdict: all 50 STRIDE rows and all 9 accepted residuals are byte-identical after the correction and threats_open stays 0, because every threat was written against a mechanism rather than against a reading.
+- [Phase 08]: [08-16]: The orphan reap is NOT inert on the shipping runtime. lastOrphanReap read `kind=noop reason=scan-failed exit=1 killed=0 ageMs=24` on a real macOS Caido 0.58.2; exit=1 is unreachable on both spawnThrew paths and on the timeout arm (all three render exit=undefined), so pgrep spawned, ran and exited 1 BY BARE NAME inside Caido's sandbox. Ledger entry 14 closed on this; 13 and 15 narrowed and left open.
+- [Phase 08]: [08-16]: A6 is a PER-PROVIDER SPLIT, not a reversal — TRUE for Claude Code (mcp-server pgid 29578 == provider pid 29578, reproduced at 30372), FALSE for codex (2026-08-27, unchanged in wording and direction). gemini and copilot stay unmeasured.
+- [Phase 08]: [08-16]: The CLI-cleanup confounder stays OPEN. Both provider-liveness cells are dated abstentions, so the 1 -> 0 pairs show the token-bearing child is gone, not that Drift removed it. Excluding it needs the PRE-FIX Control at 68199fa, owned by plan 08-17. A favourable before/after pair is not a causal attribution.
+- [Phase 08]: [08-16]: A1's TOPOLOGY half is measured (pgid == pid on both Drift-spawned providers, while caido-cli sits in pgid 41171) by direct ps from outside the sandbox, with no process.kill on its path. The CAUSAL half is not, so A1's verdict stays OPEN, its 2026-08-27 reading stays RETRACTED, and plans 08-11..08-14's corrections are untouched.
 
 ### Pending Todos
 
@@ -299,8 +304,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-28T10:05:49.402Z
-Stopped at: Completed 08-15-PLAN.md
+Last session: 2026-08-28T11:55:07.510Z
+Stopped at: Completed 08-16-PLAN.md
 Resume file: None
 
 **Live on the public remote: nothing of ours.** Plan 03-04 tore down all three `scratch/*` branches (`ci-proof-windows-probe`, `ci-proof-windows-probe-negative`, `ci-proof-windows-gate-negative`) locally and remotely. Asserted with a `test -z` discrimination over the captured glob (`scratch-glob-empty=0`) plus the full unfiltered listing, which now shows only `main` at `2d8cf16` and the pre-existing, unrelated `fix/security-hotfixes` at `0cd81f3`. `origin/main` was never pushed by this phase and is still `2d8cf16`; local `main` is 23 commits ahead and deliberately unpushed. **Re-verified 2026-08-13 (plan 03-05):** the remote still lists only `main` `2d8cf16` and the pre-existing `fix/security-hotfixes` `0cd81f3`, and all eight Phase 3 run records (4 probe + 4 `CI` control) still resolve with their recorded conclusions — which is what makes the URLs in `03-FINDINGS.md` valid citations after the branches were deleted. The probe **artifacts** do not survive: they expire 2026-09-12, which is why D-11 required the committed findings document.
