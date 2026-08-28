@@ -6,9 +6,21 @@
 # after `08-VERIFICATION.md` retracted A1. Re-runnable, committed deliberately so
 # it is a standing control rather than a one-time check. Threat T-08-44.
 #
-# WHAT IT ASSERTS
-#   No LIVING artifact in this repository still presents assumption A1 as
-#   MEASURED or CLOSED FAVOURABLY, and none presents A6 as unmeasured.
+# WHAT IT ASSERTS — four things, and A1's verdict is NOT one of them:
+#   1. No LIVING artifact in this repository presents A1 as measured, or as
+#      having closed in A1's favour. A1's verdict is OPEN.
+#   2. Any artifact that quotes the raw 2026-08-27 instrument output carries the
+#      word RETRACTED in the same file, so the reading cannot be met without its
+#      withdrawal.
+#   3. A6 remains FALSIFIED and every carrier that states an A6 verdict says so,
+#      with the 2026-08-27 measurement date.
+#   4. The dated historical-record class (`*-SUMMARY.md`) is UNMODIFIED, in HEAD
+#      and in the working tree.
+#
+#   Each arm below states its RED INPUT in one sentence — the concrete condition
+#   under which it fails. A gate whose red input is not stated is the exact
+#   defect this phase has now shipped thirteen times, and the fourteenth was this
+#   script's own previous version.
 #
 #   A1's favourable reading of 2026-08-27 was RETRACTED on 2026-08-28: the probe
 #   at 68199fa decided liveness with
@@ -421,7 +433,34 @@ done
 #
 # THE PIN IS DELIBERATE FRICTION. Regenerating one of these files now requires
 # editing this script, in a commit that says so. That is the point: "historical
-# records are never rewritten" should cost something to override.
+# records are never rewritten" should cost something to override. That paragraph
+# still applies, unchanged, to the PINNED class below.
+#
+# AMENDED 2026-08-28 (plan 08-11) — WHY THE STRICT COUNT EQUALITY HAD TO GO.
+# The fail-closed half used to require `count(*-SUMMARY.md on disk) ==
+# count(pins)`. The second gap-closure round writes SEVEN new summaries, so that
+# equality breaks the moment 08-11's own SUMMARY lands — and it CANNOT be
+# repaired by pinning, because a plan cannot know the blob hash of a file written
+# after it finishes. Left alone, ARM C goes red for the rest of the phase and
+# stays red, which is the same "a gate that forbids the correct next step" defect
+# this whole plan exists to remove, relocated one arm to the right.
+#
+# The equality is replaced by a MEMBERSHIP rule: every `*-SUMMARY.md` on disk
+# must be EITHER in the pin list OR in SUMMARY_KNOWN_UNPINNED. Anything else is a
+# FAIL naming the file. The arm stays fail-closed against a summary nobody
+# expected while letting the expected ones land.
+#
+# OUTSTANDING ACTION, WRITTEN DOWN RATHER THAN LEFT IMPLICIT — when this
+# gap-closure round closes, every name in SUMMARY_KNOWN_UNPINNED must be PROMOTED
+# to a pinned blob hash (`git rev-parse HEAD:<path>`) and the known-unpinned list
+# must return to EMPTY. Until that happens, seven files in the historical-record
+# class are protected only by the working-tree diff check below and not by a
+# content pin. This is recorded in 08-11-SUMMARY.md's follow-ups as well, so it
+# survives this file being skimmed.
+#
+# RED INPUT: a `*-SUMMARY.md` in the phase directory that is in neither list; a
+# pinned summary whose blob in HEAD differs from its pin; or any modification to
+# a dated summary sitting uncommitted in the working tree.
 # =============================================================================
 echo "== ARM C: the dated *-SUMMARY.md class is unmodified =="
 
@@ -439,6 +478,20 @@ SUMMARY_PINS="
 08-10-SUMMARY.md b6d79bd04cc77491bf7d23603e49ac92e501d065
 "
 
+# The summaries this gap-closure round is EXPECTED to produce, and which no plan
+# in the round can pin because each is written after the plan that would pin it.
+# Promote every one of these to SUMMARY_PINS when the round closes, and empty
+# this list.
+SUMMARY_KNOWN_UNPINNED="
+08-11-SUMMARY.md
+08-12-SUMMARY.md
+08-13-SUMMARY.md
+08-14-SUMMARY.md
+08-15-SUMMARY.md
+08-16-SUMMARY.md
+08-17-SUMMARY.md
+"
+
 SUMMARY_DIR=.planning/phases/08-process-lifecycle
 PINNED_COUNT=0
 while read -r name pin; do
@@ -454,13 +507,19 @@ EOF
 
 # THE FAIL-CLOSED HALF. A pin list is an INCLUSION list, and ARM A's own header
 # explains what those are worth on their own: a SUMMARY added later and never
-# pinned would be invisible to the loop above. Counting the files on disk and
-# requiring the two numbers to agree is what stops that — a new summary makes
-# this red until it is pinned.
-ON_DISK_COUNT=$(find "$SUMMARY_DIR" -maxdepth 1 -name '*-SUMMARY.md' -type f | wc -l | tr -d ' ')
-if [ "$ON_DISK_COUNT" != "$PINNED_COUNT" ]; then
-  fail "ARM C" "$ON_DISK_COUNT dated SUMMARY files on disk but $PINNED_COUNT pinned — pin the new one"
-fi
+# pinned would be invisible to the loop above. The membership rule is what stops
+# that — a summary in NEITHER list makes this red until somebody accounts for it.
+ON_DISK_COUNT=0
+UNEXPECTED_COUNT=0
+while IFS= read -r path; do
+  [ -n "$path" ] || continue
+  base=$(basename "$path")
+  ON_DISK_COUNT=$((ON_DISK_COUNT + 1))
+  if printf '%s\n' "$SUMMARY_PINS" | grep -q "^$base "; then continue; fi
+  if printf '%s\n' "$SUMMARY_KNOWN_UNPINNED" | grep -qx "$base"; then continue; fi
+  fail "ARM C" "$base is in the dated SUMMARY class but is in NEITHER the pin list NOR the known-unpinned list — pin it, or say why it exists"
+  UNEXPECTED_COUNT=$((UNEXPECTED_COUNT + 1))
+done < <(find "$SUMMARY_DIR" -maxdepth 1 -name '*-SUMMARY.md' -type f 2>/dev/null | sort)
 
 # THE SECOND, CHEAPER ARM, KEPT. The pins read HEAD's tree, so they cannot see an
 # edit that has not been committed yet. This is the original check, retained for
@@ -471,7 +530,7 @@ if [ -n "$SUMMARY_DIFF" ]; then
   echo "$SUMMARY_DIFF"
 fi
 
-[ "$FAILED" = "0" ] && echo "   ARM C: pass ($PINNED_COUNT pinned blobs match HEAD; working tree clean)"
+[ "$FAILED" = "0" ] && echo "   ARM C: pass ($PINNED_COUNT pinned blobs match HEAD; $ON_DISK_COUNT summaries on disk, $UNEXPECTED_COUNT unaccounted for; working tree clean)"
 
 echo
 if [ "$FAILED" = "0" ]; then
