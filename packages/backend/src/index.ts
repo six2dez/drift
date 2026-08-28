@@ -111,6 +111,8 @@ import {
 } from "./kill-plan";
 import {
   buildSpawnEnv,
+  derivePosixIdentity,
+  type PosixIdentityFallback,
   deriveWindowsSystemRoot,
   getSweepRoots,
   getHomeDirCandidates,
@@ -743,9 +745,26 @@ function readWindowsEnvPresence(): Record<string, boolean> {
 //     paths for command resolution. Owner: PHASE 10 (Windows Polish /
 //     not-on-PATH detection), which already owns that user-visible symptom.
 //   * buildSpawnEnv({ parentEnv }) → a spawned child receives only Drift's own
-//     variables. Owner: PHASE 9, where the first Windows leg runs; it needs a
-//     real reading rather than a code change, and it demonstrably works on
-//     macOS today on the same install that reported the empty environment.
+//     variables. CLOSED 2026-08-28 by a required `identityFallback` member on
+//     buildSpawnEnv, derived from a PATH rather than from this environment.
+//
+//     MARKED CORRECTION. This entry previously read "it needs a real reading
+//     rather than a code change, and it demonstrably works on macOS today on the
+//     same install that reported the empty environment." The real reading was
+//     taken on 2026-08-28 (derivePosixIdentity's docblock records it) and
+//     falsified BOTH halves: a code change was exactly what it needed, and it
+//     does not work on macOS. With an empty parent block the provider CLI cannot
+//     authenticate at all — a total functional break, not a degradation — which
+//     is why the severity rule at the top of this header now reads three ways,
+//     not two: a bare-name resolution is a SECURITY defect, a missing candidate
+//     path is a degradation, and a missing IDENTITY variable is a functional
+//     break, because the child cannot prove who it is.
+//
+//     What made the wrong entry survive: the evidence cited for "works on macOS"
+//     was `18 tools registered, authState: valid`, which measures the MCP server
+//     reaching CAIDO with a token Drift injects by hand. It could not have
+//     measured the provider CLI reaching ANTHROPIC, which inherits nothing.
+//     Windows remains unmeasured and stays with PHASE 9.
 //
 // `index.source.test.ts` pins the consumer census, so a NEW consumer cannot be
 // added without moving a count and forcing that scope question to be answered.
@@ -1964,6 +1983,25 @@ async function resolveCommand(
 // the same defensive `globalThis` cast, the same optional chaining and a
 // try/catch this never had. The defensive READ is what had to survive, not the
 // particular local. Its comment forbids rendering a value; nothing here does.
+// The POSIX identity fallback handed to every buildSpawnEnv call (G-01).
+//
+// Sourced from getKnownHomeDirs(), whose FIRST entry is the environment-derived
+// candidate and whose later entries are derived from `pluginPath` and the
+// configured provider commands - so on a real install, where the environment is
+// empty, this still resolves: the plugin path is
+// `/Users/<name>/Library/Application Support/Caido/...` and extractHomeDir reads
+// `/Users/<name>` straight off it.
+//
+// Returns the first candidate that derivePosixIdentity actually RECOGNISES,
+// rather than the first candidate full stop: a leading entry of the wrong shape
+// must not mask a good one behind it.
+function getPosixIdentityFallback(): PosixIdentityFallback {
+  const homeDir = getKnownHomeDirs().find(
+    (candidate) => Object.keys(derivePosixIdentity({ platform: host?.platform, homeDir: candidate })).length > 0,
+  );
+  return { platform: host?.platform, homeDir };
+}
+
 function getKnownHomeDirs(): string[] {
   return [
     ...getHomeDirCandidates({
@@ -2335,15 +2373,24 @@ async function requireMcpServerSpec(options?: {
       // drift-only dict would be green on every runner this project has and
       // broken only under Caido's LLRT (finding L-4).
       //
-      // RESIDUAL, owner PHASE 9 (G-01). That record is EMPTY on a real install,
-      // so the merge contributes nothing and the child receives only Drift's own
-      // variables. No bare name is resolved and no search order is consulted, so
-      // this is a BEHAVIOURAL question rather than the spoofing surface plan
-      // 08-08 closed — and it needs a real `windows-latest` reading rather than
-      // a code change, which is Phase 9's first leg. It demonstrably works on
-      // macOS today: 18 tools registered and `authState: valid` on the very
-      // install that reported the empty environment.
+      // G-01. That record is EMPTY on a real install, so the merge contributes
+      // nothing from the parent and the child would receive only Drift's own
+      // variables — which is why `identityFallback` below is not optional.
+      //
+      // MARKED CORRECTION, 2026-08-28. This comment previously read: "It
+      // demonstrably works on macOS today: 18 tools registered and `authState:
+      // valid` on the very install that reported the empty environment." That
+      // was the phase's own vacuous-reading pattern, one level up. `18 tools` and
+      // `authState: valid` measure the MCP SERVER authenticating to CAIDO, and it
+      // authenticates because Drift hands it CAIDO_TOKEN explicitly in
+      // driftVars. The claim drawn from it was about the PROVIDER CLI
+      // authenticating to ANTHROPIC, which inherits nothing and was never
+      // measured. Both states are visible simultaneously on the reporting
+      // install: "MCP 18/18 | MCP attached" beside "Not logged in - Please run
+      // /login". The reading was real; the conclusion drawn from it could not
+      // have come from that reading.
       parentEnv: readParentEnv(),
+      identityFallback: getPosixIdentityFallback(),
     }),
   );
 }
@@ -3543,6 +3590,7 @@ async function tryRegisterMcpForProviders(spec: McpServerSpec, sdk: BackendSDK):
       spawnEnvToken: buildSpawnEnv({
         parentEnv: readParentEnv(),
         driftVars: spec.driftVars,
+        identityFallback: getPosixIdentityFallback(),
       }).CAIDO_TOKEN,
     });
     if (registration.kind === "Skip") {
@@ -5191,12 +5239,21 @@ async function sendCliMessage(
       try {
         proc = spawnWithEnv(spawnPlan.file, spawnPlan.args, {
           env: buildSpawnEnv({
-            // RESIDUAL, owner PHASE 9 (G-01) — the CLI child's own block, and
-            // the second half of the same question. Empty on a real install;
-            // see readParentEnv's header for why that is a degradation rather
-            // than the bare-name spoofing surface 08-08 fixed.
+            // G-01, CLOSED 2026-08-28 for this site. `readParentEnv()` is still
+            // empty on a real install - that half is unchanged and still owned by
+            // PHASE 9 - but the consequence is no longer unmitigated here.
+            //
+            // The residual formerly recorded at readParentEnv's header called
+            // this "a degradation" that "demonstrably works on macOS today". Both
+            // halves were wrong, and the measurement that falsified them is in
+            // derivePosixIdentity's docblock: with an empty parent block the
+            // provider CLI cannot authenticate at all, so no turn can start, so
+            // no cancel or timeout reading can ever be taken on real hardware.
+            // That is what promoted this from a degradation to the blocker that
+            // stopped plan 08-16.
             parentEnv: readParentEnv(),
             driftVars: injectedDriftVars,
+            identityFallback: getPosixIdentityFallback(),
           }),
           stdio: ["pipe", "pipe", "pipe"],
           // Taken from the plan, never hardcoded: it is true exactly when the

@@ -172,6 +172,7 @@ function buildSpecForStub(input: { caidoUrl: string; contextFile: string }) {
       confirmSensitiveActions: false,
     }),
     parentEnv: process.env,
+    identityFallback: { platform: "darwin", homeDir: undefined },
   });
 }
 
@@ -403,6 +404,7 @@ describe("mcp-server-spec per-session channel (D-05, Drift's half)", () => {
           : {}),
       }),
       parentEnv: process.env,
+      identityFallback: { platform: "darwin", homeDir: undefined },
     });
   }
 

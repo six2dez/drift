@@ -2,6 +2,7 @@ import path from "path";
 import { describe, expect, it } from "vitest";
 import {
   buildSpawnEnv,
+  derivePosixIdentity,
   deriveWindowsSystemRoot,
   getExecutableNames,
   getHomeDirCandidates,
@@ -783,6 +784,7 @@ describe("buildSpawnEnv", () => {
         LOCALAPPDATA: "C:\\Users\\x\\AppData\\Local",
       },
       driftVars: { CAIDO_TOKEN: "t" },
+      identityFallback: { platform: "win32", homeDir: undefined },
     });
     expect(env["APPDATA"]).toBe("C:\\Users\\x\\AppData\\Roaming");
     expect(env["LOCALAPPDATA"]).toBe("C:\\Users\\x\\AppData\\Local");
@@ -793,6 +795,7 @@ describe("buildSpawnEnv", () => {
     const env = buildSpawnEnv({
       parentEnv: { CAIDO_TOKEN: "stale", PATH: "/usr/bin" },
       driftVars: { CAIDO_TOKEN: "fresh" },
+      identityFallback: { platform: "darwin", homeDir: undefined },
     });
     expect(env["CAIDO_TOKEN"]).toBe("fresh");
     expect(env["PATH"]).toBe("/usr/bin");
@@ -802,6 +805,7 @@ describe("buildSpawnEnv", () => {
     const env = buildSpawnEnv({
       parentEnv: { PRESENT: "yes", ABSENT: undefined },
       driftVars: {},
+      identityFallback: { platform: "darwin", homeDir: undefined },
     });
     expect(env).toEqual({ PRESENT: "yes" });
     expect(Object.keys(env)).not.toContain("ABSENT");
@@ -809,10 +813,109 @@ describe("buildSpawnEnv", () => {
 
   it("returns a new object rather than mutating parentEnv", () => {
     const parentEnv: Record<string, string | undefined> = { PATH: "/usr/bin" };
-    const env = buildSpawnEnv({ parentEnv, driftVars: { CAIDO_TOKEN: "t" } });
+    const env = buildSpawnEnv({
+      parentEnv,
+      driftVars: { CAIDO_TOKEN: "t" },
+      identityFallback: { platform: "darwin", homeDir: undefined },
+    });
     expect(env).not.toBe(parentEnv);
     expect(parentEnv["CAIDO_TOKEN"]).toBeUndefined();
     expect(Object.keys(parentEnv)).toEqual(["PATH"]);
+  });
+});
+
+describe("derivePosixIdentity (G-01: the provider CLI's identity when parentEnv is empty)", () => {
+  // THE RED INPUT, NAMED. Every assertion below fails if derivePosixIdentity
+  // returns {} unconditionally — which is precisely the shipped behaviour this
+  // fixes, because before it existed the child's env was `{...driftVars}` alone.
+  // Demonstrated by mutation in the plan record, not merely asserted here.
+  it("derives USER from a macOS home directory, which is the variable that flips CLI auth", () => {
+    // MEASURED 2026-08-28 (Caido 0.58.2, Claude Code 2.1.250, darwin 25.6.0):
+    // `env -i claude -p` => "Not logged in"; `env -i USER=six2dez claude -p` => OK.
+    // HOME and PATH are neither sufficient nor required; USER alone flips it.
+    expect(derivePosixIdentity({ platform: "darwin", homeDir: "/Users/six2dez" })).toEqual({
+      HOME: "/Users/six2dez",
+      USER: "six2dez",
+      LOGNAME: "six2dez",
+    });
+  });
+
+  it("derives USER from a Linux home directory", () => {
+    expect(derivePosixIdentity({ platform: "linux", homeDir: "/home/tester" })).toEqual({
+      HOME: "/home/tester",
+      USER: "tester",
+      LOGNAME: "tester",
+    });
+  });
+
+  it("never synthesises PATH — an absent PATH is safe, a guessed one reopens the bare-name search order", () => {
+    const derived = derivePosixIdentity({ platform: "darwin", homeDir: "/Users/six2dez" });
+    expect(Object.keys(derived)).not.toContain("PATH");
+  });
+
+  it("contributes nothing on win32, where libuv back-fills USERNAME and USERPROFILE", () => {
+    expect(derivePosixIdentity({ platform: "win32", homeDir: "/Users/six2dez" })).toEqual({});
+  });
+
+  it("guesses no name from an unrecognised shape, matching extractHomeDir's allow-list discipline", () => {
+    // Each of these WOULD yield a plausible-looking user name under a naive
+    // basename() — which is the failure mode the allow-list exists to prevent.
+    for (const homeDir of [
+      "/opt/six2dez",
+      "/Users/six2dez/Library/Application Support/Caido",
+      "/Users",
+      "/",
+      "relative/six2dez",
+      "",
+      "   ",
+    ]) {
+      expect(derivePosixIdentity({ platform: "darwin", homeDir })).toEqual({});
+    }
+    expect(derivePosixIdentity({ platform: "darwin", homeDir: undefined })).toEqual({});
+  });
+});
+
+describe("buildSpawnEnv identity precedence (G-01)", () => {
+  it("supplies USER when the parent block is empty — the real-install case", () => {
+    const env = buildSpawnEnv({
+      parentEnv: {},
+      driftVars: { CAIDO_TOKEN: "t" },
+      identityFallback: { platform: "darwin", homeDir: "/Users/six2dez" },
+    });
+    expect(env["USER"]).toBe("six2dez");
+    expect(env["HOME"]).toBe("/Users/six2dez");
+    expect(env["CAIDO_TOKEN"]).toBe("t");
+  });
+
+  it("is a FLOOR, not an override: a real parent value wins over the derived one", () => {
+    const env = buildSpawnEnv({
+      parentEnv: { USER: "realuser", HOME: "/Users/realuser" },
+      driftVars: {},
+      identityFallback: { platform: "darwin", homeDir: "/Users/derived" },
+    });
+    expect(env["USER"]).toBe("realuser");
+    expect(env["HOME"]).toBe("/Users/realuser");
+  });
+
+  it("still lets a drift var win over both", () => {
+    const env = buildSpawnEnv({
+      parentEnv: { USER: "realuser" },
+      driftVars: { USER: "driftuser" },
+      identityFallback: { platform: "darwin", homeDir: "/Users/derived" },
+    });
+    expect(env["USER"]).toBe("driftuser");
+  });
+
+  it("is byte-identical to the pre-fix result on a host whose environment is readable", () => {
+    // CMP-01: the POSIX behaviour users already have must not move. With a
+    // populated parent block the derived floor is entirely masked.
+    const parentEnv = { USER: "u", HOME: "/Users/u", PATH: "/usr/bin", LOGNAME: "u" };
+    const withFallback = buildSpawnEnv({
+      parentEnv,
+      driftVars: { CAIDO_TOKEN: "t" },
+      identityFallback: { platform: "darwin", homeDir: "/Users/someone-else" },
+    });
+    expect(withFallback).toEqual({ ...parentEnv, CAIDO_TOKEN: "t" });
   });
 });
 

@@ -41,7 +41,7 @@
 
 import { type McpApprovalChannel, excludeSensitiveToolNames } from "shared";
 
-import { buildSpawnEnv, type Platform } from "./platform";
+import { buildSpawnEnv, type Platform, type PosixIdentityFallback } from "./platform";
 
 // Two projections of one launch decision, deliberately distinct.
 //
@@ -117,6 +117,9 @@ export function buildMcpServerSpec(input: {
   mcpScriptPath: string;
   driftVars: Record<string, string>;
   parentEnv: Record<string, string | undefined>;
+  // Threaded, not defaulted: when `parentEnv` is empty (G-01, every real Caido
+  // install) this is the only source of the child's POSIX identity.
+  identityFallback: PosixIdentityFallback;
 }): McpServerSpec {
   return {
     command: input.nodeExecutable,
@@ -145,6 +148,7 @@ export function buildMcpServerSpec(input: {
     env: buildSpawnEnv({
       parentEnv: input.parentEnv,
       driftVars: input.driftVars,
+      identityFallback: input.identityFallback,
     }),
     driftVars: input.driftVars,
   };

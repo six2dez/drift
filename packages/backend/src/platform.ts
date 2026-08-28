@@ -842,10 +842,68 @@ export function selectComspec(input: {
 export function buildSpawnEnv(input: {
   parentEnv: Record<string, string | undefined>;
   driftVars: Record<string, string>;
+  identityFallback: PosixIdentityFallback;
 }): Record<string, string> {
   const merged: Record<string, string> = {};
   for (const [key, value] of Object.entries(input.parentEnv)) {
     if (typeof value === "string") merged[key] = value;
   }
-  return { ...merged, ...input.driftVars };
+  // Derived identity is a FLOOR, never an override: a real parent value wins over
+  // it, and drift's own variables win over both. So on a host whose environment
+  // is readable this call is byte-identical to what it returned before.
+  return { ...derivePosixIdentity(input.identityFallback), ...merged, ...input.driftVars };
+}
+
+// The POSIX identity a spawned child needs when `parentEnv` is EMPTY (G-01).
+//
+// `homeDir` is DERIVED — `extractHomeDir(pluginPath)` and the provider command
+// paths — never read from the environment, because the environment being empty
+// is the whole condition this exists for. Same shape as
+// `getWindowsSystemRootFallback`: a required member on the input so every call
+// site must answer the question rather than inherit a silent default, which is
+// the discipline plan 08-08 established for `systemRootFallback`.
+export type PosixIdentityFallback = {
+  platform: Platform | undefined;
+  homeDir: string | undefined;
+};
+
+// MEASURED, 2026-08-28, macOS 25.6.0, Caido 0.58.2, Claude Code 2.1.250.
+// `env -i claude -p` reports "Not logged in - Please run /login"; `env -i
+// USER=<name> claude -p` succeeds. HOME and PATH are neither sufficient nor
+// required for it — USER alone flips the result, because the credential lives in
+// the macOS Keychain and the lookup is keyed on the user name. With `parentEnv`
+// empty on every real Caido install, the provider CLI therefore cannot
+// authenticate AT ALL: not a degraded experience, a total functional break, and
+// the reason no cancel/timeout reading could be taken on real hardware.
+//
+// PATH is deliberately NOT synthesised here. Every executable Drift hands to a
+// spawn is already resolved to an absolute path, so a synthesised PATH would buy
+// no capability while re-opening exactly the bare-name search order that
+// T-08-03/T-08-33/T-08-34 closed. Absence of PATH is safe; a guessed one is not.
+//
+// Returns {} for anything unrecognised rather than guessing a name, matching
+// extractHomeDir's allow-list discipline.
+export function derivePosixIdentity(input: PosixIdentityFallback): Record<string, string> {
+  // win32 needs nothing from here: libuv back-fills USERNAME and USERPROFILE
+  // among its eleven `required_vars`, which is why the Windows gap this module
+  // documents is APPDATA/LOCALAPPDATA and not identity.
+  if (input.platform === "win32") return {};
+
+  const homeDir = input.homeDir?.trim();
+  if (homeDir === undefined || homeDir === "") return {};
+  if (!homeDir.startsWith("/")) return {};
+
+  const segments = homeDir.split("/").filter((segment) => segment !== "");
+  // Exactly the two POSIX shapes extractHomeDir recognises: /Users/<name> and
+  // /home/<name>. A deeper or shallower path is not a home directory and its
+  // last segment is not a user name.
+  if (segments.length !== 2) return {};
+  const root = segments[0];
+  const name = segments[1];
+  if (root !== "Users" && root !== "home") return {};
+  if (name === undefined || name === "") return {};
+
+  // LOGNAME alongside USER because POSIX tools split between the two and the
+  // cost of the second key is nil.
+  return { HOME: `/${root}/${name}`, USER: name, LOGNAME: name };
 }

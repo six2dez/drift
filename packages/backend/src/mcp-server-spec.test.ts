@@ -124,6 +124,7 @@ describe("buildMcpServerSpec", () => {
       mcpScriptPath: "C:\\Temp\\drift-mcp-abc\\mcp-server.mjs",
       driftVars: makeDriftVars(),
       parentEnv: PARENT_ENV,
+      identityFallback: { platform: "darwin", homeDir: undefined },
     });
 
     expect(spec.command).toBe("C:\\Program Files\\nodejs\\node.exe");
@@ -138,6 +139,7 @@ describe("buildMcpServerSpec", () => {
       mcpScriptPath: "/tmp/drift-mcp-abc/mcp-server.mjs",
       driftVars: { ...makeDriftVars(), PATH: "/drift/override/bin" },
       parentEnv: PARENT_ENV,
+      identityFallback: { platform: "darwin", homeDir: undefined },
     });
 
     // The parent survives — this is the property finding L-4 makes
@@ -185,6 +187,7 @@ describe("toMcpConfigDocument", () => {
       mcpScriptPath: "/tmp/drift-mcp-abc/mcp-server.mjs",
       driftVars: makeDriftVars(),
       parentEnv: PARENT_ENV,
+      identityFallback: { platform: "darwin", homeDir: undefined },
     });
 
     const claude = toMcpConfigDocument(spec);
@@ -207,6 +210,7 @@ describe("toMcpConfigDocument", () => {
       mcpScriptPath: "/tmp/drift-mcp-abc/mcp-server.mjs",
       driftVars: makeDriftVars(),
       parentEnv: PARENT_ENV,
+      identityFallback: { platform: "darwin", homeDir: undefined },
     });
 
     expect(spec.env.DRIFT_TEST_PARENT_ONLY).toBe("parent-value");
@@ -633,7 +637,11 @@ describe("the environment the registration reference expands from (WR-01)", () =
     // driftVars.CAIDO_TOKEN is non-empty by the time any of this runs, and
     // buildSpawnEnv overlays it last.
     expect(
-      buildSpawnEnv({ parentEnv: PARENT_ENV, driftVars }).CAIDO_TOKEN,
+      buildSpawnEnv({
+        parentEnv: PARENT_ENV,
+        identityFallback: { platform: "darwin", homeDir: undefined },
+        driftVars,
+      }).CAIDO_TOKEN,
     ).toBe(REGISTRATION_TOKEN);
 
     // The overlay wins even against a parent that carries its own value, which
@@ -641,6 +649,7 @@ describe("the environment the registration reference expands from (WR-01)", () =
     expect(
       buildSpawnEnv({
         parentEnv: { ...PARENT_ENV, CAIDO_TOKEN: "" },
+        identityFallback: { platform: "darwin", homeDir: undefined },
         driftVars,
       }).CAIDO_TOKEN,
     ).toBe(REGISTRATION_TOKEN);
@@ -667,6 +676,7 @@ describe("the environment the registration reference expands from (WR-01)", () =
       mcpScriptPath: MCP_SCRIPT_PATH,
       driftVars,
       parentEnv: PARENT_ENV,
+      identityFallback: { platform: "darwin", homeDir: undefined },
     });
 
     // The CLI child gets NO per-session keys at registration time (D-03): those
@@ -674,6 +684,7 @@ describe("the environment the registration reference expands from (WR-01)", () =
     // block, built from the same driftVars later in a session, does.
     const registrationTimeChildEnv = buildSpawnEnv({
       parentEnv: PARENT_ENV,
+      identityFallback: { platform: "darwin", homeDir: undefined },
       driftVars: spec.driftVars,
     });
     expect(registrationTimeChildEnv.CAIDO_TOKEN).toBe(spec.env.CAIDO_TOKEN);
