@@ -69,12 +69,44 @@
 // >        `claude` pid / `mcp-server.mjs` pgid: **not recorded — spike not run**
 // >        Verdict:       **OPEN — not measured**
 //
+// MARKED CORRECTION, 2026-08-28 — A1'S 2026-08-27 VERDICT IS RETRACTED, AND THE
+// TWO FACTS THIS BLOCK KEPT FIVE PARAGRAPHS APART ARE NOW JOINED.
+//
+// This block recorded A1 as closed on a favourable reading and, forty lines
+// further down, recorded that the SAME run found
+// `typeof process.kill === "undefined"` — the very primitive the verdict line
+// called. Both halves were written HERE, in one comment, and neither was ever
+// joined to the other. Joined:
+//
+//   the probe at 68199fa decided the verdict with
+//   `signalRef.process?.kill?.(grandchildPid, 0) ?? false`, on a runtime that
+//   supplies no `process.kill`. The optional chain yielded `undefined`,
+//   `?? false` made `alive === false`, and the favourable string was emitted
+//   UNCONDITIONALLY. The probe could not have printed the other string on the
+//   runtime it ran on. The red input did not exist, so the reading carries NO
+//   INFORMATION about whether the grandchild died.
+//
+// THE READING IS KEPT AND THE VERDICT IS WITHDRAWN, and the distinction is the
+// point: the instrument really did print that string, and deleting it would hide
+// what this phase believed and acted on. A6 is untouched — it was measured by
+// direct `ps` observation with a different instrument, and only one reading is
+// being taken back. The corrected determination lives in
+// `classifyLivenessObservation` at the foot of this file, where a "cannot tell"
+// answer is a first-class result instead of a coalesced one.
+//
+// SUPERSEDED (written 2026-08-27), preserved as a block quote:
+//
+// >        Verdict: **CLOSED FAVOURABLY — measured**
+//
 // LIVE VERDICTS (2026-08-27, probe build 68199fa installed in a real macOS
 // Caido, darwin 25.6.0; recorded in `08-UAT.md` tests 1 and 2):
 //
 //   A1 — does the shipped Caido LLRT honour `detached: true`?
 //        Reading: `spikeDetachedGroupKill: "grandchild-died (detached honoured)"`
-//        Verdict: **CLOSED FAVOURABLY — measured**
+//        Verdict: **RETRACTED 2026-08-28 — OPEN, not measured**
+//        Why retracted: the verdict line called `process.kill`, which the SAME
+//                 run measured absent, so the string above was unconditional and
+//                 its opposite unreachable.
 //   A6 — is the CLI's MCP child in the CLI's process group?
 //        Reading:  PID   PPID  PGID  ARGS
 //                 43921  43752 43752 …/codex
@@ -83,22 +115,54 @@
 //
 // WHAT EACH VERDICT CHANGES HERE.
 //
-// A1 CLOSED FAVOURABLY. The POSIX arm below no longer rests on SOURCE ANALYSIS
-// alone. The source is still the mechanism — `caido/dependency-llrt`, branch
-// `caido`, commit `a5b021c`,
-// `modules/llrt_child_process/src/lib.rs:448,462,512-521`, which calls
-// `command.process_group(0)` on unix for a detached spawn, making pgid equal the
-// child pid — but it is now CORROBORATED by execution on the runtime a user
-// actually runs. The failure mode that paragraph warned about (a shipped fork
-// that ignores `detached`, so the group reference names a group that was never
-// created while every CI leg stays green) did not occur.
+// A1 RETRACTED — OPEN. The POSIX arm below rests on SOURCE ANALYSIS of the
+// pinned LLRT commit and on NOTHING executed on the shipping runtime. The source
+// is still the mechanism — `caido/dependency-llrt`, branch `caido`, commit
+// `a5b021c`, `modules/llrt_child_process/src/lib.rs:448,462,512-521`, which
+// calls `command.process_group(0)` on unix for a detached spawn, making pgid
+// equal the child pid — and that analysis is unchanged, because none of it ever
+// depended on the probe. What is gone is the CORROBORATION.
+//
+// The failure mode the 2026-08-24 text warned about — a shipped fork that
+// ignores `detached`, so the group reference names a group that was never
+// created while every CI leg stays green — is NEITHER CONFIRMED NOR REFUTED. The
+// instrument could not see. That is the entire statement, and it is not a third
+// state: do not soften it into "probably fine", and do not harden it into
+// "broken". It is unmeasured.
+//
+// SUPERSEDED (written 2026-08-27), preserved as a block quote:
+//
+// > A1 CLOSED FAVOURABLY. The POSIX arm below no longer rests on SOURCE ANALYSIS
+// > alone. The source is still the mechanism — `caido/dependency-llrt`, branch
+// > `caido`, commit `a5b021c`,
+// > `modules/llrt_child_process/src/lib.rs:448,462,512-521`, which calls
+// > `command.process_group(0)` on unix for a detached spawn, making pgid equal the
+// > child pid — but it is now CORROBORATED by execution on the runtime a user
+// > actually runs. The failure mode that paragraph warned about (a shipped fork
+// > that ignores `detached`, so the group reference names a group that was never
+// > created while every CI leg stays green) did not occur.
 //
 // Recorded decision OQ-2 (`08-02-PLAN.md`) — `killTree` keeps the single-pid
-// signal ALONGSIDE the group spawn — SURVIVES A1's closure, but its reason
-// changes and the new reason must be written down or the rung will read as
-// redundant to the next person: it is no longer defence against an UNMEASURED
-// runtime, it is defence against a FUTURE Caido that rebases its LLRT fork. One
-// measurement closes a version, not a dependency. Do not delete that rung.
+// signal ALONGSIDE the group spawn — survives the retraction, and its stated
+// justification is corrected. THE DIRECTION OF THE CORRECTION MATTERS, because
+// it is what a reader deciding whether the rung is dead weight will act on: the
+// 2026-08-27 revision DEMOTED the rung to defence against a FUTURE Caido that
+// rebases its LLRT fork. With A1 open, it is defence against the PRESENT Caido
+// as well — the runtime users run today, whose honouring of the process-group
+// spawn option is unmeasured. That revision therefore UNDER-CLAIMED the rung's
+// necessity. The error ran toward MORE caution rather than less, which is why
+// nothing shipped wrong on the strength of it; but a reader who takes the
+// demoted wording at face value deletes the rung, so it is corrected here rather
+// than left to be re-derived. It costs one syscall. Do not delete that rung.
+//
+// SUPERSEDED (written 2026-08-27), preserved as a block quote:
+//
+// > Recorded decision OQ-2 (`08-02-PLAN.md`) — `killTree` keeps the single-pid
+// > signal ALONGSIDE the group spawn — SURVIVES A1's closure, but its reason
+// > changes and the new reason must be written down or the rung will read as
+// > redundant to the next person: it is no longer defence against an UNMEASURED
+// > runtime, it is defence against a FUTURE Caido that rebases its LLRT fork. One
+// > measurement closes a version, not a dependency. Do not delete that rung.
 //
 // A6 FALSIFIED, and this is the one that changed the mechanism. The provider CLI
 // (codex, pid 43921) sat in process group 43752 while its own `mcp-server.mjs`
@@ -127,6 +191,17 @@
 // one originally written: not "a module that touches neither has no hidden input
 // a test cannot supply", but "the runtime does not supply it in the first
 // place".
+//
+// AND THE CONSUMER NOBODY TRACED — which is how that same absence produced a
+// wrong verdict rather than merely a missing one. EVERY other consumer of
+// `typeof process.kill === "undefined"` was worked through: `08-SECURITY.md`
+// § G-02 traces its effect on `isPidAlive` in detail, and this module's own
+// `hasTrackedProcessExited` docblock spends three bullets on the neighbouring
+// case. The one consumer nobody traced was the probe's OWN VERDICT LINE, in this
+// file's own subject area, three modules from the careful reasoning above it. It
+// called the absent primitive and coalesced the absent answer into a verdict.
+// The three-valued determination that replaces it is
+// `classifyLivenessObservation` at the foot of this file.
 
 import { type Platform, resolveWindowsSystemBinary } from "./platform";
 
