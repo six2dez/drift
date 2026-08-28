@@ -373,6 +373,9 @@ Do not summarise, interpret or round any of the five readings. Record what the t
 **Rewritten 2026-08-27.** Stated unsoftened in both directions, because the whole point of a
 spike record is that a later reader can tell measured ground from assumed ground.
 
+**Corrected again 2026-08-28.** One of the two entries below moved back across that line: A1's
+reading was withdrawn, so A1 returns to the does-NOT-close list it left on 2026-08-27.
+
 **What it CLOSES:**
 
 - **A6, closed in the NEGATIVE, for one provider.** Codex's `mcp-server.mjs` child sits in its
@@ -384,7 +387,14 @@ spike record is that a later reader can tell measured ground from assumed ground
 - **A1 — RETRACTED 2026-08-28, and back in this list.** The 2026-08-27 entry moved A1 into the
   CLOSES list above; it is moved back here because the instrument that produced its reading
   could not have printed the other answer. The A1 bullet as it read on 2026-08-27 is preserved
-  in the block quote below.
+  in the block quote below. The mechanism: the probe decided the verdict with an optional call on
+  `process.kill`, a primitive the same run measured absent, so it could only ever print the
+  favourable string.
+- **Whether the shipped Caido LLRT honours `detached: true` at all.** The nine `killTree` sites
+  that depend on it are backed by **source analysis of a pinned commit** — `caido/dependency-llrt`
+  branch `caido` at `a5b021c`, `modules/llrt_child_process/src/lib.rs:448, 462, 512-521` — and
+  **not** by execution on the shipping runtime. That sentence was correct before 2026-08-27 and is
+  correct again; it is reinstated here rather than left to be reconstructed later.
 
 > **SUPERSEDED 2026-08-27 (preserved, not deleted — this bullet sat in the CLOSES list above
 > until 2026-08-28):**
@@ -430,12 +440,35 @@ spike record is that a later reader can tell measured ground from assumed ground
 negative A1, and that OQ-2's single-pid rung was the **only** protection against it. Both halves
 of that argument are now wrong, and the way they are wrong is worth reading carefully:
 
-1. **A1 came back positive.** The failure this section predicted — a fork that ignores
-   `detached`, so the group operand names a group that was never created — did not happen.
+**Amended 2026-08-28: only the SECOND half is wrong.** Point 1 below is corrected in place —
+A1 was not answered at all, so the first half of the 2026-08-27 argument is neither confirmed nor
+refuted. Points 2 and 3 stand with their original force.
+
+1. **A1 is UNDETERMINED — the instrument could not see.** *(Point 1 corrected in place
+   2026-08-28; the 2026-08-27 text is preserved in the block quote directly below.)* The probe's
+   verdict line called `process.kill` optionally on a runtime where the same run measured it
+   absent, and defaulted the miss to "dead", so the favourable answer was the only answer it
+   could give. The failure this section predicted — a fork that ignores `detached`, so the group
+   operand names a group that was never created — is **unobserved**, neither confirmed nor
+   refuted.
+
+> **SUPERSEDED 2026-08-27 (preserved, not deleted — point 1 as it read that day):**
+>
+> 1. **A1 came back positive.** The failure this section predicted — a fork that ignores
+>    `detached`, so the group operand names a group that was never created — did not happen.
+
 2. **The failure landed at A6 instead**, which the section treated as the lesser risk.
 3. **OQ-2's rung does not address A6 at all.** It signals the tracked CLI pid. A6's falsification
    is about the CLI's *child* sitting outside the CLI's group. The rung Phase 8 kept as its
    insurance policy insures against the wrong event.
+
+**And the consequence runs toward MORE caution, not less (added 2026-08-28).** With A1 open,
+OQ-2's single-pid rung is defence against the **present** Caido and not only against a future one
+that rebases its LLRT fork. The 2026-08-27 re-justification therefore **UNDER-claimed** the rung's
+necessity: it narrowed the rung's purpose on the strength of a reading that carried no
+information. That is an error toward more caution rather than less, and saying so explicitly is
+part of the record — a correction that only ever discovered under-claims would be a suspicious
+correction.
 
 **What DOES address it** is the argv-marker orphan reap that plans **08-06** and **08-07**
 shipped: `pgrep -f` over a session-unique temp-directory marker adjacent to `mcp-server.mjs`,
@@ -449,21 +482,49 @@ with the multi-session cancel window recorded as **AR-07**.
 
 ### The consequence, plainly
 
-**Corrected 2026-08-27.** The phase's POSIX group mechanism for LIF-02 no longer rests on source
-analysis alone: `caido/dependency-llrt@caido` at pinned commit `a5b021c` is now corroborated by
-execution on a real install, so the nine-site regression this paragraph feared did not occur and
-is not the live risk.
+**Corrected 2026-08-27. Corrected AGAIN 2026-08-28, in the other direction.** The phase's POSIX
+group mechanism for LIF-02 rests on source analysis alone: `caido/dependency-llrt@caido` at
+pinned commit `a5b021c` has never been executed on the runtime users actually run. The nine-site
+regression the 2026-08-24 paragraph feared is **an open risk again**, because the reading that
+retired it has been withdrawn.
 
-The live risk moved. **A6 is falsified**, so on at least one provider the group signal cannot
-reach the token-bearing child however faithfully the runtime honours `detached`. The answer is
-the argv-marker reap (§ above), not the group operand and not OQ-2's rung.
+There are now **TWO** live risks, and the 2026-08-27 revision traded one for the other instead of
+naming both:
 
-OQ-2's single-pid rung **survives with a corrected justification**, and the correction must be
-written down or the rung will read as redundant to the next reader: it is no longer defence
-against an *unmeasured* runtime, it is defence against a **future Caido that rebases its LLRT
-fork**. One measurement closes a version, not a dependency. Do not delete that rung. The same
-wording is carried at `packages/backend/src/kill-plan.ts`'s module header, which plan 08-06
-corrected on the same date; keep the two consistent.
+- **A6 is FALSIFIED** — for the one provider measured (codex), the group signal cannot reach the
+  token-bearing child however faithfully the runtime honours `detached`, because that child sits
+  in a group of its own. The answer to this one is the argv-marker reap (§ above), not the group
+  operand and not OQ-2's rung.
+- **A1 is UNMEASURED** — whether the group reference names a group that exists **at all** on the
+  shipping runtime is unknown. If the shipped fork ignores `detached`, the group operand names a
+  group that was never created, and **every CI leg stays green while it happens**, because every
+  CI leg runs Node and Node honours the option.
+
+OQ-2's single-pid rung **survives, and its justification reverts to the original one**: it is
+defence against an *unmeasured* runtime — the **present** Caido — and only secondarily against a
+future Caido that rebases its LLRT fork. The 2026-08-27 wording narrowed it to the future case on
+the strength of the withdrawn reading, and that narrowing is withdrawn with it. **Do not delete
+that rung.** The same wording is carried at `packages/backend/src/kill-plan.ts`'s module header;
+keep the two consistent — plan **08-12** makes the matching correction there.
+
+> **SUPERSEDED 2026-08-27 (preserved, not deleted — correct as a record of what this section
+> argued on its date, false as a live claim since 2026-08-28):**
+>
+> **Corrected 2026-08-27.** The phase's POSIX group mechanism for LIF-02 no longer rests on source
+> analysis alone: `caido/dependency-llrt@caido` at pinned commit `a5b021c` is now corroborated by
+> execution on a real install, so the nine-site regression this paragraph feared did not occur and
+> is not the live risk.
+>
+> The live risk moved. **A6 is falsified**, so on at least one provider the group signal cannot
+> reach the token-bearing child however faithfully the runtime honours `detached`. The answer is
+> the argv-marker reap (§ above), not the group operand and not OQ-2's rung.
+>
+> OQ-2's single-pid rung **survives with a corrected justification**, and the correction must be
+> written down or the rung will read as redundant to the next reader: it is no longer defence
+> against an *unmeasured* runtime, it is defence against a **future Caido that rebases its LLRT
+> fork**. One measurement closes a version, not a dependency. Do not delete that rung. The same
+> wording is carried at `packages/backend/src/kill-plan.ts`'s module header, which plan 08-06
+> corrected on the same date; keep the two consistent.
 
 > **SUPERSEDED 2026-08-24 (preserved, not deleted):**
 >
@@ -477,3 +538,29 @@ corrected on the same date; keep the two consistent.
 > signal alongside the group signal, explicitly as defence against A1 — is now the phase's **only**
 > protection against this, and it degrades a total regression into a partial one rather than
 > preventing it.
+
+---
+
+## The rule this spike cost us, stated as a rule
+
+**Added 2026-08-28.** Not an anecdote about one bad line — a standing rule for every assertion in
+this repository whose red input requires hardware.
+
+**An assertion whose red input requires hardware MUST state, in the same breath, what a
+"cannot tell" answer looks like, and MUST NEVER coalesce it into either verdict.** Three values,
+always: alive / dead / cannot-tell. `?? false` on an unavailable primitive is not a default, it is
+a fabricated measurement — it converts "I could not look" into "I looked and saw nothing", and a
+reader downstream cannot tell the two apart, because the string printed is identical.
+
+That is exactly what happened here. The probe asked
+`signalRef.process?.kill?.(pid, 0) ?? false`, the sandbox exposed no `kill`, the miss became
+`alive === false`, and the favourable verdict was emitted unconditionally — the red input did not
+exist, so a favourable result meant nothing. It is the same vacuous-gate shape this phase caught
+thirteen times in its own gates; the fourteenth instance produced a *reading* rather than a green
+tick, which is why it propagated into eleven carriers, the ROADMAP, REQUIREMENTS.md and the
+Windows ledger before anyone re-read it.
+
+The fixed three-valued determination lives in `packages/backend/src/kill-plan.ts` as
+**`classifyLivenessObservation`** (plan **08-15**), which returns `alive`, `dead` or
+`inconclusive` and forces every caller to answer the third case explicitly. A re-run of this spike
+must consume it rather than re-deriving a boolean; see § *How to run this spike later*, step 2.
