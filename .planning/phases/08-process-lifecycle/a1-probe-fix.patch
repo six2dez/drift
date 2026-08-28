@@ -1,8 +1,11 @@
 # =============================================================================
 # a1-probe-fix.patch — the Phase 8 Wave-0 A1 probe, repaired
 #
-# APPLIES TO: packages/backend/src/index.ts AS IT EXISTS AT COMMIT 68199fa
+# APPLIES TO: packages/backend/src/index.ts AND packages/backend/src/mcp-server-spec.ts
+#   AS THEY EXIST AT COMMIT 68199fa
 #   ("feat(08-01): add the temporary A1 probe to the diagnostics block").
+#   The second file was added 2026-08-28 by plan 08-17 and is a COMPATIBILITY
+#   edit only — see section 5.
 #   It does NOT apply to HEAD, deliberately — the probe is not in HEAD and must
 #   not be put there. See NEVER COMMIT THIS TO HEAD below.
 #
@@ -65,6 +68,55 @@
 #   reasoning about it: the first run of `verify-a1-patch.sh` failed step 3 with
 #   these two TS2345 errors, which is the control doing its job.
 #
+# 5. SIX MORE COMPATIBILITY EDITS, ADDED 2026-08-28 BY PLAN 08-17, and named here
+#   for the same reason section 4 names its two: they are not probe changes and
+#   they must not be discovered later as smuggled-in behaviour.
+#
+#   HOW THEY WERE FOUND: by RUNNING `verify-a1-patch.sh`, which failed step 3
+#   with four TS2345 errors. That is the standing control doing exactly the job
+#   its own header predicts — "a signature change at HEAD that the patch's call
+#   sites no longer satisfy, and `tsc --noEmit` fails here rather than on the
+#   maintainer's machine an hour into a hardware session." The patch's previous
+#   VERIFIED line was true on 2026-08-28 and became false the same day.
+#
+#   WHAT MOVED: commit 39876b5 ("give the spawned provider CLI a POSIX identity
+#   when process.env is empty") made `identityFallback` a REQUIRED member of
+#   `buildSpawnEnv` in `platform.ts` — the same G-01 discipline as
+#   `systemRootFallback`, so every call site must state an answer. HEAD's
+#   `platform.ts` travels with this patch, so the four historical call sites
+#   (three in index.ts, one in mcp-server-spec.ts) stopped compiling.
+#
+#   THE SIX EDITS: the `./platform` import gains `derivePosixIdentity` and
+#   `type PosixIdentityFallback`; `getPosixIdentityFallback` is reproduced
+#   byte-for-byte from HEAD beside the `getKnownHomeDirs` this commit already
+#   has; and the four call sites each state an answer.
+#
+#   THE ANSWER IS NOT THE SAME AT ALL FOUR SITES, AND THE SPLIT IS THE POINT.
+#   `mcp-server-spec.ts` gets `{ platform: undefined, homeDir: undefined }`,
+#   which makes `derivePosixIdentity` return `{}` and reproduces 68199fa byte for
+#   byte — the MCP server child authenticates to Caido with a token Drift injects
+#   and never through the macOS Keychain, so it needs no USER. The three
+#   `index.ts` sites get the real derived floor, and the load-bearing one is the
+#   PROVIDER CLI SPAWN. Caido's sandbox exposes an EMPTY `process.env`; at this
+#   commit that leaves the provider CLI with no USER, and `env -i claude -p`
+#   answers "Not logged in" because the credential is in the Keychain keyed on
+#   the user name. Without the floor NO TURN CAN START on a real install, so the
+#   pre-fix Control — a `pgrep -f mcp-server.mjs` count taken DURING a live turn
+#   — cannot be taken at all. Plan 08-16 hit that wall on abfbc17 and recorded it.
+#
+#   IT DOES NOT CONTAMINATE THE CONTROL, and this is the claim to check rather
+#   than accept. The floor adds three environment keys to a spawned child. It
+#   touches no termination path: no group kill, no signal ladder, and no orphan
+#   reap — there is no reap at this commit, which is precisely what makes the
+#   build a Control. It also makes the before/after pair differ in ONE variable
+#   instead of two, because the post-fix reading of 2026-08-28 was itself taken on
+#   a build carrying this floor.
+#
+#   IF YOU WANT THE OTHER ANSWER: replacing `getPosixIdentityFallback()` with
+#   `{ platform: undefined, homeDir: undefined }` at the three index.ts sites
+#   reproduces 68199fa exactly and still yields the A1 reading, because the probe
+#   spawns `node` fixtures that need no identity. It costs the Control.
+#
 # WHAT IT DOES NOT CHANGE: the fixture sources, the detached spawn, the group
 #   kill via the OS `kill` utility, the synchronous-throw guard around the
 #   fixture spawn (a probe that rejects the diagnostics RPC is worse than one
@@ -85,14 +137,23 @@
 #   machine, is in `08-SPIKE.md` § How to run this spike later. The one-line
 #   restore, whatever went wrong:
 #
-#     git checkout -- packages/backend/src/index.ts
+#     git checkout -- packages/backend/src/index.ts packages/backend/src/mcp-server-spec.ts
 #
 # VERIFIED: applied, type-checked and built on 2026-08-28 by plan 08-15, via
 #   `bash .planning/phases/08-process-lifecycle/verify-a1-patch.sh` (exit 0).
+#
+#   THAT LINE WENT STALE THE SAME DAY, and the staleness is preserved above
+#   rather than overwritten because it is the evidence that the control works.
+#   Commit 39876b5 landed after plan 08-15 wrote it and broke step 3.
+#
+# RE-VERIFIED 2026-08-28 by plan 08-17, after the section-5 edits, by the same
+#   command (exit 0).
 # =============================================================================
+diff --git a/packages/backend/src/index.ts b/packages/backend/src/index.ts
+index 8ec34f6..3db4837 100644
 --- a/packages/backend/src/index.ts
 +++ b/packages/backend/src/index.ts
-@@ -90,7 +90,23 @@
+@@ -90,8 +90,29 @@ import {
    getClaudePrintRecoveryMode,
  } from "./claude-print";
  import { getPersistenceDbHandle, type PersistenceDbHandle } from "./persistence";
@@ -106,17 +167,23 @@
 +// 120-combination totality case over the classifier's whole input domain; a
 +// verdict re-derived inline here would be a verdict no assertion can reach,
 +// which is the defect this patch exists to repair.
- import {
++import {
 +  buildLivenessProbePlan,
 +  buildOrphanKillPlan,
 +  classifyLivenessObservation,
 +  formatSpikeVerdict,
 +} from "./kill-plan";
-+import {
+ import {
    buildSpawnEnv,
++  // ADDED BY a1-probe-fix.patch — a COMPATIBILITY edit, see the patch header's
++  // section 5. HEAD's `platform.ts` travels with this patch, and at HEAD
++  // `buildSpawnEnv` takes `identityFallback` as a REQUIRED member.
++  derivePosixIdentity,
++  type PosixIdentityFallback,
    getSweepRoots,
    getHomeDirCandidates,
-@@ -589,7 +605,25 @@
+   getTempRoot,
+@@ -589,7 +610,25 @@ function readParentEnv(): Record<string, string | undefined> {
  // The value is handed to a spawn and never rendered: readParentEnv's contract
  // forbids logging an environment value, and an interpreter path is one.
  function getComspec(): string | undefined {
@@ -143,7 +210,7 @@
  }
  
  // RUN-05. The single `os` read of the whole backend, and the only place
-@@ -1523,9 +1557,14 @@
+@@ -1523,9 +1562,14 @@ async function resolveCommand(
        // `globalThis` cast and the try/catch — and whose own comment forbids
        // rendering a value. This site consumes those values and logs none of
        // them (T-06-T20 / 05-D-11).
@@ -158,19 +225,79 @@
        });
        const pathResolution = await new Promise<string | undefined>((resolve) => {
          // UX-04 / Phase 10 owns what this line adds on Windows: a spawn from a
-@@ -4953,6 +4992,11 @@
-   `const g = cp.spawn(process.execPath, ["-e", ${JSON.stringify(SPIKE_GRANDCHILD_SOURCE)}], { stdio: "ignore" });` +
+@@ -1708,6 +1752,37 @@ function getKnownHomeDirs(): string[] {
+   ].filter((value): value is string => typeof value === "string" && value.trim() !== "");
+ }
+ 
++// ADDED BY a1-probe-fix.patch — a COMPATIBILITY edit, see the patch header's
++// section 5. Byte-for-byte HEAD's `getPosixIdentityFallback` (index.ts:1998 at
++// 39876b5), reproduced here rather than invented, because `getKnownHomeDirs`
++// above already exists at this commit unchanged and the helper is three lines of
++// composition over it.
++//
++// WHY THE FLOOR TRAVELS WITH THE PROBE, STATED OUT LOUD RATHER THAN CHOSEN
++// SILENTLY. The behaviour-preserving answer here is `{ platform: undefined,
++// homeDir: undefined }`, which makes `derivePosixIdentity` return `{}` and
++// reproduces this commit exactly — that is what the mcp-server-spec.ts call site
++// gets. It is the WRONG answer at the provider spawn, and the reason is measured:
++// Caido's sandbox exposes an EMPTY `process.env`, so at this commit the provider
++// CLI is spawned with no USER, and `env -i claude -p` answers "Not logged in"
++// because the credential is in the macOS Keychain keyed on the user name. Without
++// this floor no turn can start on a real install, and the pre-fix Control — a
++// `pgrep -f mcp-server.mjs` count taken DURING a live turn — cannot be taken at
++// all. Plan 08-16 hit exactly that wall on abfbc17.
++//
++// It does not contaminate the Control. This adds three environment keys to a
++// spawned child and touches no termination path: no group kill, no signal ladder,
++// no orphan reap (there is no reap at this commit — that is what makes it the
++// Control). It makes the pre/post pair differ in the variable under test instead
++// of in two variables at once, because the post-fix reading of 2026-08-28 was
++// taken on a build that had this floor.
++function getPosixIdentityFallback(): PosixIdentityFallback {
++  const homeDir = getKnownHomeDirs().find(
++    (candidate) => Object.keys(derivePosixIdentity({ platform: host?.platform, homeDir: candidate })).length > 0,
++  );
++  return { platform: host?.platform, homeDir };
++}
++
+ async function checkProvider(
+   id: string,
+   options?: { bypassCache?: boolean },
+@@ -3166,6 +3241,8 @@ async function tryRegisterMcpForProviders(spec: McpServerSpec, sdk: BackendSDK):
+       spawnEnvToken: buildSpawnEnv({
+         parentEnv: readParentEnv(),
+         driftVars: spec.driftVars,
++        // ADDED BY a1-probe-fix.patch — compatibility, patch header section 5.
++        identityFallback: getPosixIdentityFallback(),
+       }).CAIDO_TOKEN,
+     });
+     if (registration.kind === "Skip") {
+@@ -4260,6 +4337,12 @@ async function sendCliMessage(
+           env: buildSpawnEnv({
+             parentEnv: readParentEnv(),
+             driftVars: injectedDriftVars,
++            // ADDED BY a1-probe-fix.patch — compatibility, patch header section 5.
++            // THIS is the call site the pre-fix Control depends on: it is the
++            // provider CLI spawn, and without the derived USER the CLI cannot
++            // authenticate on a real install, so no turn starts and no count can
++            // be taken. See getPosixIdentityFallback's header above.
++            identityFallback: getPosixIdentityFallback(),
+           }),
+           stdio: ["pipe", "pipe", "pipe"],
+           // Taken from the plan, never hardcoded: it is true exactly when the
+@@ -4954,6 +5037,11 @@ const SPIKE_FIXTURE_SOURCE =
    'process.stdout.write(JSON.stringify({ parent: process.pid, grandchild: g.pid }) + "\\n");' +
    "setTimeout(function () {}, 30000);";
-+
+ 
 +// The liveness probe's wall-clock budget. A single `ps -p <pid>` returns in
 +// single-digit milliseconds on any host that has one; anything past this is the
 +// instrument misbehaving, and an instrument that misbehaved is not evidence.
 +const SPIKE_PROBE_BUDGET_MS = 2000;
- 
++
  async function runLifecycleSpike(): Promise<Record<string, string>> {
    const spikeNote = "Phase 8 A1 probe — temporary, removed by T-08-03";
-@@ -4984,12 +5028,14 @@
+ 
+@@ -4984,12 +5072,14 @@ async function runLifecycleSpike(): Promise<Record<string, string>> {
      spikeProcessKillType = "unavailable";
    }
  
@@ -191,7 +318,24 @@
  
    const nodeExecutable = await getCachedNodeExecutable();
    if (nodeExecutable === undefined) {
-@@ -5055,27 +5101,103 @@
+@@ -5008,7 +5098,15 @@ async function runLifecycleSpike(): Promise<Record<string, string>> {
+     // spawn() throws SYNCHRONOUSLY for an unspawnable path (08-RESEARCH.md
+     // Pitfall 9). An escape from here would reject the getDiagnostics RPC.
+     const fixture = spawnDetached(nodeExecutable, ["-e", SPIKE_FIXTURE_SOURCE], {
+-      env: buildSpawnEnv({ parentEnv: readParentEnv(), driftVars: {} }),
++      // ADDED BY a1-probe-fix.patch — compatibility, patch header section 5.
++      // The fixture is a bare `node -e`, which needs no POSIX identity; the same
++      // helper is used here only so no call site in this file answers the
++      // question a different way.
++      env: buildSpawnEnv({
++        parentEnv: readParentEnv(),
++        driftVars: {},
++        identityFallback: getPosixIdentityFallback(),
++      }),
+       stdio: ["pipe", "pipe", "pipe"],
+       windowsVerbatimArguments: false,
+       detached: true,
+@@ -5055,27 +5153,103 @@ async function runLifecycleSpike(): Promise<Record<string, string>> {
      // buildKillTreePlan where a test can reach it.
      await spawnAndWait("kill", ["-TERM", "--", `-${String(parentPid)}`]);
      await spawnAndWait(nodeExecutable, ["-e", "setTimeout(function () {}, 600);"]);
@@ -311,3 +455,23 @@
    }
  
    return { spikeProcessKillType, spikeDetachedGroupKill, spikeNote };
+diff --git a/packages/backend/src/mcp-server-spec.ts b/packages/backend/src/mcp-server-spec.ts
+index 48a6c5f..16e38cf 100644
+--- a/packages/backend/src/mcp-server-spec.ts
++++ b/packages/backend/src/mcp-server-spec.ts
+@@ -145,6 +145,15 @@ export function buildMcpServerSpec(input: {
+     env: buildSpawnEnv({
+       parentEnv: input.parentEnv,
+       driftVars: input.driftVars,
++      // ADDED BY a1-probe-fix.patch — compatibility, patch header section 5, and
++      // the ONE site that takes the behaviour-preserving answer rather than the
++      // floor. `derivePosixIdentity` returns `{}` for an undefined homeDir, so
++      // this reproduces this commit byte for byte. It is the right answer here
++      // because the MCP server child authenticates to Caido with a token Drift
++      // injects, never through the macOS Keychain, so it needs no USER — and
++      // threading a real fallback through `buildMcpServerSpec`'s input type would
++      // change a historical signature and its callers for no measurement gain.
++      identityFallback: { platform: undefined, homeDir: undefined },
+     }),
+     driftVars: input.driftVars,
+   };

@@ -621,6 +621,195 @@ resolving toward a convenient value.
 
 ---
 
+## The patched-probe A1 re-run and the pre-fix Control — staged 2026-08-28 by plan 08-17, EMPTY
+
+**Both tables below are EMPTY and empty is the honest state.** They were staged by plan 08-17's
+task 1 against a probe build that exists, and they are filled only by readings the maintainer takes
+on their own hardware. A cell nobody measured is never filled from an expectation, from a
+neighbouring cell, or from this document's own prose. The abstention rule that governs the
+2026-08-28 HEAD-build tables above governs these two as well, unchanged and without exception.
+
+### The probe build these tables are waiting on
+
+Produced 2026-08-28 by the committed control rather than reconstructed by hand, because hand
+reconstruction is the activity that produced five wrong censuses in this phase.
+
+| Field | Value |
+|---|---|
+| Command | `bash .planning/phases/08-process-lifecycle/verify-a1-patch.sh /tmp/drift-a1-build` |
+| Exit code | **0** — the patch applies at `68199fa`, the patched backend type-checks, `caido-dev build` produces a package |
+| Source commit | **`68199fa`** ("feat(08-01): add the temporary A1 probe to the diagnostics block") |
+| Patch | `.planning/phases/08-process-lifecycle/a1-probe-fix.patch`, plus HEAD's `kill-plan.ts` and `platform.ts` carried in by the control |
+| Package | `/tmp/drift-a1-build/plugin_package.zip`, **2,549,143 bytes**, sha256 `a135fdca6da842beaeea4ab98dd2264be6d7f6035f33dc3601e50e881c88a9d5` |
+| Unzipped | `/tmp/drift-a1-build/plugin_package/`, 5 files, **2,548,183 bytes** |
+| Where it lives | **outside the repository.** `git status --porcelain` never listed it, `git status --porcelain packages/` is empty, and `git worktree list` shows one worktree |
+
+**What this build does that HEAD does not, and why it must be uninstalled afterwards.** The probe
+spawns **two fixture `node` processes on every `getDiagnostics` call** — a parent and a detached
+grandchild — kills the parent's process group, then asks a spawned enumerator whether the
+grandchild is still in the process table. Opening the Settings panel repeatedly is therefore an
+unbounded process spawn on a machine holding a live Caido session token, which is threat
+**T-08-76**, and it is why the probe was removed from HEAD by T-08-03 and must never be committed
+back. The patched build cleans its fixtures up through a **spawned** positive single-pid killer on
+every exit path including the inconclusive and error arms; the original signalled them through the
+same absent `process.kill` the verdict used, so on this sandbox its cleanup was a silent no-op and
+the 2026-08-27 run leaked both of its fixtures. **That fix is a claim, not yet a measurement** —
+which is exactly why table 1 carries a fixture-survivor cell.
+
+**The control went RED before it went green, and that is recorded rather than smoothed over.** The
+first run on 2026-08-28 failed step 3 with four `TS2345` errors: commit `39876b5` — the
+out-of-plan POSIX-identity fix that landed between plans 08-15 and 08-17 — made `identityFallback`
+a **required** member of `buildSpawnEnv`, and `verify-a1-patch.sh` carries HEAD's `platform.ts`
+into the scratch worktree, so four historical call sites stopped compiling. Plan 08-15's
+`VERIFIED` line was true when written and false the same day. The control caught it exactly where
+its own header predicted it would — *"rather than on the maintainer's machine an hour into a
+hardware session"* — and section 5 of the patch header now names the six repair edits.
+
+**One of those six edits changes what the Control build IS, so it is stated here and not only in
+the patch.** Caido's sandbox exposes an **empty** `process.env`. At `68199fa` that leaves the
+spawned provider CLI with no `USER`, and `env -i claude -p` answers *"Not logged in"* because the
+credential is in the macOS Keychain keyed on the user name. **Without a derived identity floor no
+turn can start on a real install, so the Control — a `pgrep` count taken DURING a live turn —
+could not be taken at all.** Plan 08-16 hit that exact wall on `abfbc17`. The probe build therefore
+carries HEAD's `getPosixIdentityFallback` at the three `index.ts` call sites. It adds three
+environment keys to a spawned child and touches **no** termination path: no group kill, no signal
+ladder, and no orphan reap — there is no reap at `68199fa`, which is precisely what makes the build
+a Control. It also makes the before/after pair differ in one variable rather than two, because
+plan 08-16's post-fix reading was itself taken on a build carrying this floor. The
+`mcp-server-spec.ts` site takes the behaviour-preserving answer instead and reproduces `68199fa`
+byte for byte. **If the maintainer would rather the Control run on a build carrying nothing from
+after `68199fa`, the patch header's section 5 names the one-line change and the cost: the A1
+reading survives it, the Control does not.**
+
+### Is the A1 re-run still required after the 2026-08-28 topology reading? — REDUCED, NOT SUPERSEDED
+
+Plan 08-16's **Table 5** measured `pgid == pid` on both Drift-spawned providers by direct `ps`
+observation from outside the sandbox, and that reading is sound: it has no `process.kill` anywhere
+on its path, so unlike the withdrawn 2026-08-27 probe reading it is structurally capable of
+printing the unfavourable value. This section states in the open what that does and does not do to
+the re-run below, rather than letting the re-run become a ceremony nobody re-justified.
+
+| A1's half | Status after Table 5 | Does the patched-probe re-run still bear on it? |
+|---|---|---|
+| **Topology** — does `detached: true` produce a process group of its own? | **Measured 2026-08-28, favourable.** `pgid == pid` is the signature of `setpgid(0,0)`; an LLRT that ignored `detached` would have shown the parent's group 41171, twice, and did not | **No.** A `ps` listing from outside the sandbox is a better instrument for this than any in-sandbox probe, and it has already answered |
+| **Causation** — does a kill aimed at that group actually reach a grandchild inside it? | **OPEN. Unmeasured by anything.** A listing can show a group exists; it cannot show that a signal sent to the group was delivered | **Yes, and it is the only instrument that does.** The probe spawns the group kill and then asks a spawned enumerator whether the grandchild survived it |
+
+**The decision: the re-run is REDUCED IN SCOPE and still REQUIRED. It is not superseded and it is
+not dropped.** Two of the cells the original re-run existed to fill are already answered elsewhere
+and are marked below as such rather than re-asked — the Caido version string (**0.58.2**, recorded
+2026-08-28) and the topology question. What survives is the causal half, and it is the half the
+nine POSIX termination sites actually rest on: a group reference that names a real group is worth
+nothing if the signal to that group does not arrive. **Recording the re-run as done because Table 5
+exists would be the same substitution that produced the retracted reading** — a narrower question
+answered, filed as the wider one.
+
+### What a definite verdict here does to `verdict-gate.sh`, said in advance
+
+**If the re-run returns the CONFIRMED value, `verdict-gate.sh` ARM A will go RED naming this file,
+and that red is CORRECT.** ARM A/A1-STALE fails on any live line, outside a block quote, in any
+non-excluded file, that states A1's withdrawn verdict — and this file would then be the only
+carrier in the tree stating a live favourable A1 claim while the ROADMAP, `REQUIREMENTS.md`,
+`STATE.md`, ledger entry 11 and the source comments all still state the retraction. **The gate
+would be reporting a true inconsistency, not malfunctioning.**
+
+It is written here **in advance**, before any reading exists, so it is not met as a surprise
+mid-session and resolved the cheap way. The cheap way is to weaken the gate — add an exclusion,
+narrow the pattern, reword this file — and that would rebuild the original defect from the other
+direction: a gate that softens when the fact changes is not a gate. **The gate is not to be
+touched.** The correct response is to propagate the new verdict to every carrier, and ARM A's own
+output is the worklist that names them — which is the discovery mechanism the gate was built to be.
+
+If the re-run returns **inconclusive**, or is not taken, the gate stays at exit 0 and nothing about
+it changes.
+
+### The three-outcome rule, in this section's own words
+
+The patched probe's `spikeDetachedGroupKill` reports **exactly three** things, and all three are
+results:
+
+- `grandchild-died (detached honoured)` — **A1 CONFIRMED.** The group signal reached the detached
+  grandchild.
+- `grandchild-survived (detached NOT honoured)` — **A1 FALSIFIED.** It did not. The phase's POSIX
+  mechanism does not hold on the shipping runtime.
+- `inconclusive: <reason> — the probe could not tell whether the target is still in the process
+  table` — **A1 stays OPEN.**
+
+**The third is a RESULT, not an error and not a retry.** Record it verbatim, reason token and all.
+Do not run the probe again to get a different answer, do not average it against anything, and do
+not read it as either of the other two. `<reason>` is one of `enumerator-unavailable`,
+`probe-timeout`, `no-exit-code`, `unrecognised-exit-code`, `unusable-pid` or
+`contradictory-output`, and it names *which* question the instrument could not answer.
+`classifyLivenessObservation` **defaults** to inconclusive and has exactly three arms that return
+anything else, so the value is reached rather than defaulted-past. Coalescing a non-answer into a
+verdict is the precise defect that produced the withdrawn 2026-08-27 reading; `formatSpikeVerdict`
+shares no verdict word between the third string and the first two — no "died", no "survived", no
+"honoured" — so a reader skimming a diagnostics report cannot mistake one for the other. A pasted
+value that is **none** of the three is an anomaly to report, never a value to normalise into one.
+
+### Table 1 — the A1 re-run with the patched probe
+
+| Field | Value |
+|---|---|
+| Date taken | **not recorded — reading not yet taken** |
+| Platform | **not recorded — reading not yet taken** |
+| Caido version | **not re-asked.** Answered 2026-08-28 as **0.58.2**, from Caido's own About screen, and recorded in § *The build these readings are attributed to*. Re-confirm only if the maintainer changed Caido between sessions |
+| Probe build | `68199fa` + `a1-probe-fix.patch` (incl. section 5), package sha256 `a135fdca6da842beaeea4ab98dd2264be6d7f6035f33dc3601e50e881c88a9d5` |
+| `spikeProcessKillType` | **not recorded — reading not yet taken** |
+| `spikeDetachedGroupKill` | **not recorded — reading not yet taken.** Exactly one of the three outcomes above, verbatim |
+| Reason token, if the verdict is inconclusive | **not recorded — reading not yet taken.** Transcribe the token even though it is inside the verdict string, so an inconclusive result cannot be filed as a bare non-answer |
+| `spikeNote` | **not recorded — reading not yet taken** |
+| Surviving fixture processes after the diagnostics call — `pgrep -f 'node -e' \| wc -l` | **not recorded — reading not yet taken.** This is how the original probe's fixture LEAK is confirmed fixed rather than assumed fixed |
+| Anything in `ps` that looks like a leftover fixture | **not recorded — reading not yet taken** |
+| **Verdict — causal half only** | **OPEN. A1's 2026-08-28 status, unchanged until this table is filled.** The topology half was measured 2026-08-28 (Table 5) and is not re-asked here |
+
+### Table 2 — the pre-fix Control, on that same build
+
+`08-VERIFICATION.md`'s `insufficient_spec` item — 08-01 truth 3 — abstained on 2026-08-24, still
+unmet, and now the phase's most load-bearing open measurement. Plan 08-16's readings show **that**
+the token-bearing child dies; they do not show **why**. Drift's spawned group kill, the single-pid
+SIGTERM→SIGKILL ladder, the argv-marker reap and Claude Code's own cleanup of its MCP child are all
+consistent with `1 → 0`, and no reading yet taken separates them. **The CLI-cleanup confounder is
+unexcluded, and this table is the only thing that excludes it.**
+
+| Field | Value |
+|---|---|
+| Date taken | **not recorded — reading not yet taken** |
+| Build identity | `68199fa` + `a1-probe-fix.patch`. **This build predates the argv-marker orphan reap entirely** (plans 08-06/08-07), which is what makes it the Control, and it is the SAME install as table 1 — one install, two readings |
+| What it pairs with | plan 08-16's post-fix counts on build `39876b5`: **1** during the live turn, **0** ~5 s after Stop |
+| `pgrep -f mcp-server.mjs \| wc -l` during a live turn | **not recorded — reading not yet taken** |
+| `pgrep -f mcp-server.mjs \| wc -l` ~5 s after Stop | **not recorded — reading not yet taken** |
+| Was a survivor cleaned up by pid, and was there one? | **not recorded — reading not yet taken** |
+| **Verdict** | **OPEN — the LIF-02 defect has never been observed on real hardware** |
+
+**Both directions are results, and neither is the expected one.** A **non-zero** after-Stop count is
+the LIF-02 defect reproduced on real hardware, and beside plan 08-16's post-fix zero it is the
+before/after pair this phase has wanted since 2026-08-24 — the thing that finally excludes the
+confounder. A **zero** after-Stop count is equally a reading: it would mean the defect does not
+reproduce on this machine, and that the post-fix zero proves considerably less than it appears to.
+Neither outcome is to be softened toward the other.
+
+### The abstention rule, restated for these two tables
+
+Identical to the rule governing the 2026-08-28 HEAD-build tables above, and repeated here so it
+travels with the tables it governs:
+
+1. **A cell is filled only from a reading that was taken** — verbatim, no rounding, no tidying, no
+   unit conversion, no reconstruction from prose.
+2. **A cell that could not be filled gets a dated marked abstention** naming what was attempted and
+   what stopped it. An abstention is a complete and correct outcome, not a failure.
+3. **Never fill a cell from a neighbouring cell**, and never from table 1 into table 2 or back.
+4. **Never fill a cell from an expectation** — not from this document, not from a plan, not from
+   what the mechanism is supposed to do. **In particular: never infer the Control from the post-fix
+   readings.** That inference is the entire thing the Control exists to prevent.
+5. **A cannot-tell reading is recorded as cannot-tell.** For table 1 this is the explicit third
+   outcome, and it is not retried into a definite answer.
+6. **No unexplained blanks.** Every cell ends as a verbatim value or a dated abstention with a named
+   blocker, and the two counts sum to the cell count.
+7. **Interpretation lives beneath the tables, in its own labelled paragraph**, never inside a cell
+   (threat T-08-71).
+
+---
+
 ## How to run this spike later
 
 The probe code is **not in HEAD** — task T-08-03 removed it, as its own plan required, because
