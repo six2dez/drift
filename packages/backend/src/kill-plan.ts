@@ -830,3 +830,296 @@ export function shouldReapSessionOrphans(input: {
   if (input.activeSessionCount !== 0) return false;
   return input.directMcpCallDepth === 0;
 }
+
+// ── Liveness, as a THREE-valued determination (08-VERIFICATION.md gap 1) ──
+//
+// THE FINDING THESE THREE HELPERS EXIST FOR, and it is a finding rather than a
+// style note. Phase 8's Wave-0 probe decided assumption A1 with one expression:
+//
+//     const alive = signalRef.process?.kill?.(grandchildPid, 0) ?? false;
+//
+// and then reported `alive` as one of two verdict strings. The SAME diagnostics
+// run, five lines earlier in the SAME report, measured
+// `spikeProcessKillType: "undefined"` — Caido's sandbox exposes no
+// `process.kill`. With the primitive absent the optional chain yields
+// `undefined`, `?? false` makes `alive === false`, and the string that reads as
+// a favourable answer was emitted UNCONDITIONALLY. The probe could not print the
+// other string on the runtime it was run on, so its A1 verdict was RETRACTED on
+// 2026-08-28 (see the LIVE VERDICTS block at the head of this file).
+//
+// THE RULE THIS PHASE EARNED, stated once, here, where the decision now lives:
+// an assertion whose red input requires hardware must state what a CANNOT-TELL
+// answer looks like, and must never coalesce it into either verdict. A `??`, an
+// `||` or a `default:` on the liveness path is the bug — not a shortcut that
+// happens to be wrong, the bug itself, because each of them manufactures a
+// definite answer out of an absent one.
+//
+// Every other consumer of that same `process.kill` absence WAS traced correctly
+// (`08-SECURITY.md` § G-02 works through its effect on `isPidAlive` in detail).
+// The one consumer nobody traced was the probe's own verdict line — in this
+// file's own subject area, three modules away from the careful reasoning at
+// `hasTrackedProcessExited`.
+//
+// WHY HERE. Same argument as every other decision in this module: the probe
+// lives in `index.ts`, which declares no `caido:plugin` alias and cannot be
+// imported by any test this project can run, so a verdict computed inline there
+// is a verdict no assertion can reach (Pitfall 3). Lifted out, it is proven by
+// an executed totality case over its whole input domain. Plan 08-15's probe
+// patch composes these rather than re-deriving them.
+//
+// THE MODULE'S SINGLE-IMPORT PROPERTY IS UNCHANGED by this block: it adds no
+// second import statement, so `grep -cE '^import'` over this file still returns
+// 1 and it is still `./platform`.
+
+// The three answers, and the third is a first-class result rather than an error
+// case. `inconclusive` is what the 2026-08-27 probe should have returned and
+// could not express.
+export type LivenessVerdict = "alive" | "dead" | "inconclusive";
+
+// The reason vocabulary, CLOSED in the same way `OrphanScanNoopReason` is closed
+// — an enumerable union rather than free prose, so a reason cannot become a
+// sentence that leaks a pid, a path or an environment value into a diagnostics
+// string (T-08-59).
+//
+//   * `enumerator-unavailable` — the enumerator could not be spawned at all.
+//   * `probe-timeout`          — it was spawned and did not finish.
+//   * `no-exit-code`           — it left `undefined` (LLRT) or `null` (a
+//                                signalled child under Node): no result at all.
+//   * `unrecognised-exit-code` — an exit code the enumerator does not document,
+//                                so the instrument misbehaved.
+//   * `unusable-pid`           — the caller asked about a pid that cannot exist.
+//   * `contradictory-output`   — the exit code and the printed rows disagree.
+//   * `matched-running`        — the ONE shape that establishes presence.
+//   * `matched-zombie`         — a row that exists but names a reaped process.
+//   * `successful-non-match`   — the ONE shape that establishes absence.
+export type LivenessReason =
+  | "enumerator-unavailable"
+  | "probe-timeout"
+  | "no-exit-code"
+  | "unrecognised-exit-code"
+  | "unusable-pid"
+  | "contradictory-output"
+  | "matched-running"
+  | "matched-zombie"
+  | "successful-non-match";
+
+// One verdict, one reason. The reason travels WITH the verdict rather than being
+// logged separately, because an `inconclusive` with no cause attached is what a
+// reader turns back into a guess.
+export type LivenessObservation = {
+  verdict: LivenessVerdict;
+  reason: LivenessReason;
+};
+
+// The enumerator's exit codes, named rather than spelled at the branch. `ps -p`
+// exits 0 when it printed a row for the pid and 1 when the pid is not in the
+// table; ANY other code is the instrument misbehaving and is not evidence.
+const PROBE_EXIT_MATCHED = 0;
+const PROBE_EXIT_NO_MATCH = 1;
+
+// One row of the enumerator's output, or nothing. `undefined` here means "no
+// line in this output was a row for the requested pid" — deliberately NOT "the
+// process is gone", which is the distinction the whole block is about.
+type ProbeRow = { zombie: boolean };
+
+// Find the target row by PID EQUALITY, scanning every line.
+//
+// TWO PROPERTIES, BOTH LOAD-BEARING, BOTH WITH A CASE IN `kill-plan.test.ts`:
+//
+//   1. The pid is compared as a NUMBER. A containment test would read a row for
+//      4428 or 442840 as an answer about 44284, and pid adjacency is not a
+//      hypothetical on a machine running high-fan-out tooling.
+//   2. EVERY line is scanned. A read of `stdout.split("\n")[0]` is wrong on any
+//      host whose first line is a header, a warning or a blank — and it fails
+//      toward `inconclusive`, which is safe but silently blinds the probe.
+//
+// A line that does not begin with a decimal integer is NOISE and is skipped. It
+// is not a negative answer; treating it as one is the coalescing defect again,
+// relocated into the parser.
+function findProbeRow(stdout: string, pid: number): ProbeRow | undefined {
+  for (const rawLine of stdout.split("\n")) {
+    // Carriage-return-tolerant, for the same reason `parseOrphanScanPids` is.
+    const fields = rawLine
+      .trim()
+      .split(/\s+/)
+      .filter((field) => field !== "");
+    const pidField = fields[0];
+    if (pidField === undefined) continue;
+    // EVERY character must be a digit. "44284abc" is not a pid field, and
+    // `Number.parseInt` would happily return 44284 from it.
+    let allDigits = true;
+    for (const character of pidField) {
+      if (character < "0" || character > "9") {
+        allDigits = false;
+        break;
+      }
+    }
+    if (!allDigits) continue;
+    if (Number.parseInt(pidField, 10) !== pid) continue;
+    // The second whitespace-delimited field is the process state. A leading `Z`
+    // is a zombie: the entry survives, the process does not. Presence of the ROW
+    // alone would call a reaped grandchild alive. A row with no state field at
+    // all is still a row, so it counts as presence.
+    const stateField = fields[1];
+    return { zombie: stateField !== undefined && stateField.startsWith("Z") };
+  }
+  return undefined;
+}
+
+// What a spawned liveness probe's outcome MEANS.
+//
+// BRANCH ORDER IS THE CONTRACT, ordered exactly as `classifyOrphanScanOutcome`
+// orders its own: unspawnable first, timeout second, then the caller's own bad
+// input, then the arms that can reach a definite answer. Reordering these
+// changes behaviour, not style.
+//
+// THE DEFAULT OF THIS LADDER IS `inconclusive`. There are exactly three arms
+// that can return anything else, and each of them requires a positive
+// observation to be reached.
+export function classifyLivenessObservation(input: {
+  spawnThrew: boolean;
+  exitCode: number | null | undefined;
+  timedOut: boolean;
+  stdout: string;
+  pid: number | undefined;
+}): LivenessObservation {
+  // THE ARM THAT IS GAP 1. A host with no enumerator — or a sandbox that
+  // refuses the spawn — has told us NOTHING about the pid. The withdrawn probe
+  // wrote `?? false` here and called it "not alive".
+  if (input.spawnThrew) {
+    return { verdict: "inconclusive", reason: "enumerator-unavailable" };
+  }
+
+  // A probe that did not finish measured nothing. Same class as above, one arm
+  // to the right, and just as tempting to fold into "not alive".
+  if (input.timedOut) {
+    return { verdict: "inconclusive", reason: "probe-timeout" };
+  }
+
+  // The module's shared pid refusal, reused rather than re-spelled. A question
+  // about a pid that cannot exist has no answer — and specifically it does not
+  // have the answer "the process is gone".
+  if (isUnusablePid(input.pid)) {
+    return { verdict: "inconclusive", reason: "unusable-pid" };
+  }
+
+  // `undefined` is what Caido's LLRT `ChildProcess` leaves (it defines `pid` and
+  // `kill` and nothing else) and `null` is what a signalled child leaves under
+  // Node. Neither is an enumeration result, and `undefined !== null` being TRUE
+  // is exactly the trap `hasTrackedProcessExited` documents above.
+  if (input.exitCode === undefined || input.exitCode === null) {
+    return { verdict: "inconclusive", reason: "no-exit-code" };
+  }
+
+  if (
+    input.exitCode !== PROBE_EXIT_MATCHED &&
+    input.exitCode !== PROBE_EXIT_NO_MATCH
+  ) {
+    return { verdict: "inconclusive", reason: "unrecognised-exit-code" };
+  }
+
+  // `input.pid` survived `isUnusablePid` above, so it is a positive integer
+  // here; the local narrows it for the compiler without an `as`.
+  const pid = input.pid ?? 0;
+  const row = findProbeRow(input.stdout, pid);
+
+  if (input.exitCode === PROBE_EXIT_MATCHED) {
+    // An enumerator that reports success and prints no row for the pid is
+    // contradicting itself. That is NOT evidence of absence — folding it into
+    // `dead` would rebuild gap 1 out of a different operator.
+    if (row === undefined) {
+      return { verdict: "inconclusive", reason: "contradictory-output" };
+    }
+    return row.zombie
+      ? { verdict: "dead", reason: "matched-zombie" }
+      : { verdict: "alive", reason: "matched-running" };
+  }
+
+  // Exit 1 — the DOCUMENTED "no such process". This is the one negative outcome
+  // that carries information, and it is why the probe spawns an enumerator
+  // instead of calling a primitive the sandbox does not supply.
+  if (row !== undefined) {
+    // The instrument said "no such process" and then printed it. Both halves
+    // cannot be true, so neither is trusted.
+    return { verdict: "inconclusive", reason: "contradictory-output" };
+  }
+  return { verdict: "dead", reason: "successful-non-match" };
+}
+
+// The probe's own spawn plan: a process-table lookup for ONE pid, printing the
+// pid and the process state with no header.
+//
+// It returns the module's existing `KillTreePlan` union rather than a new one,
+// so it inherits the refusal vocabulary and every consumer keeps the same three
+// projections it already switches on.
+//
+// THE BARE NAME IS A DELIBERATE, BOUNDED ACCEPTANCE (T-08-55, same class as
+// T-08-03). `ps` is resolved through whatever PATH the host supplies. Two things
+// bound it. FIRST, SCOPE: this builder is consumed ONLY by an uncommitted local
+// diagnostic build — plan 08-15's patch file, applied by a maintainer on their
+// own machine — and by nothing on any shipping path. SECOND, DESIGN: a hijacked
+// binary cannot produce a WRONG verdict, only an absent one, because
+// `classifyLivenessObservation` above requires a row whose PARSED PID EQUALS the
+// requested pid and does not trust a bare exit code. A binary that exits 0 with
+// unrelated or empty output yields `inconclusive`.
+export function buildLivenessProbePlan(input: {
+  pid: number | undefined;
+  platform: Platform | undefined;
+}): KillTreePlan {
+  // The SHARED refusal first, in the same branch-order-is-contract style
+  // `buildOrphanKillPlan` uses, and proven from this caller too.
+  if (isUnusablePid(input.pid)) {
+    return { kind: "none", reason: "no-pid" };
+  }
+
+  // The literal "win32" only; `undefined` falls through to the POSIX arm, the
+  // CMP-01 rule this module states everywhere else. A1 is a POSIX assumption in
+  // the first place — it is about `process_group(0)`, an option the win32 arm
+  // never takes — so there is nothing for this probe to ask there.
+  if (input.platform === "win32") {
+    return { kind: "none", reason: "unsupported-platform" };
+  }
+
+  return {
+    kind: "spawn",
+    file: "ps",
+    args: [
+      // `pid=,state=` — the two fields the classifier reads, with the trailing
+      // `=` suppressing each column header. A header line would be noise the
+      // parser skips anyway, but asking for one and then skipping it is two
+      // decisions where one will do.
+      "-o",
+      "pid=,state=",
+      // POSITIVE, and a SINGLE pid. No process-group reference appears anywhere
+      // in this argv, deliberately: A1 asks whether a group exists at all, and a
+      // probe that poses the question with a group reference cannot answer it.
+      "-p",
+      String(input.pid),
+    ],
+    // FALSE, and stated rather than omitted for the same reason every other
+    // builder in this module states it: nothing here was escaped by this module,
+    // and the flag is inert off win32 in any case.
+    windowsVerbatimArguments: false,
+  };
+}
+
+// The exact string the probe writes into its diagnostics field.
+//
+// THE FIRST TWO ARE BYTE-IDENTICAL to what the 2026-08-27 run produced, on
+// purpose: a re-run on fixed hardware must be COMPARABLE with the withdrawn
+// reading, and a silently reworded string would make the old and new readings
+// two different measurements of two different things.
+//
+// THE THIRD IS THE WHOLE POINT. It shares no verdict word with either of the
+// other two — no "died", no "survived", no "honoured" — so a reader skimming a
+// diagnostics report cannot mistake a non-answer for either outcome. That
+// mistake, made once, is what this entire block exists to prevent.
+export function formatSpikeVerdict(observation: LivenessObservation): string {
+  if (observation.verdict === "alive") {
+    return "grandchild-survived (detached NOT honoured)";
+  }
+  if (observation.verdict === "dead") {
+    return "grandchild-died (detached honoured)";
+  }
+  return `inconclusive: ${observation.reason} — the probe could not tell whether the target is still in the process table`;
+}
