@@ -314,7 +314,7 @@ Plans:
   4. Session finalize / `stopMcpServer` kills all tracked pids before sweeping the temp dir, so token-bearing processes die before their env-source files are removed.
   5. macOS/Linux cancellation and timeout semantics visible to the user are unchanged and existing tests stay green.
 
-**Plans**: 10/10 plans executed (5/5 executed; 5 gap-closure plans added 2026-08-27 from `08-UAT.md`)
+**Plans**: 17 plans (10/10 executed; 7 gap-closure plans added 2026-08-28 from `08-VERIFICATION.md`)
 
 Plans:
 **Wave 1**
@@ -357,6 +357,32 @@ Plans:
 **Gap Wave 5** *(blocked on Gap Wave 4)*
 
 - [x] 08-10-PLAN.md — Contract corrections: A1/A6 marked corrections in all NINE carriers (the count read "four" when this line was written and was corrected twice more during planning — the gate is a repo-wide scan for exactly that reason), the unrunnable A6 command, SC-2's stale clause, the LIF requirement status, ledger entry 11, residuals AR-04/AR-05/AR-06/AR-07, and `COVERAGE.md` (LIF-01, LIF-02)
+
+---
+
+*Second gap-closure round (added 2026-08-28 from `08-VERIFICATION.md`; three failed gaps, one `insufficient_spec` item, five open `human_verification` items). The verdict: **the code is a net improvement; the record is a regression.** No code blockers — nothing stubbed, orphaned, hollow or unwired. Gap 1 is a record defect: assumption **A1 was recorded as CLOSED FAVOURABLY on a reading the probe could not have produced any other way** — it determined liveness with `process.kill`, which the same diagnostics run measured absent, and coalesced the absent case into the favourable verdict. That is the phase's thirteenth vacuous gate and the first that produced a reading rather than a green tick, which is why it propagated into eleven carriers, the ROADMAP, REQUIREMENTS.md and ledger entry 11 — and why `verdict-gate.sh` now enforces it in both arms and goes red on the correction itself. Gaps 2 and 3 are criteria that have drifted from what measurement shows. The Windows execution leg stays deferred to Phase 9 SC-4.*
+
+**Gap Wave 6** *(gap-closure set; the instrument before any carrier — `08-VERIFICATION.md` gap 1 `missing` item 1 is explicit that the gate must be fixed FIRST)*
+
+- [ ] 08-11-PLAN.md — Tracer: re-point `verdict-gate.sh` at A1's actual verdict with both scans given a demonstrated red input, keep ARM A's fail-closed discovery shape, then land the retraction in `08-SPIKE.md` and watch that carrier drop out of the gate's own output (LIF-01, LIF-02)
+
+**Gap Wave 7** *(blocked on Gap Wave 6; three plans with no file overlap, parallel)*
+
+- [ ] 08-12-PLAN.md — The probe fix as a tested pure helper: `classifyLivenessObservation` (three-valued, with an executed totality case over its whole input domain), `buildLivenessProbePlan`, `formatSpikeVerdict` — plus the A1 marked correction in `kill-plan.ts`, `index.ts` and `kill-tree.posix.test.ts` (LIF-01, LIF-02)
+- [ ] 08-13-PLAN.md — Gap 2: amend SC-2 in place to name BOTH mechanisms and state the reap's three boundaries, retract A1 inside the 2026-08-27 amendment, and correct LIF-01/LIF-02 and their coverage rows (LIF-01, LIF-02)
+- [ ] 08-14-PLAN.md — The register and the phase documents: ledger entry 11 corrected in both representations with a new entry for the unfalsifiable probe verdict, plus `STATE.md`, `08-UAT.md` test 1, `08-VALIDATION.md` and `08-SECURITY.md` — the gate goes green here (LIF-01, LIF-02)
+
+**Gap Wave 8** *(blocked on Gap Wave 7)*
+
+- [ ] 08-15-PLAN.md — UD-01's resolved deliverable: a `lastOrphanReap` diagnostics key that says whether the orphan reap ran, was refused, or is inert — plus `a1-probe-fix.patch` and `verify-a1-patch.sh`, a committed probe fix proven to apply, type-check and build (LIF-02)
+
+**Gap Wave 9** *(blocked on Gap Wave 8; `autonomous: false`, `gate="blocking-human"`)*
+
+- [ ] 08-16-PLAN.md — Four readings on the shipping build: the POSIX cancel counts, the POSIX timeout counts taken independently, the `lastOrphanReap` value (the phase's cheapest high-value measurement), and A6 against a Drift-spawned Claude Code turn (LIF-02)
+
+**Gap Wave 10** *(blocked on Gap Wave 9; `autonomous: false`, `gate="blocking-human"`)*
+
+- [ ] 08-17-PLAN.md — The A1 re-run with the fixed probe and the pre-fix Control on one probe build, then the ownership record: the Windows leg re-deferred to Phase 9 SC-4 and every remaining item named as owned or ownerless (LIF-01, LIF-02)
 
 **Research flag**: RESOLVED 2026-08-24 by `08-RESEARCH.md`. The primitives are indeed standard; the **mechanism** was not. `detached: true` is source-verified honoured by Caido's LLRT fork (`command.process_group(0)`), but the canonical group-signalling spelling `process.kill(-pid, sig)` **throws** there — LLRT types `pid` as `u32` and rquickjs range-checks through `f64`, raising `Underflow` before `libc::kill` is reached — while working perfectly under Node, the only vehicle any CI leg in this repository runs. SC-2 is amended in place by plan 08-05 accordingly (see the criterion's own note).
 
