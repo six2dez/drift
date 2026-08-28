@@ -35,23 +35,56 @@ import { buildKillTreePlan, shouldDetachProviderSpawn } from "./kill-plan";
 // > `mcp-server.mjs` child inside it (A6, also **OPEN — not measured**).
 //
 // CORRECTION (2026-08-27, probe build installed in a real macOS Caido, darwin
-// 25.6.0; `08-UAT.md` tests 1 and 2). **A1 is CLOSED FAVOURABLY** —
-// `spikeDetachedGroupKill` read `grandchild-died (detached honoured)`, so the
-// shipped LLRT does create the group this file's argv aims at. **A6 is
-// FALSIFIED** — a real provider CLI (codex, pid 43921, pgid 43752) put its
-// `mcp-server.mjs` child (pid 44284) in pgid 44284, its own group, which no
-// group signal aimed at the CLI can reach. The mechanism for that class is the
-// argv-marker orphan reap, proven separately in `orphan-reap.posix.test.ts`.
+// 25.6.0; `08-UAT.md` tests 1 and 2). **A6 is FALSIFIED** — a real provider CLI
+// (codex, pid 43921, pgid 43752) put its `mcp-server.mjs` child (pid 44284) in
+// pgid 44284, its own group, which no group signal aimed at the CLI can reach.
+// The mechanism for that class is the argv-marker orphan reap, proven separately
+// in `orphan-reap.posix.test.ts`. That reading stands: it was taken by direct
+// `ps` observation, an instrument with a red input.
+//
+// A1 RETRACTED (2026-08-28). The A1 half of that same correction is WITHDRAWN
+// and is preserved below as a block quote. The probe decided A1 with
+// `signalRef.process?.kill?.(pid, 0) ?? false` on a runtime whose SAME
+// diagnostics run measured `process.kill` absent, so the optional chain yielded
+// `undefined`, `?? false` made the answer "not alive", and the favourable string
+// was emitted UNCONDITIONALLY. The unfavourable string was unreachable, the red
+// input did not exist, and the reading therefore says nothing about whether the
+// group was created. **A1 is OPEN — not measured.** The fixed, three-valued
+// determination is `classifyLivenessObservation` in `kill-plan.ts`.
+//
+// > **A1 is CLOSED FAVOURABLY** —
+// > `spikeDetachedGroupKill` read `grandchild-died (detached honoured)`, so the
+// > shipped LLRT does create the group this file's argv aims at.
 //
 // THIS SUITE'S OWN REACH IS UNCHANGED BY EITHER READING, and that must not be
-// softened now that one of them is favourable. A green run here proves that the
-// production plan's argv brings down a real process group on the platform the
-// shipping user base runs — under NODE. It executes not one line of LLRT, so
-// closing A1 elsewhere does not retroactively make this file a proof of the
-// shipping runtime; the A1 evidence is the probe reading above, not this suite.
-// Nor does it execute one line of `index.ts`, which declares no `caido:plugin`
-// alias and cannot be imported by any test this project can run; the wiring is
-// asserted statically in `index.source.test.ts`.
+// softened by the retraction any more than it was to be softened by the
+// favourable claim. A green run here proves that the production plan's argv
+// brings down a real process group on the platform the shipping user base runs —
+// under NODE. It executes not one line of LLRT, so a verdict about A1 reached
+// elsewhere — in either direction — does not retroactively make this file a
+// proof of the shipping runtime. Nor does it execute one line of `index.ts`,
+// which declares no `caido:plugin` alias and cannot be imported by any test this
+// project can run; the wiring is asserted statically in `index.source.test.ts`.
+//
+// AND THE RETRACTION MAKES THIS PARAGRAPH STRONGER, NOT WEAKER. With A1
+// withdrawn there is no probe reading left to point at, so this suite's
+// Node-only reach is now the phase's ONLY executed behavioural evidence for the
+// POSIX group path — and it is evidence about NODE. Nothing in this repository
+// has executed one line of the runtime the shipping user base actually runs.
+// That sentence is the honest state of the phase's POSIX guarantee, and it is
+// why the single-pid rung in `killTree` is kept.
+//
+// SUPERSEDED (written 2026-08-27), preserved as a block quote:
+//
+// > THIS SUITE'S OWN REACH IS UNCHANGED BY EITHER READING, and that must not be
+// > softened now that one of them is favourable. A green run here proves that the
+// > production plan's argv brings down a real process group on the platform the
+// > shipping user base runs — under NODE. It executes not one line of LLRT, so
+// > closing A1 elsewhere does not retroactively make this file a proof of the
+// > shipping runtime; the A1 evidence is the probe reading above, not this suite.
+// > Nor does it execute one line of `index.ts`, which declares no `caido:plugin`
+// > alias and cannot be imported by any test this project can run; the wiring is
+// > asserted statically in `index.source.test.ts`.
 
 // One constant, referenced by every case as `it`'s third argument, so a future
 // raise cannot apply to one of them only. Process creation plus two settles is

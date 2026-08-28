@@ -5973,18 +5973,41 @@ function killTree(
   // > the plan below names a group that was never created and NOTHING dies; this
   // > rung turns that total regression into the partial one we have today.
   //
-  // CORRECTION (2026-08-27, probe build installed in a real macOS Caido, darwin
-  // 25.6.0): **A1 IS CLOSED FAVOURABLY.** `spikeDetachedGroupKill` read
-  // `grandchild-died (detached honoured)` — the shipped LLRT does honour the
-  // detached spawn option, so the group reference in the plan below names a
-  // group that really exists. The failure this rung was written against did not
-  // occur.
+  // RETRACTION (2026-08-28). The 2026-08-27 correction below is WITHDRAWN, and
+  // the reason is a defect in the instrument rather than a change of mind: the
+  // probe decided A1 with
+  // `signalRef.process?.kill?.(grandchildPid, 0) ?? false` on a runtime whose
+  // SAME diagnostics run measured `process.kill` absent. The optional chain
+  // yielded `undefined`, `?? false` made the answer "not alive", and the
+  // favourable string was emitted UNCONDITIONALLY. The probe could not have
+  // printed the other one, so the reading carries no information and A1 is OPEN
+  // again. The reading itself is preserved below because it is a fact about what
+  // the instrument printed; only the verdict drawn from it is taken back. The
+  // corrected three-valued determination is `classifyLivenessObservation` in
+  // `kill-plan.ts`.
   //
-  // THE RUNG STAYS ANYWAY, and its justification is corrected rather than
-  // dropped: it is no longer defence against an UNMEASURED runtime, it is
-  // defence against a FUTURE Caido that rebases its LLRT fork. One measurement
-  // closes a version, not a dependency. It costs one syscall. Recorded decision
-  // OQ-2 — do not delete it as redundant.
+  // > CORRECTION (2026-08-27, probe build installed in a real macOS Caido, darwin
+  // > 25.6.0): **A1 IS CLOSED FAVOURABLY.** `spikeDetachedGroupKill` read
+  // > `grandchild-died (detached honoured)` — the shipped LLRT does honour the
+  // > detached spawn option, so the group reference in the plan below names a
+  // > group that really exists. The failure this rung was written against did not
+  // > occur.
+  //
+  // THE RUNG STAYS, AND WHAT IT DEFENDS AGAINST IS NOW BOTH THINGS. With A1
+  // open, this rung is once again defence against exactly what it was originally
+  // written for: a runtime whose honouring of the process-group spawn option is
+  // UNMEASURED — the Caido users run today. It is ALSO defence against the
+  // FUTURE Caido that rebases its LLRT fork, which is the case the 2026-08-27
+  // revision added and which survives the retraction on its own. One measurement
+  // would have closed a version rather than a dependency; no measurement closes
+  // neither. It costs one syscall. Recorded decision OQ-2 — do not delete it as
+  // redundant.
+  //
+  // > THE RUNG STAYS ANYWAY, and its justification is corrected rather than
+  // > dropped: it is no longer defence against an UNMEASURED runtime, it is
+  // > defence against a FUTURE Caido that rebases its LLRT fork. One measurement
+  // > closes a version, not a dependency. It costs one syscall. Recorded decision
+  // > OQ-2 — do not delete it as redundant.
   //
   // It is also not, and never was, a defence against A6, which the same reading
   // measured FALSE: a provider CLI's `mcp-server.mjs` child can sit in its OWN
@@ -6256,9 +6279,41 @@ async function respondToMcpToolApproval(
 
 // ── Diagnostic ──────────────────────────────────────────────────────
 
-// No Phase 8 Wave-0 spike (A1/A6) ran here. The temporary probe lived at this
-// spot on commit 68199fa; the hardware checkpoint that would have EXECUTED it
-// against a real Caido install was waived, so A1 and A6 stay OPEN — 08-SPIKE.md.
+// THE PHASE 8 WAVE-0 PROBE (A1/A6) LIVED AT THIS SPOT, ON COMMIT 68199fa, AND
+// IT WAS RUN. The breadcrumb here used to say no spike ran, which was true when
+// it was written and is now wrong in the DANGEROUS direction: it reads as though
+// the measurement was never attempted, and a later maintainer would conclude the
+// probe is untried rather than tried-and-found-blind, rebuild it from the same
+// commit, and reproduce the same defect. All three facts, so that cannot happen:
+//
+//   1. The probe is recoverable at `git show 68199fa` — it lived at this spot in
+//      `getDiagnostics` and is deliberately not in HEAD.
+//   2. It WAS EXECUTED on 2026-08-27 against a real macOS Caido (darwin 25.6.0),
+//      and it produced a genuine A6 measurement: codex pid 43921 in pgid 43752,
+//      its `mcp-server.mjs` child pid 44284 in its own pgid 44284. A6 is
+//      **FALSIFIED** and that reading stands.
+//   3. Its A1 verdict was RETRACTED on 2026-08-28. The verdict line determined
+//      liveness with `signalRef.process?.kill?.(pid, 0) ?? false`, on a runtime
+//      the SAME run measured as exposing no `process.kill`; the coalescing
+//      operator turned the absent answer into the favourable one and the
+//      unfavourable string was unreachable. A1 is OPEN — not measured.
+//
+// SUPERSEDED (this breadcrumb's original text, written before the 2026-08-27
+// run), preserved as a block quote rather than deleted, for the same reason
+// every other marked correction in this phase preserves what it replaces —
+// deleting it would hide that the phase once believed no measurement had been
+// attempted at all:
+//
+// > No Phase 8 Wave-0 spike (A1/A6) ran here. The temporary probe lived at this
+// > spot on commit 68199fa; the hardware checkpoint that would have EXECUTED it
+// > against a real Caido install was waived, so A1 and A6 stay OPEN — 08-SPIKE.md.
+//
+// DO NOT RE-RUN THE PROBE FROM 68199fa. The fixed determination is
+// `classifyLivenessObservation` in `kill-plan.ts` — three-valued, with the
+// cannot-tell answer reported as `inconclusive` and never folded into either
+// verdict — and the probe rebuilt on top of it is the committed patch file
+// `.planning/phases/08-process-lifecycle/a1-probe-fix.patch` (plan 08-15). Apply
+// that, not this. 08-SPIKE.md carries the procedure.
 
 async function getDiagnostics(_sdk: BackendSDK): Promise<Result<Record<string, string>>> {
   const mcpScript = path.join(assetsPath, "mcp-server.mjs");
