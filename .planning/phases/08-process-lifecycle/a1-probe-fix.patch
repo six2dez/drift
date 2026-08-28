@@ -1,0 +1,313 @@
+# =============================================================================
+# a1-probe-fix.patch — the Phase 8 Wave-0 A1 probe, repaired
+#
+# APPLIES TO: packages/backend/src/index.ts AS IT EXISTS AT COMMIT 68199fa
+#   ("feat(08-01): add the temporary A1 probe to the diagnostics block").
+#   It does NOT apply to HEAD, deliberately — the probe is not in HEAD and must
+#   not be put there. See NEVER COMMIT THIS TO HEAD below.
+#
+# THE DEFECT IT FIXES, IN ONE SENTENCE: the probe decided grandchild liveness
+#   with `signalRef.process?.kill?.(pid, 0) ?? false` on a runtime whose own
+#   diagnostics field, five lines earlier in the same report, measured
+#   `process.kill` as `undefined` — so the optional chain yielded `undefined`,
+#   `?? false` made `alive === false`, and the favourable verdict string
+#   "grandchild-died (detached honoured)" was emitted UNCONDITIONALLY. The
+#   unfavourable string was unreachable. The 2026-08-27 A1 reading therefore
+#   carried no information and was RETRACTED on 2026-08-28.
+#
+# THE SECOND DEFECT, which is a real process leak rather than a tidy-up: the
+#   fixture cleanup loop at the foot of the probe signalled its two fixture pids
+#   through that SAME absent primitive, so on the shipping sandbox it was a
+#   silent no-op. The 2026-08-27 run left its fixture processes running, and
+#   every further diagnostics call would have leaked two more.
+#
+# THE THREE-VALUED CONTRACT. The patched probe reports exactly THREE outcomes,
+#   and the third is a first-class result rather than an error or a retry:
+#
+#     grandchild-survived (detached NOT honoured)   A1 is FALSIFIED
+#     grandchild-died (detached honoured)           A1 is CONFIRMED
+#     inconclusive: <reason> — the probe could not tell whether the target is
+#                              still in the process table
+#
+#   The first two strings are BYTE-IDENTICAL to what the 2026-08-27 run
+#   produced, on purpose: a re-run must be comparable with the withdrawn
+#   reading. The third shares no verdict word with either — no "died", no
+#   "survived", no "honoured" — so a reader skimming a diagnostics report cannot
+#   mistake a non-answer for either outcome. RECORD IT VERBATIM. Do not retry
+#   it, and do not read it as either verdict; that coalescing is the exact bug
+#   this patch removes.
+#
+# WHAT IT CHANGES — three things, and only these three:
+#   1. The verdict determination, which now spawns a process-table enumerator
+#      (`buildLivenessProbePlan`), classifies its outcome
+#      (`classifyLivenessObservation`) and renders it (`formatSpikeVerdict`) —
+#      all three from `packages/backend/src/kill-plan.ts` at HEAD, each proven
+#      by executed unit cases including a 120-combination totality case. The
+#      probe COMPOSES them rather than re-deriving the logic.
+#   2. The fixture cleanup, which now spawns `buildOrphanKillPlan`'s positive
+#      single-pid killer per fixture pid, unconditionally, on every exit path
+#      including the inconclusive and error arms.
+#   3. The now-unused callable `process.kill` reference, removed so no future
+#      edit reaches for it again. `spikeProcessKillType` still REPORTS the
+#      `typeof`, because that reading is what exposed the defect.
+#
+# 4. TWO COMPATIBILITY EDITS, NAMED RATHER THAN SMUGGLED IN. They are not probe
+#   changes and they alter no behaviour; they exist because HEAD's `platform.ts`
+#   has to travel with the patch (HEAD's `kill-plan.ts` imports
+#   `resolveWindowsSystemBinary` from it, which the historical `platform.ts`
+#   does not export) and HEAD's `selectComspec` / `getWhichCommand` take
+#   `systemRootFallback` as a REQUIRED member, so every call site must state an
+#   answer (G-01). Both historical call sites are given `systemRootFallback: ""`,
+#   which `selectComspec`'s own comment records as falling through to exactly the
+#   pre-G-01 last-resort behaviour this commit already had. Both are win32-only
+#   paths and the probe returns early on win32, so they are moot for the
+#   measurement either way. They were discovered by RUNNING the control, not by
+#   reasoning about it: the first run of `verify-a1-patch.sh` failed step 3 with
+#   these two TS2345 errors, which is the control doing its job.
+#
+# WHAT IT DOES NOT CHANGE: the fixture sources, the detached spawn, the group
+#   kill via the OS `kill` utility, the synchronous-throw guard around the
+#   fixture spawn (a probe that rejects the diagnostics RPC is worse than one
+#   that reports inconclusive), the win32 early return, or the three
+#   diagnostics field names.
+#
+# NEVER COMMIT THIS TO HEAD. The probe spawns two fixture node processes on
+#   EVERY diagnostics call. Opening Settings repeatedly on a machine holding a
+#   live Caido session token is an unbounded process spawn, which is threat
+#   T-08-76. It exists as a patch file applied to a checked-out historical
+#   commit for a LOCAL, UNCOMMITTED, maintainer-driven build, and for nothing
+#   else. It is never signed and never released.
+#
+# HOW TO APPLY, AND HOW TO RESTORE. `verify-a1-patch.sh` beside this file does
+#   the whole thing in a scratch worktree that never touches your working tree,
+#   and is the control that proves the patch still applies and still builds.
+#   The by-hand form, for a maintainer who wants the built plugin on their own
+#   machine, is in `08-SPIKE.md` § How to run this spike later. The one-line
+#   restore, whatever went wrong:
+#
+#     git checkout -- packages/backend/src/index.ts
+#
+# VERIFIED: applied, type-checked and built on 2026-08-28 by plan 08-15, via
+#   `bash .planning/phases/08-process-lifecycle/verify-a1-patch.sh` (exit 0).
+# =============================================================================
+--- a/packages/backend/src/index.ts
++++ b/packages/backend/src/index.ts
+@@ -90,7 +90,23 @@
+   getClaudePrintRecoveryMode,
+ } from "./claude-print";
+ import { getPersistenceDbHandle, type PersistenceDbHandle } from "./persistence";
++// ADDED BY a1-probe-fix.patch. `kill-plan.ts` does not exist at 68199fa — plan
++// 08-02 created it — so applying this patch requires HEAD's `kill-plan.ts` and
++// HEAD's `platform.ts` to be copied in beside it. `verify-a1-patch.sh` does
++// exactly that, and is the control that proves the combination still builds.
++//
++// The probe COMPOSES these four rather than re-deriving any of them. Every
++// decision they encode is proven by an executed test at HEAD, including a
++// 120-combination totality case over the classifier's whole input domain; a
++// verdict re-derived inline here would be a verdict no assertion can reach,
++// which is the defect this patch exists to repair.
+ import {
++  buildLivenessProbePlan,
++  buildOrphanKillPlan,
++  classifyLivenessObservation,
++  formatSpikeVerdict,
++} from "./kill-plan";
++import {
+   buildSpawnEnv,
+   getSweepRoots,
+   getHomeDirCandidates,
+@@ -589,7 +605,25 @@
+ // The value is handed to a spawn and never rendered: readParentEnv's contract
+ // forbids logging an environment value, and an interpreter path is one.
+ function getComspec(): string | undefined {
+-  return selectComspec({ env: readParentEnv(), platform: host?.platform });
++  // ADDED BY a1-probe-fix.patch — a COMPATIBILITY edit, not a probe change. See
++  // the patch header's section 4. HEAD's `platform.ts` has to travel with the
++  // patch (HEAD's `kill-plan.ts` imports `resolveWindowsSystemBinary` from it,
++  // and the historical `platform.ts` does not export that), and HEAD's
++  // `selectComspec` takes `systemRootFallback` as a REQUIRED member so every
++  // call site states an answer out loud (G-01).
++  //
++  // The EMPTY STRING is the answer that reproduces this commit's behaviour
++  // EXACTLY, and that is the point of choosing it. `selectComspec`'s own comment
++  // records it: with an empty fallback the derived-root rung hands back the bare
++  // "cmd.exe", which fails its drive-absolute check and falls through to the
++  // last-resort line that existed here before G-01. So the patched build behaves
++  // as 68199fa did. It is also moot for this probe in any case — the whole
++  // question is POSIX-only and `runLifecycleSpike` returns early on win32.
++  return selectComspec({
++    env: readParentEnv(),
++    platform: host?.platform,
++    systemRootFallback: "",
++  });
+ }
+ 
+ // RUN-05. The single `os` read of the whole backend, and the only place
+@@ -1523,9 +1557,14 @@
+       // `globalThis` cast and the try/catch — and whose own comment forbids
+       // rendering a value. This site consumes those values and logs none of
+       // them (T-06-T20 / 05-D-11).
++      // ADDED BY a1-probe-fix.patch — the second COMPATIBILITY edit, same
++      // reason and same value as the one at `getComspec` above: an empty
++      // fallback reproduces 68199fa's own resolution behaviour, and this whole
++      // branch is win32-only while the probe is POSIX-only.
+       const searchCommand = getWhichCommand({
+         platform: host?.platform,
+         env: readParentEnv(),
++        systemRootFallback: "",
+       });
+       const pathResolution = await new Promise<string | undefined>((resolve) => {
+         // UX-04 / Phase 10 owns what this line adds on Windows: a spawn from a
+@@ -4953,6 +4992,11 @@
+   `const g = cp.spawn(process.execPath, ["-e", ${JSON.stringify(SPIKE_GRANDCHILD_SOURCE)}], { stdio: "ignore" });` +
+   'process.stdout.write(JSON.stringify({ parent: process.pid, grandchild: g.pid }) + "\\n");' +
+   "setTimeout(function () {}, 30000);";
++
++// The liveness probe's wall-clock budget. A single `ps -p <pid>` returns in
++// single-digit milliseconds on any host that has one; anything past this is the
++// instrument misbehaving, and an instrument that misbehaved is not evidence.
++const SPIKE_PROBE_BUDGET_MS = 2000;
+ 
+ async function runLifecycleSpike(): Promise<Record<string, string>> {
+   const spikeNote = "Phase 8 A1 probe — temporary, removed by T-08-03";
+@@ -4984,12 +5028,14 @@
+     spikeProcessKillType = "unavailable";
+   }
+ 
+-  // The same guard again, narrowed to the callable shape Q5 verified. Kept
+-  // separate from the reader above so the reported `typeof` word is derived from
+-  // an unknown, never from a type this file asserted.
+-  const signalRef = globalThis as typeof globalThis & {
+-    process?: { kill?: (pid: number, signal?: string | number) => boolean };
+-  };
++  // THE CALLABLE GUARD IS GONE, and its absence is the point rather than an
++  // omission. `signalRef` existed only so the verdict line and the cleanup loop
++  // could call `process.kill`. Both now spawn instead — the verdict through
++  // `buildLivenessProbePlan`, the cleanup through `buildOrphanKillPlan` — so
++  // there is no consumer left, and leaving the reference in place would invite a
++  // future edit to reach for it again. `spikeProcessKillType` above still
++  // REPORTS the `typeof`, because that reading is exactly what exposed this
++  // defect and it must keep travelling beside the verdict.
+ 
+   const nodeExecutable = await getCachedNodeExecutable();
+   if (nodeExecutable === undefined) {
+@@ -5055,27 +5101,103 @@
+     // buildKillTreePlan where a test can reach it.
+     await spawnAndWait("kill", ["-TERM", "--", `-${String(parentPid)}`]);
+     await spawnAndWait(nodeExecutable, ["-e", "setTimeout(function () {}, 600);"]);
+-    try {
+-      // Signal 0 is a positive-pid call, so Q2's u32 range check does not apply.
+-      // An EPERM still throws on unix, hence the guard.
+-      const alive = signalRef.process?.kill?.(grandchildPid, 0) ?? false;
+-      spikeDetachedGroupKill = alive
+-        ? "grandchild-survived (detached NOT honoured)"
+-        : "grandchild-died (detached honoured)";
+-    } catch (e) {
+-      spikeDetachedGroupKill = `error: ${e instanceof Error ? e.constructor.name : typeof e}`;
++    // THE DEFECT THIS PATCH REPAIRS, and the whole reason the file exists.
++    //
++    // WHAT WAS HERE (68199fa, run 2026-08-27, verdict RETRACTED 2026-08-28):
++    //
++    //     const alive = signalRef.process?.kill?.(grandchildPid, 0) ?? false;
++    //     spikeDetachedGroupKill = alive
++    //       ? "grandchild-survived (detached NOT honoured)"
++    //       : "grandchild-died (detached honoured)";
++    //
++    // The SAME diagnostics run, five fields earlier in the SAME report, measured
++    // `spikeProcessKillType: "undefined"` — Caido's sandbox exposes no
++    // `process.kill`. With the primitive absent the optional chain yields
++    // `undefined`, `?? false` makes `alive === false`, and the favourable string
++    // was emitted UNCONDITIONALLY. The unfavourable string was UNREACHABLE on
++    // the runtime the probe was run on, so the reading carried no information
++    // about A1 at all. The red input did not exist.
++    //
++    // WHAT REPLACES IT. Liveness is determined by a SPAWNED enumerator — the one
++    // capability this sandbox is known to have, since the probe already spawns
++    // `kill` two statements above — and classified by
++    // `classifyLivenessObservation`, whose ladder DEFAULTS to `inconclusive` and
++    // has exactly three arms that can return anything else. THREE values reach
++    // the diagnostics field, never two. A `??`, an `||` or a `default:` on this
++    // path is the bug itself and not a shortcut that happens to be wrong.
++    const probePlan = buildLivenessProbePlan({
++      pid: grandchildPid,
++      platform: host?.platform,
++    });
++    if (probePlan.kind === "none") {
++      spikeDetachedGroupKill = formatSpikeVerdict({
++        verdict: "inconclusive",
++        reason: "unusable-pid",
++      });
++    } else {
++      // THE WALL-CLOCK BOUND, and it is an OBSERVATION rather than a
++      // cancellation — the same distinction `classifyOrphanScanOutcome`'s
++      // freshness bound draws. `spawnAndWait` carries no timeout channel at this
++      // commit, and adding one here would need a `setTimeout` that CLAUDE.md
++      // records as not firing while an outer `await` is suspended. So the elapsed
++      // time is MEASURED and handed to the classifier: a probe that took longer
++      // than the budget is not trusted, and lands on `inconclusive` rather than
++      // being read as an answer.
++      const probeStartedAt = Date.now();
++      const probe = await spawnAndWait(probePlan.file, probePlan.args, {
++        windowsVerbatimArguments: probePlan.windowsVerbatimArguments,
++      });
++      spikeDetachedGroupKill = formatSpikeVerdict(
++        classifyLivenessObservation({
++          // `spawned: false` is `spawnAndWait`'s own discriminator for a spawn
++          // that THREW or emitted `error`. It resolves a SYNTHETIC `code: 1` in
++          // that case, which is byte-identical to `ps`'s documented "no process
++          // matched" — so reading the code alone would turn an unspawnable
++          // enumerator into the answer "the grandchild is gone". That is gap 1
++          // rebuilt out of a different operator, and this is the line that
++          // refuses it.
++          spawnThrew: !probe.spawned,
++          exitCode: probe.spawned ? probe.code : undefined,
++          timedOut: Date.now() - probeStartedAt > SPIKE_PROBE_BUDGET_MS,
++          stdout: probe.stdout,
++          pid: grandchildPid,
++        }),
++      );
+     }
+   }
+ 
+-  // Threat T-08-09. Unconditional, on every path that captured a pid — including
+-  // the inconclusive and error arms — so a failed experiment leaks nothing.
++  // Threat T-08-09 / T-08-76. Unconditional, on every path that captured a pid —
++  // including the inconclusive and error arms — so a failed experiment leaks
++  // nothing.
++  //
++  // THIS LOOP WAS A REAL LEAK, not a tidy-up, and it is the second defect this
++  // patch repairs. It used to signal through the SAME runtime primitive the
++  // verdict line above used:
++  //
++  //     signalRef.process?.kill?.(pid, "SIGKILL");
++  //
++  // On a sandbox where `process.kill` is `undefined` — which is what the
++  // 2026-08-27 run measured five fields earlier in its own report — the optional
++  // chain evaluates to `undefined` and the statement is a SILENT NO-OP. That run
++  // therefore left BOTH of its fixture processes running, and every subsequent
++  // diagnostics call would have leaked two more. Opening Settings repeatedly
++  // would be an unbounded process leak on a user's machine, which is why the
++  // probe must never be committed to HEAD even with this fix.
++  //
++  // The replacement spawns `buildOrphanKillPlan`'s plan — the POSITIVE
++  // SINGLE-PID killer the shipped orphan reap already uses, refusing `undefined`,
++  // `0`, negatives and non-integers through the module's shared pid guard.
++  // `spawnAndWait` never rejects (it resolves a synthetic code for a spawn that
++  // threw), so no try/catch is needed and no exit code is read: a fixture already
++  // dead and a fixture that could not be signalled are equally nothing-to-do
++  // here, and the survivor count is the measurement plan 08-17 takes.
+   for (const pid of [parentPid, grandchildPid]) {
+     if (pid === undefined) continue;
+-    try {
+-      signalRef.process?.kill?.(pid, "SIGKILL");
+-    } catch {
+-      // Already dead, or no longer ours. Either way there is nothing to do.
+-    }
++    const killPlan = buildOrphanKillPlan({ pid, platform: host?.platform });
++    if (killPlan.kind === "none") continue;
++    await spawnAndWait(killPlan.file, killPlan.args, {
++      windowsVerbatimArguments: killPlan.windowsVerbatimArguments,
++    });
+   }
+ 
+   return { spikeProcessKillType, spikeDetachedGroupKill, spikeNote };

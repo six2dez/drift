@@ -260,17 +260,63 @@ still an isolated zero, and the CLI-cleanup confounder it carries is still unexc
 ## How to run this spike later
 
 The probe code is **not in HEAD** — task T-08-03 removed it, as its own plan required, because
-it spawns fixture processes on every `getDiagnostics` call and must not ship. To re-run it,
-build from the commit that carries it:
+it spawns fixture processes on every `getDiagnostics` call and must not ship.
+
+**Do not rebuild it by hand from 68199fa.** The probe *as it exists at that commit* is broken in
+two ways, and hand reconstruction is the activity that produced five wrong censuses in this
+phase. The repair is a committed, reviewable artifact instead:
+
+- **`.planning/phases/08-process-lifecycle/a1-probe-fix.patch`** — the fixed probe, as a unified
+  diff against `packages/backend/src/index.ts` at 68199fa. Its header names the commit, both
+  defects, the three-valued contract, the restore command, and why it must never be committed.
+- **`.planning/phases/08-process-lifecycle/verify-a1-patch.sh`** — the standing control that
+  proves the patch still applies, type-checks and builds, inside a scratch worktree that never
+  touches your working tree.
+
+**Verified 2026-08-28:** `bash .planning/phases/08-process-lifecycle/verify-a1-patch.sh` exits
+**0** — the patch applies at 68199fa, the patched backend type-checks, and `caido-dev build`
+produces `dist/plugin_package` (5 files, 2,545,673 bytes) and `dist/plugin_package.zip`
+(2,546,633 bytes).
+
+### Apply and restore, verbatim
+
+The cheapest route is the control itself: it builds the package for you and leaves your working
+tree alone.
+
+```
+bash .planning/phases/08-process-lifecycle/verify-a1-patch.sh /tmp/drift-a1-build
+```
+
+`/tmp/drift-a1-build/plugin_package.zip` is then the probe build to install in Caido.
+
+To do it in the working tree instead — for instance to iterate on the probe:
 
 ```
 git checkout 68199fa -- packages/backend/src/index.ts
+git apply .planning/phases/08-process-lifecycle/a1-probe-fix.patch
 pnpm build
 ```
 
-Then restore HEAD's version afterwards with `git checkout HEAD -- packages/backend/src/index.ts`.
-`index.ts` at HEAD is byte-equivalent to its pre-spike state apart from a three-line breadcrumb
-comment above `getDiagnostics`, so the checkout is clean in both directions.
+Restore, whatever happened, with:
+
+```
+git checkout HEAD -- packages/backend/src/index.ts
+```
+
+`index.ts` at HEAD is byte-equivalent to its pre-spike state apart from the breadcrumb comment
+above `getDiagnostics`, so the checkout is clean in both directions. **Never commit the patched
+file.** The probe spawns two fixture node processes on every diagnostics call, which is threat
+T-08-76.
+
+> **SUPERSEDED 2026-08-28 (preserved, not deleted). The original recipe, which rebuilds the
+> DEFECTIVE probe with no patch step:**
+>
+> ```
+> git checkout 68199fa -- packages/backend/src/index.ts
+> pnpm build
+> ```
+>
+> Then restore HEAD's version afterwards with `git checkout HEAD -- packages/backend/src/index.ts`.
 
 The procedure below is preserved so it can be executed later without reconstruction. **Steps 1-3
 were executed on 2026-08-27 and their readings are in the tables above; step 4 was not.** Re-run
@@ -302,12 +348,56 @@ Open Drift → Settings → the Copy-diagnostics action, and record the three `s
 > - `spikeProcessKillType` — expected `function`. Anything else means the liveness probe in
 >   `08-RESEARCH.md` § *Q5* is not available on that build, and plan 08-03's deferred-rung guard
 >   needs a redesign.
-- `spikeDetachedGroupKill` — **this is A1.** It is exactly one of:
-  - `grandchild-died (detached honoured)` → A1 closed favourably; the phase proceeds as planned.
-  - `grandchild-survived (detached NOT honoured)` → the phase's POSIX mechanism is falsified.
-    **STOP**, do not run plan 08-02, re-plan the phase.
-  - `inconclusive (no fixture output)`, `skipped (node executable not resolved)`, or
-    `error: <constructor name>` → **also a halt.** An unclear A1 is not a pass. Record verbatim.
+- `spikeDetachedGroupKill` — **this is A1.** Under the PATCHED probe there are **exactly three**
+  outcomes, and the third is a first-class RESULT rather than a halt. The old list enumerated two
+  verdicts plus three halt values; that shape is what let a non-answer be filed as an answer.
+  - `grandchild-survived (detached NOT honoured)` → **A1 FALSIFIED.** The group signal does not
+    reach a detached grandchild on this runtime; the phase's POSIX mechanism does not hold.
+    **STOP** and re-plan.
+  - `grandchild-died (detached honoured)` → **A1 CONFIRMED.** `detached: true` really does put
+    the fixture in its own process group and the group signal reaches the grandchild.
+  - `inconclusive: <reason> — the probe could not tell whether the target is still in the process
+    table` → **A1 stays OPEN.** **RECORD IT VERBATIM, reason token and all.** Do NOT retry it,
+    do NOT average it against another run, and do NOT read it as either verdict above. `<reason>`
+    is one of `enumerator-unavailable`, `probe-timeout`, `no-exit-code`,
+    `unrecognised-exit-code`, `unusable-pid` or `contradictory-output`, and it names *which*
+    question the instrument could not answer. `enumerator-unavailable` in particular means
+    Caido's sandbox refused to spawn `ps` — which is itself the reading step 5 asks for, arriving
+    a second way.
+
+  Coalescing that third outcome into either of the other two is the exact defect that produced
+  the withdrawn 2026-08-27 reading, so `formatSpikeVerdict` (`kill-plan.ts`) shares no verdict
+  word between it and them — no "died", no "survived", no "honoured". The first two strings are
+  byte-identical to what the 2026-08-27 run printed, deliberately, so a re-run is COMPARABLE with
+  the reading that was withdrawn rather than being a second measurement of a different thing.
+
+> **SUPERSEDED 2026-08-28 (preserved, not deleted). The original list, written for the probe
+> whose third-and-beyond outcomes were all halts:**
+>
+> - `spikeDetachedGroupKill` — **this is A1.** It is exactly one of:
+>   - `grandchild-died (detached honoured)` → A1 closed favourably; the phase proceeds as planned.
+>   - `grandchild-survived (detached NOT honoured)` → the phase's POSIX mechanism is falsified.
+>     **STOP**, do not run plan 08-02, re-plan the phase.
+>   - `inconclusive (no fixture output)`, `skipped (node executable not resolved)`, or
+>     `error: <constructor name>` → **also a halt.** An unclear A1 is not a pass. Record verbatim.
+
+### The re-run's results table — empty, and empty is the honest state
+
+Filled in by plan 08-17 when the patched build is run on real hardware. Cells stay marked
+**not recorded** until then, in the same form the Control table below uses; a cell nobody
+measured must never be filled from an expectation.
+
+| Field | Value |
+|---|---|
+| Date taken | **not recorded — the patched probe has not been run** |
+| Platform | **not recorded** |
+| Caido version | **not recorded** (from Caido's own About/Settings, not from `processVersion`) |
+| Probe build | `68199fa` + `a1-probe-fix.patch` |
+| `spikeProcessKillType` | **not recorded** |
+| `spikeDetachedGroupKill` | **not recorded** — one of the three outcomes above, verbatim |
+| `spikeNote` | **not recorded** |
+| `lastOrphanReap` (step 5) | **not recorded** |
+| **Verdict** | **OPEN — A1's 2026-08-28 status, unchanged until this table is filled** |
 
 ### Step 3 — readings 3 and 4 (A6)
 
@@ -364,7 +454,29 @@ pgrep -f mcp-server.mjs | wc -l
 Record both counts. A non-zero count **after** Stop is the LIF-02 defect reproduced on real
 hardware. Clean up any survivor by pid before continuing.
 
-Do not summarise, interpret or round any of the five readings. Record what the terminal said.
+### Step 5 — reading 6: is the orphan reap inert on this runtime?
+
+**One glance, and it needs no probe build at all** — it reads a key that ships in HEAD.
+
+Open Drift → Settings → the Copy-diagnostics action and record **`lastOrphanReap`** verbatim.
+It is one of:
+
+| Value | What it means |
+|---|---|
+| `none (no orphan reap has run since this plugin load)` | Nothing has triggered a reap yet. Cancel a turn or close a session and read it again — an untriggered reap is not a reading. |
+| `kind=noop reason=enumerator-unavailable exit=… killed=0 ageMs=…` | **The reading this step exists for.** Caido's sandbox could not spawn `pgrep`, so the entire argv-marker orphan reap plans 08-06/08-07 shipped is **inert on this runtime** while every CI gate stays green. `08-VERIFICATION.md` ledger entries 14 and 15 name this as the phase's largest open risk. |
+| `kind=noop reason=no-match exit=… killed=0 ageMs=…` | The reap RAN and matched nothing. Not the same reading as the row above, and telling those two apart is the whole reason the key exists. |
+| `kind=noop reason=scan-timeout \| scan-stale \| scan-failed …` | The reap ran and the enumerator misbehaved or the sample went stale. Record the reason token. |
+| `kind=reap exit=… killed=N ageMs=…` | The reap ran and signalled N orphans. |
+| `kind=refused reason=gate-closed sessions=N directDepth=N killed=0 ageMs=0` | The idle gate refused. `sessions>0` is residual AR-07; `directDepth>0` is a Drift-owned MCP call in flight. |
+| `kind=refused reason=no-pid \| unsupported-platform \| bad-marker \| session-active …` | The scan plan itself refused before any spawn. |
+
+The key is **scalars only** — no pid, no path, no argv, no environment value — so it is safe to
+paste into a public issue exactly as it appears (threat T-08-75). It was added by plan 08-15 as
+decision **UD-01**'s resolved deliverable: diagnostics-only, no user-visible surface, zero
+frontend files.
+
+Do not summarise, interpret or round any of the six readings. Record what the terminal said.
 
 ---
 
