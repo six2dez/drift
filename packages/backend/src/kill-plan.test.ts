@@ -9,10 +9,14 @@ import {
   classifyLivenessObservation,
   classifyOrphanScanOutcome,
   DEFAULT_TASKKILL,
+  formatOrphanReapRecord,
   formatSpikeVerdict,
   hasTrackedProcessExited,
+  type KillPlanRefusal,
   type KillTreePlan,
   type LivenessVerdict,
+  type OrphanReapRecord,
+  type OrphanScanNoopReason,
   MCP_SERVER_SCRIPT_NAME,
   MCP_TEMP_DIR_PREFIX,
   parseOrphanScanPids,
@@ -1649,6 +1653,194 @@ describe("formatSpikeVerdict — an inconclusive answer never wears a verdict's 
       expect(formatSpikeVerdict({ verdict: "inconclusive", reason })).toContain(
         reason,
       );
+    }
+  });
+});
+
+// ── The orphan reap's diagnostics value (UD-01 option C, plan 08-15) ──
+//
+// WHY THIS FORMATTER IS IN `kill-plan.ts` AND NOT AT ITS CALL SITE. The reap
+// orchestrator lives in `index.ts`, which declares no `caido:plugin` alias and
+// cannot be imported by any test this project can run (Pitfall 3). A value
+// composed inline there is a value no assertion can reach — and this particular
+// value is one a user pastes into a public GitHub issue, so "no assertion can
+// reach it" is not an acceptable state for it to be in.
+//
+// WHAT THE KEY IS FOR, stated here as well as at the call site because this is
+// where the shape is fixed: `08-VERIFICATION.md` ledger entries 14 and 15 name
+// the phase's own largest risk as the orphan reap degrading silently to the
+// `enumerator-unavailable` no-op on Caido's sandbox while every gate stays
+// green. The whole point of this string is that a reader can tell THAT case
+// apart from a reap that ran and found nothing. If those two ever render the
+// same, the key answers nothing.
+describe("formatOrphanReapRecord renders one scalar-only line per reap outcome", () => {
+  // Every no-op reason in `OrphanScanNoopReason`, spelled out rather than
+  // derived, so a reason ADDED to the union without a case here shows up as a
+  // type error at the array rather than as a silently thinner census.
+  const NOOP_REASONS: OrphanScanNoopReason[] = [
+    "enumerator-unavailable",
+    "scan-timeout",
+    "scan-stale",
+    "scan-failed",
+    "no-match",
+  ];
+
+  // Every refusal `buildSessionOrphanScanPlan` / `buildPreviousRunOrphanScanPlan`
+  // can return, same rule.
+  const REFUSALS: KillPlanRefusal[] = [
+    "no-pid",
+    "unsupported-platform",
+    "bad-marker",
+    "session-active",
+  ];
+
+  it("names the kind, the exit code and the killed count for a completed reap", () => {
+    const rendered = formatOrphanReapRecord({
+      kind: "reap",
+      exitCode: 0,
+      killed: 3,
+      ageMs: 12,
+    });
+
+    expect(rendered).toContain("kind=reap");
+    expect(rendered).toContain("exit=0");
+    expect(rendered).toContain("killed=3");
+  });
+
+  // THE ONE DISTINCTION THE KEY EXISTS FOR. "The mechanism never ran on this
+  // runtime" and "the mechanism ran and matched nothing" are the two readings a
+  // bug report most needs to separate, and they are one token apart.
+  it("distinguishes the inert enumerator from a reap that ran and matched nothing", () => {
+    const inert = formatOrphanReapRecord({
+      kind: "noop",
+      reason: "enumerator-unavailable",
+      exitCode: undefined,
+      ageMs: 4,
+    });
+    const ranAndFoundNothing = formatOrphanReapRecord({
+      kind: "noop",
+      reason: "no-match",
+      exitCode: 1,
+      ageMs: 4,
+    });
+
+    expect(inert).not.toBe(ranAndFoundNothing);
+    expect(inert).toContain("enumerator-unavailable");
+    expect(ranAndFoundNothing).toContain("no-match");
+  });
+
+  // RED INPUT: a formatter that collapses two reasons onto one string — for
+  // instance by rendering only `kind=noop killed=0` — passes every case above
+  // and fails here. That collapse is precisely what would make the key unable to
+  // answer the question it was added for.
+  it("renders pairwise-distinct strings across the whole no-op reason union", () => {
+    const rendered = NOOP_REASONS.map((reason) =>
+      formatOrphanReapRecord({
+        kind: "noop",
+        reason,
+        exitCode: 1,
+        ageMs: 7,
+      }),
+    );
+
+    expect(new Set(rendered).size).toBe(NOOP_REASONS.length);
+  });
+
+  it("carries the plan builder's own refusal vocabulary for a plan refusal", () => {
+    const rendered = REFUSALS.map((reason) =>
+      formatOrphanReapRecord({ kind: "plan-refused", reason, ageMs: 0 }),
+    );
+
+    for (const [index, reason] of REFUSALS.entries()) {
+      expect(rendered[index] ?? "").toContain(reason);
+    }
+    expect(new Set(rendered).size).toBe(REFUSALS.length);
+  });
+
+  // The gate-closed refusal carries the SAME two scalars its console line
+  // already carries, and no third: `sessions>0` is AR-07, `directDepth>0` is a
+  // direct MCP call in flight or a release that never arrived.
+  it("carries the gate-closed refusal's two scalars and no more", () => {
+    const rendered = formatOrphanReapRecord({
+      kind: "gate-closed",
+      sessions: 2,
+      directDepth: 1,
+      ageMs: 0,
+    });
+
+    expect(rendered).toContain("gate-closed");
+    expect(rendered).toContain("sessions=2");
+    expect(rendered).toContain("directDepth=1");
+  });
+
+  // THE ERRORED CASE. `08-UI-SPEC.md` row E6/error flags this as the one branch
+  // with no wired evidence, because the key did not exist when the row was
+  // written: what does the value show when the reap ERRORED rather than being
+  // inert? Every non-`enumerator-unavailable` no-op reason is that case.
+  it("renders a readable, non-empty value naming the reason when the reap errored", () => {
+    for (const reason of NOOP_REASONS.filter(
+      (candidate) => candidate !== "enumerator-unavailable",
+    )) {
+      const rendered = formatOrphanReapRecord({
+        kind: "noop",
+        reason,
+        exitCode: 2,
+        ageMs: 9,
+      });
+      expect(rendered).not.toBe("");
+      expect(rendered).toContain(reason);
+    }
+  });
+
+  // SCALARS ONLY (T-08-75). A diagnostics key is a support-bundle key, and a
+  // support bundle is pasted into public issues. The formatter must be a
+  // WHITELIST over the fields it knows, never a generic serializer: every record
+  // below is handed a pid-shaped number, a pid ARRAY and an absolute path in
+  // fields the formatter must not read, and none of them may appear.
+  //
+  // RED INPUT: implement the formatter as `JSON.stringify(record)`, or
+  // interpolate the pid field into any arm, and every case below fails naming
+  // the leaked value.
+  it("leaks no pid, no pid list and no path into any outcome's value", () => {
+    const PID_SHAPED = 443921;
+    const LEAKY_PATH = "/tmp/drift-mcp-deadbeefcafe";
+    const contaminate = (record: OrphanReapRecord): OrphanReapRecord =>
+      ({
+        ...record,
+        pid: PID_SHAPED,
+        pids: [PID_SHAPED],
+        tempDir: LEAKY_PATH,
+      }) as unknown as OrphanReapRecord;
+
+    const records: OrphanReapRecord[] = [
+      { kind: "reap", exitCode: 0, killed: 2, ageMs: 11 },
+      { kind: "gate-closed", sessions: 1, directDepth: 0, ageMs: 0 },
+      ...NOOP_REASONS.map(
+        (reason): OrphanReapRecord => ({
+          kind: "noop",
+          reason,
+          exitCode: 1,
+          ageMs: 5,
+        }),
+      ),
+      ...REFUSALS.map(
+        (reason): OrphanReapRecord => ({
+          kind: "plan-refused",
+          reason,
+          ageMs: 0,
+        }),
+      ),
+    ];
+
+    for (const record of records) {
+      const rendered = formatOrphanReapRecord(contaminate(record));
+      expect(rendered).not.toContain(String(PID_SHAPED));
+      expect(rendered).not.toContain(LEAKY_PATH);
+      // No path separator of either dialect, and therefore no `=` followed by
+      // an absolute path — the rendering rule the reap's own log line obeys.
+      expect(rendered).not.toContain("/");
+      expect(rendered).not.toContain("\\");
+      expect(rendered).not.toMatch(/=\s*[/\\]/);
     }
   });
 });
