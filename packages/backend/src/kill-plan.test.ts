@@ -2,13 +2,17 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildKillTreePlan,
+  buildLivenessProbePlan,
   buildOrphanKillPlan,
   buildPreviousRunOrphanScanPlan,
   buildSessionOrphanScanPlan,
+  classifyLivenessObservation,
   classifyOrphanScanOutcome,
   DEFAULT_TASKKILL,
+  formatSpikeVerdict,
   hasTrackedProcessExited,
   type KillTreePlan,
+  type LivenessVerdict,
   MCP_SERVER_SCRIPT_NAME,
   MCP_TEMP_DIR_PREFIX,
   parseOrphanScanPids,
@@ -1088,6 +1092,563 @@ describe("shouldReapSessionOrphans — only a pair of exact zeros opens the idle
           directMcpCallDepth: bad,
         }),
       ).toBe(false);
+    }
+  });
+});
+
+// ── The three-valued liveness determination (08-VERIFICATION.md gap 1) ──
+//
+// WHAT THESE CASES ARE FOR, STATED BEFORE ANY OF THEM. The Wave-0 probe at
+// commit 68199fa decided assumption A1 with
+//
+//   const alive = signalRef.process?.kill?.(grandchildPid, 0) ?? false;
+//
+// on a runtime where the SAME diagnostics run measured
+// `spikeProcessKillType: "undefined"`. With `process.kill` absent the optional
+// chain yields `undefined`, `?? false` makes `alive === false`, and the
+// favourable string `grandchild-died (detached honoured)` was emitted
+// UNCONDITIONALLY. That reading was RETRACTED on 2026-08-28: the probe could not
+// print the other string on the runtime it ran on, so the red input did not
+// exist and the reading carries no information.
+//
+// The defect is not the probe's plumbing, it is its DECISION: a "cannot tell"
+// answer coalesced into a verdict. So the decision lives in a pure function
+// here, where a case can reach it — the same argument that put the pid refusal
+// in `buildKillTreePlan` rather than at its call site.
+//
+// The pid every case uses is 44284, the `mcp-server.mjs` child A6 measured on
+// 2026-08-27, chosen because 4428 and 442840 are its adjacency traps.
+const PROBE_PID = 44284;
+
+// The two strings the 2026-08-27 run produced, pinned BYTE-IDENTICALLY so a
+// re-run on fixed hardware is comparable with the withdrawn one. Changing either
+// silently would make the old and new readings incomparable.
+const FAVOURABLE = "grandchild-died (detached honoured)";
+const UNFAVOURABLE = "grandchild-survived (detached NOT honoured)";
+
+describe("classifyLivenessObservation — every unanswerable shape is inconclusive, never dead", () => {
+  // RED INPUT for this case, and it is the ORIGINAL DEFECT verbatim: implement
+  // the unspawnable arm as a coalescing operator over an unavailable primitive
+  // (`?? false` → "not alive" → `dead`) and this case goes red. That single
+  // expression is what produced gap 1.
+  it("reports inconclusive when the enumerator could not be spawned at all", () => {
+    const observed = classifyLivenessObservation({
+      spawnThrew: true,
+      exitCode: undefined,
+      timedOut: false,
+      stdout: "",
+      pid: PROBE_PID,
+    });
+
+    expect(observed.verdict).toBe("inconclusive");
+    expect(observed.reason).toBe("enumerator-unavailable");
+  });
+
+  it("reports inconclusive on a timed-out probe rather than assuming absence", () => {
+    // A probe that did not finish measured nothing. Folding it into `dead` is
+    // the same class of error as the one above, one arm to the right.
+    const observed = classifyLivenessObservation({
+      spawnThrew: false,
+      exitCode: undefined,
+      timedOut: true,
+      stdout: `${String(PROBE_PID)} S`,
+      pid: PROBE_PID,
+    });
+
+    expect(observed.verdict).toBe("inconclusive");
+    expect(observed.reason).toBe("probe-timeout");
+  });
+
+  it("reports inconclusive for an absent or a null exit code", () => {
+    // `undefined` is what Caido's LLRT `ChildProcess` leaves — it defines `pid`
+    // and `kill` and nothing else — and `null` is what a signalled child leaves
+    // under Node. Neither is an enumeration result.
+    for (const exitCode of [undefined, null] as const) {
+      const observed = classifyLivenessObservation({
+        spawnThrew: false,
+        exitCode,
+        timedOut: false,
+        stdout: `${String(PROBE_PID)} S`,
+        pid: PROBE_PID,
+      });
+
+      expect(observed.verdict).toBe("inconclusive");
+      expect(observed.reason).toBe("no-exit-code");
+    }
+  });
+
+  it("reports inconclusive for an exit code the enumerator's contract does not define", () => {
+    // `ps` documents 0 (matched) and 1 (no match). 2 is a usage error and 127 is
+    // "command not found" from a shell that resolved something else — both mean
+    // the instrument misbehaved, and a misbehaving instrument is not evidence of
+    // absence.
+    for (const exitCode of [2, 127, -1]) {
+      const observed = classifyLivenessObservation({
+        spawnThrew: false,
+        exitCode,
+        timedOut: false,
+        stdout: "",
+        pid: PROBE_PID,
+      });
+
+      expect(observed.verdict).toBe("inconclusive");
+      expect(observed.reason).toBe("unrecognised-exit-code");
+    }
+  });
+
+  it("reports inconclusive for an unusable pid, before any output is read", () => {
+    // The same four shapes `isUnusablePid` refuses everywhere else in this
+    // module. A classifier asked about a pid that cannot exist has not learned
+    // that the process is gone.
+    for (const pid of [undefined, Number.NaN, 0, -1, 1.5]) {
+      const observed = classifyLivenessObservation({
+        spawnThrew: false,
+        exitCode: 0,
+        timedOut: false,
+        stdout: "44284 S",
+        pid,
+      });
+
+      expect(observed.verdict).toBe("inconclusive");
+      expect(observed.reason).toBe("unusable-pid");
+    }
+  });
+});
+
+describe("classifyLivenessObservation — the two arms that positively establish absence, and the one that establishes presence", () => {
+  it("reports alive for a matching row whose state is not a zombie", () => {
+    const observed = classifyLivenessObservation({
+      spawnThrew: false,
+      exitCode: 0,
+      timedOut: false,
+      stdout: "44284 S\n",
+      pid: PROBE_PID,
+    });
+
+    expect(observed).toEqual({ verdict: "alive", reason: "matched-running" });
+  });
+
+  it("reports dead for a matching row whose state marks it a zombie", () => {
+    // A zombie has left the process table's live population but not its entry.
+    // `ps` still prints the row, so a presence test on the row alone would call
+    // a reaped grandchild alive.
+    const observed = classifyLivenessObservation({
+      spawnThrew: false,
+      exitCode: 0,
+      timedOut: false,
+      stdout: "44284 Z+\n",
+      pid: PROBE_PID,
+    });
+
+    expect(observed).toEqual({ verdict: "dead", reason: "matched-zombie" });
+  });
+
+  it("reports dead for a successful non-match — exit 1 with nothing printed", () => {
+    // `ps -p <pid>` exits 1 with empty output when the pid is not in the table.
+    // This is the ONE negative outcome that carries information, and it is the
+    // reason the probe spawns an enumerator instead of calling a primitive the
+    // sandbox does not supply.
+    const observed = classifyLivenessObservation({
+      spawnThrew: false,
+      exitCode: 1,
+      timedOut: false,
+      stdout: "",
+      pid: PROBE_PID,
+    });
+
+    expect(observed).toEqual({ verdict: "dead", reason: "successful-non-match" });
+  });
+
+  it("reports inconclusive when a successful exit prints nothing", () => {
+    // An enumerator that reports success and prints no row is contradicting
+    // itself. That is not evidence of absence, and coalescing it into `dead`
+    // would rebuild gap 1 out of a different operator.
+    const observed = classifyLivenessObservation({
+      spawnThrew: false,
+      exitCode: 0,
+      timedOut: false,
+      stdout: "",
+      pid: PROBE_PID,
+    });
+
+    expect(observed).toEqual({
+      verdict: "inconclusive",
+      reason: "contradictory-output",
+    });
+  });
+
+  it("reports inconclusive for stdout carrying only blank or whitespace lines", () => {
+    for (const stdout of ["\n", " ", "   \n\n", "\r\n"]) {
+      const observed = classifyLivenessObservation({
+        spawnThrew: false,
+        exitCode: 0,
+        timedOut: false,
+        stdout,
+        pid: PROBE_PID,
+      });
+
+      expect(observed.verdict).toBe("inconclusive");
+    }
+  });
+
+  it("reports inconclusive when a NON-match exit code arrives WITH a matching row", () => {
+    // The instrument said "no such process" and then printed the process. Both
+    // halves cannot be true, so neither is trusted.
+    const observed = classifyLivenessObservation({
+      spawnThrew: false,
+      exitCode: 1,
+      timedOut: false,
+      stdout: "44284 S\n",
+      pid: PROBE_PID,
+    });
+
+    expect(observed.verdict).toBe("inconclusive");
+  });
+});
+
+describe("classifyLivenessObservation — a pid is compared as a NUMBER, never as a substring (adjacency)", () => {
+  // RED INPUT: replace the pid comparison with `line.includes(String(pid))` or
+  // any other containment check and both rows below are read as matches, so the
+  // first assertion returns `alive` for a process that is not the target. 4428
+  // is a PREFIX of 44284 and 442840 is a row whose text CONTAINS it; neither
+  // answers anything about 44284.
+  it("does not treat a prefix, suffix or substring pid as the requested pid", () => {
+    for (const stdout of ["4428 S\n", "442840 S\n", "144284 S\n", "4428 Z\n"]) {
+      const observed = classifyLivenessObservation({
+        spawnThrew: false,
+        exitCode: 0,
+        timedOut: false,
+        stdout,
+        pid: PROBE_PID,
+      });
+
+      expect(observed.verdict).not.toBe("alive");
+      expect(observed.verdict).not.toBe("dead");
+      expect(observed.verdict).toBe("inconclusive");
+    }
+  });
+
+  it("still reaches the successful-non-match arm when the only rows are adjacent pids", () => {
+    // The other direction of the same comparison: exit 1 plus rows that are NOT
+    // the target is a genuine non-match, so it must stay `dead`. A comparison
+    // loose enough to match 4428 would make this `inconclusive` instead and
+    // silently disable the probe's one informative negative.
+    const observed = classifyLivenessObservation({
+      spawnThrew: false,
+      exitCode: 1,
+      timedOut: false,
+      stdout: "4428 S\n442840 S\n",
+      pid: PROBE_PID,
+    });
+
+    expect(observed).toEqual({ verdict: "dead", reason: "successful-non-match" });
+  });
+});
+
+describe("classifyLivenessObservation — the row is found by pid equality anywhere in stdout, not by line index (ordering)", () => {
+  // RED INPUT: read `stdout.split("\n")[0]` instead of scanning every line and
+  // every case below returns `inconclusive`, because on a real host the first
+  // line is as often a header, a warning or a blank as it is the row.
+  it("finds the matching row after a leading blank line", () => {
+    const observed = classifyLivenessObservation({
+      spawnThrew: false,
+      exitCode: 0,
+      timedOut: false,
+      stdout: "\n44284 S\n",
+      pid: PROBE_PID,
+    });
+
+    expect(observed).toEqual({ verdict: "alive", reason: "matched-running" });
+  });
+
+  it("finds the matching row last, after two lines of noise", () => {
+    const observed = classifyLivenessObservation({
+      spawnThrew: false,
+      exitCode: 0,
+      timedOut: false,
+      stdout: "ps: warning: procfs unavailable\n\n  44284 S\n",
+      pid: PROBE_PID,
+    });
+
+    expect(observed).toEqual({ verdict: "alive", reason: "matched-running" });
+  });
+
+  it("yields the SAME verdict wherever the matching row sits", () => {
+    // Asserted as an equality between three positions rather than three
+    // independent expectations, so a partial line scan cannot satisfy one
+    // ordering and quietly fail another.
+    const positions = [
+      "44284 S\n",
+      "\n44284 S\n",
+      "ps: warning\nnoise\n44284 S\n",
+      "44284 S\ntrailing noise\n",
+    ];
+    const verdicts = positions.map(
+      (stdout) =>
+        classifyLivenessObservation({
+          spawnThrew: false,
+          exitCode: 0,
+          timedOut: false,
+          stdout,
+          pid: PROBE_PID,
+        }).verdict,
+    );
+
+    expect(verdicts).toEqual(["alive", "alive", "alive", "alive"]);
+  });
+
+  it("skips a line that does not begin with a decimal integer instead of reading it as a negative answer", () => {
+    // A noise line is NOISE. Treating "no parseable row on this line" as "the
+    // process is gone" is the coalescing defect again, in the parser.
+    const observed = classifyLivenessObservation({
+      spawnThrew: false,
+      exitCode: 0,
+      timedOut: false,
+      stdout: "PID STAT\nps: some warning\n",
+      pid: PROBE_PID,
+    });
+
+    expect(observed.verdict).toBe("inconclusive");
+  });
+});
+
+// ── TOTALITY over the classifier's whole input domain ───────────────────
+//
+// THE CASE THAT CANNOT BE SATISFIED BY A DEFAULT. Every case above names one
+// shape; this one enumerates the cartesian product of `spawnThrew`, `timedOut`,
+// five exit codes and six stdout shapes — 120 combinations — and re-derives the
+// expected verdict from the CONTRACT rather than from the implementation. Any
+// classifier that reaches a definite verdict through a default arm or a
+// coalescing operator disagrees on at least one combination.
+const TOTALITY_STDOUTS = [
+  { label: "empty", stdout: "", matching: "none" },
+  { label: "a single blank line", stdout: "\n", matching: "none" },
+  { label: "a matching running row", stdout: "44284 S\n", matching: "running" },
+  { label: "a matching zombie row", stdout: "44284 Z\n", matching: "zombie" },
+  { label: "an adjacent (4428) row", stdout: "4428 S\n", matching: "none" },
+  {
+    label: "a matching row after noise",
+    stdout: "ps: warning\n\n  44284 S\n",
+    matching: "running",
+  },
+] as const;
+
+const TOTALITY_EXIT_CODES = [0, 1, 2, null, undefined] as const;
+
+// The contract, re-stated independently of the implementation.
+function expectedVerdict(input: {
+  spawnThrew: boolean;
+  timedOut: boolean;
+  exitCode: number | null | undefined;
+  matching: "none" | "running" | "zombie";
+}): LivenessVerdict {
+  if (input.spawnThrew) return "inconclusive";
+  if (input.timedOut) return "inconclusive";
+  if (input.exitCode !== 0 && input.exitCode !== 1) return "inconclusive";
+  if (input.exitCode === 0) {
+    if (input.matching === "running") return "alive";
+    if (input.matching === "zombie") return "dead";
+    return "inconclusive";
+  }
+  // exit 1 — the documented no-match code. A row for the target contradicts it.
+  return input.matching === "none" ? "dead" : "inconclusive";
+}
+
+describe("classifyLivenessObservation — TOTALITY: a definite verdict is reachable ONLY from the enumerated confident shapes", () => {
+  it("agrees with the contract on every one of the 120 combinations", () => {
+    let combinations = 0;
+    for (const spawnThrew of [true, false]) {
+      for (const timedOut of [true, false]) {
+        for (const exitCode of TOTALITY_EXIT_CODES) {
+          for (const shape of TOTALITY_STDOUTS) {
+            combinations += 1;
+            const observed = classifyLivenessObservation({
+              spawnThrew,
+              exitCode,
+              timedOut,
+              stdout: shape.stdout,
+              pid: PROBE_PID,
+            });
+            expect({
+              spawnThrew,
+              timedOut,
+              exitCode,
+              shape: shape.label,
+              verdict: observed.verdict,
+            }).toEqual({
+              spawnThrew,
+              timedOut,
+              exitCode,
+              shape: shape.label,
+              verdict: expectedVerdict({
+                spawnThrew,
+                timedOut,
+                exitCode,
+                matching: shape.matching,
+              }),
+            });
+          }
+        }
+      }
+    }
+
+    expect(combinations).toBe(120);
+  });
+
+  it("reaches a definite verdict on exactly 6 of the 120 combinations — 2 alive, 4 dead", () => {
+    // The number is asserted rather than described, because it is the machine
+    // form of "the answer is inconclusive unless something positively said
+    // otherwise". A classifier with a definite default drives this count up;
+    // one hardwired to refuse drives it to zero, which is why both directions
+    // are pinned.
+    const counts: Record<LivenessVerdict, number> = {
+      alive: 0,
+      dead: 0,
+      inconclusive: 0,
+    };
+    for (const spawnThrew of [true, false]) {
+      for (const timedOut of [true, false]) {
+        for (const exitCode of TOTALITY_EXIT_CODES) {
+          for (const shape of TOTALITY_STDOUTS) {
+            counts[
+              classifyLivenessObservation({
+                spawnThrew,
+                exitCode,
+                timedOut,
+                stdout: shape.stdout,
+                pid: PROBE_PID,
+              }).verdict
+            ] += 1;
+          }
+        }
+      }
+    }
+
+    expect(counts).toEqual({ alive: 2, dead: 4, inconclusive: 114 });
+  });
+});
+
+describe("buildLivenessProbePlan — the refusal ladder buildOrphanKillPlan already states", () => {
+  const REFUSED_PROBE_PIDS = [
+    { label: "an undefined pid", pid: undefined },
+    { label: "NaN", pid: Number.NaN },
+    { label: "0 — every process in Drift's own group", pid: 0 },
+    { label: "-1 — already a group reference", pid: -1 },
+    { label: "1.5 — a non-integer cannot be a pid", pid: 1.5 },
+  ];
+
+  it.each(REFUSED_PROBE_PIDS)("refuses $label with no-pid and no argv", ({ pid }) => {
+    for (const platform of POSIX_PLATFORMS) {
+      const plan = buildLivenessProbePlan({ pid, platform });
+      expect(plan).toEqual({ kind: "none", reason: "no-pid" });
+      expect(plan).not.toHaveProperty("file");
+      expect(plan).not.toHaveProperty("args");
+    }
+  });
+
+  it("refuses win32 with unsupported-platform and no argv at all", () => {
+    // Same reason `buildSessionOrphanScanPlan` refuses it: there is no
+    // command-line-bearing enumerator on Windows this phase is willing to spawn,
+    // and A1 is a POSIX assumption in the first place.
+    const plan = buildLivenessProbePlan({ pid: PROBE_PID, platform: "win32" });
+
+    expect(plan).toEqual({ kind: "none", reason: "unsupported-platform" });
+    expect(plan).not.toHaveProperty("file");
+    expect(plan).not.toHaveProperty("args");
+  });
+});
+
+describe("buildLivenessProbePlan — a POSITIVE single-pid operand, never a group (GD-01)", () => {
+  it("emits the decimal pid as a positive operand on darwin, linux and an undefined platform", () => {
+    // RED INPUT: render the operand as `-${pid}`, or add any process-group
+    // reference to this argv, and this case goes red. A1 is about whether a
+    // group EXISTS; a probe that asks the question with a group reference cannot
+    // answer it.
+    for (const platform of POSIX_PLATFORMS) {
+      const plan = expectSpawn(buildLivenessProbePlan({ pid: PROBE_PID, platform }));
+
+      expect(plan.args).toContain("44284");
+      expect(plan.args).not.toContain("-44284");
+      expect(plan.windowsVerbatimArguments).toBe(false);
+      for (const argument of plan.args) {
+        // A leading minus followed by digits is the group-reference spelling.
+        // `-o` and `-p` are switches and are unaffected.
+        expect(/^-\d/.test(argument)).toBe(false);
+      }
+    }
+  });
+
+  it("spawns a process-table enumerator that prints the pid and the process state", () => {
+    // The two fields the classifier reads have to be the two fields the argv
+    // asks for, or the parser is scanning a format nobody produces.
+    const plan = expectSpawn(
+      buildLivenessProbePlan({ pid: PROBE_PID, platform: "darwin" }),
+    );
+
+    expect(plan.file).toBe("ps");
+    expect(plan.args).toEqual(["-o", "pid=,state=", "-p", "44284"]);
+  });
+});
+
+describe("formatSpikeVerdict — an inconclusive answer never wears a verdict's clothes", () => {
+  // RED INPUT: make the `inconclusive` branch fall through to either verdict's
+  // string and the pairwise-distinctness case and the shares-no-verdict-word
+  // case both go red. This is the defect being corrected, reduced to its
+  // smallest form: gap 1 was an inconclusive answer rendered as a verdict.
+  it("renders the FAVOURABLE string for dead, byte-identical to the 2026-08-27 run", () => {
+    expect(
+      formatSpikeVerdict({ verdict: "dead", reason: "successful-non-match" }),
+    ).toContain(FAVOURABLE);
+  });
+
+  it("renders the UNFAVOURABLE string for alive, byte-identical to the 2026-08-27 run", () => {
+    expect(
+      formatSpikeVerdict({ verdict: "alive", reason: "matched-running" }),
+    ).toContain(UNFAVOURABLE);
+  });
+
+  it("renders inconclusive sharing no verdict word with either outcome, and names the reason", () => {
+    const rendered = formatSpikeVerdict({
+      verdict: "inconclusive",
+      reason: "enumerator-unavailable",
+    });
+
+    // The four words a reader would use to decide the question. None may appear.
+    for (const verdictWord of ["died", "survived", "honoured", "NOT honoured"]) {
+      expect(rendered).not.toContain(verdictWord);
+    }
+    expect(rendered).toContain("inconclusive");
+    expect(rendered).toContain("enumerator-unavailable");
+  });
+
+  it("renders three pairwise-distinct strings across the three verdicts", () => {
+    const rendered = [
+      formatSpikeVerdict({ verdict: "alive", reason: "matched-running" }),
+      formatSpikeVerdict({ verdict: "dead", reason: "successful-non-match" }),
+      formatSpikeVerdict({
+        verdict: "inconclusive",
+        reason: "enumerator-unavailable",
+      }),
+    ];
+
+    expect(new Set(rendered).size).toBe(3);
+  });
+
+  it("names the reason for every inconclusive reason the classifier can produce", () => {
+    // A formatter that named only the reason its own test used would let the
+    // other four render as a bare word with no cause attached.
+    const reasons = [
+      "enumerator-unavailable",
+      "probe-timeout",
+      "no-exit-code",
+      "unrecognised-exit-code",
+      "unusable-pid",
+      "contradictory-output",
+    ] as const;
+    for (const reason of reasons) {
+      expect(formatSpikeVerdict({ verdict: "inconclusive", reason })).toContain(
+        reason,
+      );
     }
   });
 });
