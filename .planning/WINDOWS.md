@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 11
+open_count: 12
 waived_count: 0
 fixed_count: 9
-total_count: 20
-last_updated: 2026-08-28T09:25:02.483Z
+total_count: 21
+last_updated: 2026-08-28T10:06:12.399Z
 ---
 
 # Broken Windows Ledger
@@ -35,6 +35,7 @@ last_updated: 2026-08-28T09:25:02.483Z
 | 18 | 08 | deviation | packages/backend/src/index.ts |  | Plan 08-09's exact-count criterion grep -c '0o700' index.ts is comment-sensitive: a 'why' comment mentioning the octal moves it with no behavioural change. Satisfied by rephrasing; executable (comment-stripped) count measured separately at 4 -> 4. Specify over the comment-stripped stream if it recurs. | open |  | 2026-08-27T13:06:17.978Z |  |
 | 19 | 08 | deviation | .planning/phases/08-process-lifecycle/08-10-PLAN.md |  | 08-10 Task 1's acceptance criterion states its scoped seven-carrier verify 'returns 12 against the uncorrected tree'; measured 7 at this plan's start. The 12 was taken BEFORE plan 08-06 block-quoted the three source carriers, which moved 5 hits inside quotes where the strip removes them. Not a vacuous gate — 7 != 0, so it was still red and still proved the work — but it is the FIFTH wrong census figure in a plan whose own thesis is that enumerated censuses cannot be trusted, which is exactly why verdict-gate.sh consumes no count. | open |  | 2026-08-27T13:30:26.477Z |  |
 | 20 | 08 | deviation | packages/backend/src/index.ts |  | Fourteenth vacuous gate in Phase 8, and the first that shipped as a READING rather than as a green tick. The A1 probe at the recoverable commit 68199fa (index.ts:5061) decided the verdict with 'const alive = signalRef.process?.kill?.(grandchildPid, 0) ?? false', an optional call on a primitive the SAME diagnostics run measured ABSENT five lines earlier ('spikeProcessKillType: undefined'); the absent case was coalesced to 'not alive', so the favourable string 'grandchild-died (detached honoured)' was emitted UNCONDITIONALLY. THE RED INPUT DID NOT EXIST. WHAT MAKES THIS INSTANCE DIFFERENT FROM THE TWELVE ALREADY RECORDED (entries 16, 17, 18, 19 and the self-reports in this phase's SUMMARYs): those produced a green tick, which a reviewer distrusts by habit; this one produced a plausible-looking hardware READING, which reviewers propagate. It propagated into eleven carriers, .planning/ROADMAP.md, .planning/REQUIREMENTS.md, four phase documents, three source files and this ledger's own entry 11, and was pinned there by verdict-gate.sh ARM B before anybody re-derived it. FIXED IN CODE: classifyLivenessObservation in packages/backend/src/kill-plan.ts (plan 08-12) is three-valued - alive / dead / inconclusive - and reports inconclusive when the liveness primitive is unavailable instead of coalescing it into a verdict. WHAT STILL CLOSES THIS ENTRY: the A1 re-run on real hardware with the fixed probe, owned by plan 08-17. Recording the defect is not fixing the measurement. | open |  | 2026-08-28T09:25:02.483Z |  |
+| 21 | 8 | deviation | packages/backend/src/index.ts |  | Plan 08-15 Task 1 acceptance criterion 'comment-stripped grep -c lastOrphanReap in index.ts is >= 5 after' MEASURED 4, not >= 5. The natural implementation the plan's own action describes (one declaration, one writer, one surfaced key with the ?? idiom) has exactly four occurrences; every route to five was padding. Reported rather than padded. The mechanism count (recordOrphanReapOutcome, 5 comment-stripped lines) does clear the floor. Fifteenth criterion-shape defect recorded in Phase 8, and the first recorded as UNDER-measuring rather than as vacuous. | open |  | 2026-08-28T10:06:12.399Z |  |
 
 ````json
 [
@@ -276,6 +277,18 @@ last_updated: 2026-08-28T09:25:02.483Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-08-28T09:25:02.483Z",
+    "resolved_at": null
+  },
+  {
+    "id": 21,
+    "kind": "deviation",
+    "phase": "8",
+    "file": "packages/backend/src/index.ts",
+    "line": null,
+    "description": "Plan 08-15 Task 1 acceptance criterion 'comment-stripped grep -c lastOrphanReap in index.ts is >= 5 after' MEASURED 4, not >= 5. The natural implementation the plan's own action describes (one declaration, one writer, one surfaced key with the ?? idiom) has exactly four occurrences; every route to five was padding. Reported rather than padded. The mechanism count (recordOrphanReapOutcome, 5 comment-stripped lines) does clear the floor. Fifteenth criterion-shape defect recorded in Phase 8, and the first recorded as UNDER-measuring rather than as vacuous.",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-08-28T10:06:12.399Z",
     "resolved_at": null
   }
 ]
