@@ -646,3 +646,11 @@ the membership rule; T-08-54 accepted as recorded.
 Wave 6 complete. The gate is fixed and its output is the worklist. Ready for the plans that depend
 on it: **08-12** (source carriers), **08-13** (ROADMAP + REQUIREMENTS), **08-14** (WINDOWS, STATE,
 UAT, VALIDATION, SECURITY).
+
+## Self-Check: PASSED
+
+- `verdict-gate.sh`, `08-SPIKE.md`, `08-11-SUMMARY.md` all present on disk.
+- Commits `015d9da`, `9476d25`, `e9b2842`, `bdf2234` all present in `git log --all`.
+- Gate re-run with this SUMMARY on disk: 3 `== ARM ` headers, **ARM C failures: 0** (the
+  membership rule works in production, not only on the fixture), ARM A names 10 files, and
+  `08-SPIKE.md` appears 0 times.

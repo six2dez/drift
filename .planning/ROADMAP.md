@@ -314,7 +314,7 @@ Plans:
   4. Session finalize / `stopMcpServer` kills all tracked pids before sweeping the temp dir, so token-bearing processes die before their env-source files are removed.
   5. macOS/Linux cancellation and timeout semantics visible to the user are unchanged and existing tests stay green.
 
-**Plans**: 17 plans (10/10 executed; 7 gap-closure plans added 2026-08-28 from `08-VERIFICATION.md`)
+**Plans**: 11/17 plans executed (10/10 executed; 7 gap-closure plans added 2026-08-28 from `08-VERIFICATION.md`)
 
 Plans:
 **Wave 1**
@@ -364,7 +364,7 @@ Plans:
 
 **Gap Wave 6** *(gap-closure set; the instrument before any carrier — `08-VERIFICATION.md` gap 1 `missing` item 1 is explicit that the gate must be fixed FIRST)*
 
-- [ ] 08-11-PLAN.md — Tracer: re-point `verdict-gate.sh` at A1's actual verdict with both scans given a demonstrated red input, keep ARM A's fail-closed discovery shape, then land the retraction in `08-SPIKE.md` and watch that carrier drop out of the gate's own output (LIF-01, LIF-02)
+- [x] 08-11-PLAN.md — Tracer: re-point `verdict-gate.sh` at A1's actual verdict with both scans given a demonstrated red input, keep ARM A's fail-closed discovery shape, then land the retraction in `08-SPIKE.md` and watch that carrier drop out of the gate's own output (LIF-01, LIF-02)
 
 **Gap Wave 7** *(blocked on Gap Wave 6; three carrier plans with no file overlap, parallel — so none of them can assert the gate exits 0: whichever finishes first still sees its siblings' carriers named by ARM A)*
 
@@ -509,7 +509,7 @@ Parallelism opportunities: Phase 2 may run alongside Phase 3 (both depend only o
 | 5. Kill Shell Wrappers | 6/6 | Complete   | 2026-08-20 |
 | 6. Windows Command Resolution | 7/7 | Complete    | 2026-08-21 |
 | 7. Provider Spawn & Registration | 0/3 | Not started | - |
-| 8. Process Lifecycle | 10/10 | In Progress|  |
+| 8. Process Lifecycle | 11/17 | In Progress|  |
 | 9. CI Hardening | 0/1 | Not started | - |
 | 10. Windows Polish | 0/1 | Not started | - |
 | 11. Plugin Capability Discovery | 0/3 | Not started | - |
