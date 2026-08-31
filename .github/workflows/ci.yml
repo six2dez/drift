@@ -274,25 +274,45 @@ jobs:
           report="$RUNNER_TEMP/win32-kill-tree-report.json"
           pnpm exec vitest run packages/backend/src/kill-tree.win32.test.ts \
             --reporter=json --outputFile="$report"
-          # Three conditions, and each one fails a different way of going green
-          # with nothing executed: pending>0 is the skipIf still gating; total=0
-          # is the file no longer being collected at all (a glob or path change);
-          # passed<total is a real failure the reporter would otherwise let
-          # through, since this step reads the file rather than the exit status.
+          # Exact count plus exact behavioural identity. A positive lower bound
+          # is vacuous here: deleting the tree-termination case used to leave the
+          # path-resolution measurement as one passing test and the gate green.
           node -e '
             const fs = require("fs");
             const report = JSON.parse(fs.readFileSync(process.argv[1], "utf-8"));
+            const expectedTotal = 2;
+            const behavioralFullName = "win32 process-tree termination (LIF-01) the plan\u0027s argv brings down a real process tree";
             const passed = report.numPassedTests ?? 0;
             const pending = report.numPendingTests ?? 0;
             const total = report.numTotalTests ?? 0;
-            if (pending > 0 || total === 0 || passed !== total) {
+            const assertions = (report.testResults ?? []).flatMap((result) =>
+              Array.isArray(result.assertionResults) ? result.assertionResults : []
+            );
+            const behavioral = assertions.filter(
+              (assertion) => assertion.fullName === behavioralFullName
+            );
+            if (
+              pending !== 0 ||
+              total !== expectedTotal ||
+              passed !== expectedTotal ||
+              behavioral.length !== 1 ||
+              behavioral.some((assertion) => assertion.status !== "passed")
+            ) {
               console.error(
                 "Gate failed: the win32 kill-tree suite did not execute cleanly on this host " +
-                  JSON.stringify({ passed, pending, total })
+                  JSON.stringify({
+                    passed,
+                    pending,
+                    total,
+                    behavioralMatches: behavioral.length,
+                    behavioralStatuses: behavioral.map((assertion) => assertion.status),
+                  })
               );
               process.exit(1);
             }
-            console.log("Gate passed: the win32 kill-tree suite ran " + total + " tests on this host.");
+            console.log(
+              "Gate passed: the win32 kill-tree suite ran both expected tests, including the behavioural process-tree termination case."
+            );
           ' "$report"
 
       # The one step this whole leg exists for on top of the suite: `pnpm build`

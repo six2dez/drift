@@ -22,11 +22,9 @@ import { describe, expect, it } from "vitest";
 // silent as the failure it prevents. This suite runs on every platform, which is
 // the point — the Linux legs are where a deleted gate gets noticed.
 //
-// What it cannot do, stated plainly: it asserts the gate's PRESENCE and that it
-// points at a file that exists. It does not run the gate. The gate's own
-// behaviour is exercised only on the Windows runner, and its three-arm shape is
-// copied unchanged from the Phase 7 step whose arms were checked by hand against
-// four report shapes.
+// What it cannot do, stated plainly: it asserts the gate's PRESENCE, report
+// predicate and target file. It does not run the Windows behaviour. The native
+// process-tree case still executes only on the Windows runner.
 
 const repoRoot = new URL("../../../", import.meta.url);
 const ciWorkflow = readFileSync(
@@ -47,6 +45,43 @@ const KILL_TREE_GATE_STEP = "Gate: the win32 kill-tree suite actually ran";
 const KILL_TREE_REPORT = "win32-kill-tree-report.json";
 const SPAWN_PLAN_GATE_STEP = "Gate: the win32 spawn-plan suite actually ran";
 const SPAWN_PLAN_REPORT = "win32-report.json";
+const EXPECTED_KILL_TREE_TEST_COUNT = 2;
+const KILL_TREE_BEHAVIORAL_TEST_FULL_NAME =
+  "win32 process-tree termination (LIF-01) the plan's argv brings down a real process tree";
+
+type KillTreeJsonReport = {
+  numPassedTests?: number;
+  numPendingTests?: number;
+  numTotalTests?: number;
+  testResults?: Array<{
+    assertionResults?: Array<{ fullName?: string; status?: string }>;
+  }>;
+};
+
+function validateKillTreeReport(report: KillTreeJsonReport): string[] {
+  const failures: string[] = [];
+  const passed = report.numPassedTests ?? 0;
+  const pending = report.numPendingTests ?? 0;
+  const total = report.numTotalTests ?? 0;
+  if (
+    pending !== 0 ||
+    total !== EXPECTED_KILL_TREE_TEST_COUNT ||
+    passed !== EXPECTED_KILL_TREE_TEST_COUNT
+  ) {
+    failures.push("exact-count");
+  }
+  const assertions = (report.testResults ?? []).flatMap(
+    (result) => result.assertionResults ?? [],
+  );
+  const behavioral = assertions.filter(
+    (assertion) =>
+      assertion.fullName === KILL_TREE_BEHAVIORAL_TEST_FULL_NAME,
+  );
+  if (behavioral.length !== 1 || behavioral[0]?.status !== "passed") {
+    failures.push("behavioral-test");
+  }
+  return failures;
+}
 
 function extractNamedStep(workflow: string, name: string): string {
   const marker = `      - name: '${name}'`;
@@ -63,9 +98,13 @@ function validateKillTreeGateStep(step: string): string[] {
     "--reporter=json",
     `report="$RUNNER_TEMP/${KILL_TREE_REPORT}"`,
     '--outputFile="$report"',
-    "pending > 0",
-    "total === 0",
-    "passed !== total",
+    "const expectedTotal = 2;",
+    `const behavioralFullName = "${KILL_TREE_BEHAVIORAL_TEST_FULL_NAME.replaceAll("'", "\\u0027")}";`,
+    "pending !== 0",
+    "total !== expectedTotal",
+    "passed !== expectedTotal",
+    "assertion.fullName === behavioralFullName",
+    'assertion.status !== "passed"',
     '\' "$report"',
   ];
   for (const anchor of required) {
@@ -92,9 +131,74 @@ describe("the windows CI leg asserts the win32 kill-tree suite ran (LIF-01)", ()
     expect(killTreeGateStep).toContain(KILL_TREE_REPORT);
   });
 
-  it("fails on a skipped, uncollected or partly-failing run", () => {
-    // The three ways the leg could go green with nothing proven.
+  it("fails on a skipped, uncollected, count-drifted or partly-failing run", () => {
     expect(validateKillTreeGateStep(killTreeGateStep)).toEqual([]);
+  });
+
+  it("rejects the one-test report left after deleting the behavioral test", () => {
+    const oneMeasurementOnly: KillTreeJsonReport = {
+      numPassedTests: 1,
+      numPendingTests: 0,
+      numTotalTests: 1,
+      testResults: [
+        {
+          assertionResults: [
+            {
+              fullName:
+                "win32 process-tree termination (LIF-01) resolves taskkill.exe by absolute path from the runner's own SystemRoot",
+              status: "passed",
+            },
+          ],
+        },
+      ],
+    };
+
+    expect(validateKillTreeReport(oneMeasurementOnly)).toEqual([
+      "exact-count",
+      "behavioral-test",
+    ]);
+  });
+
+  it("requires the behavioral assertion itself to report passed", () => {
+    const report: KillTreeJsonReport = {
+      numPassedTests: 2,
+      numPendingTests: 0,
+      numTotalTests: 2,
+      testResults: [
+        {
+          assertionResults: [
+            {
+              fullName: KILL_TREE_BEHAVIORAL_TEST_FULL_NAME,
+              status: "skipped",
+            },
+            { fullName: "measurement", status: "passed" },
+          ],
+        },
+      ],
+    };
+
+    expect(validateKillTreeReport(report)).toEqual(["behavioral-test"]);
+  });
+
+  it("accepts the exact two-test report with one passed behavioral identity", () => {
+    const report: KillTreeJsonReport = {
+      numPassedTests: 2,
+      numPendingTests: 0,
+      numTotalTests: 2,
+      testResults: [
+        {
+          assertionResults: [
+            {
+              fullName: KILL_TREE_BEHAVIORAL_TEST_FULL_NAME,
+              status: "passed",
+            },
+            { fullName: "measurement", status: "passed" },
+          ],
+        },
+      ],
+    };
+
+    expect(validateKillTreeReport(report)).toEqual([]);
   });
 
   it("names a suite path that exists — a rename must not leave the gate pointing at nothing", () => {
@@ -122,14 +226,10 @@ describe("the windows CI leg asserts the win32 kill-tree suite ran (LIF-01)", ()
     );
   });
 
-  // THE SIXTH CASE, unique to Phase 8, and the direct closure of the collision
-  // D-P2 records. The three arms above (`--reporter=json`, `pending > 0`,
-  // `total === 0`, `passed !== total`) are word-for-word what
-  // `spawn-plan.win32.gate.test.ts` already asserts, so on those strings alone
-  // EITHER step satisfies BOTH suites — and either could then be deleted with
-  // both suites still green, which is a gate that is green because its twin
-  // exists. Pinning both step names and both report filenames, and asserting the
-  // filenames differ, is what makes each gate falsifiable on its own step.
+  // The direct closure of the collision D-P2 records. Both steps still share
+  // reporter/path vocabulary, even though this gate now adds exact-count and
+  // behavioral-identity checks. Pinning both step names and report filenames is
+  // what prevents either validation from passing against its sibling's text.
   it("cannot be satisfied by the Phase 7 gate step, nor it by this one", () => {
     expect(killTreeGateStep).toContain(KILL_TREE_GATE_STEP);
     expect(spawnPlanGateStep).toContain(SPAWN_PLAN_GATE_STEP);
