@@ -469,7 +469,7 @@ describe("index.ts kills every tracked tree before it removes the files that car
     // The directory removed here holds the MCP config, the context file and the
     // per-session approvals/activity documents — every env-source that carried
     // the Caido token into a child's environment.
-    const body = functionBody(code, "cleanupMcpRuntime");
+    const body = functionBody(code, "cleanupMcpRuntimeGeneration");
 
     // The non-vacuity guard: an empty body makes both lookups -1 and the
     // comparison meaningless, so it fails loudly here instead.
@@ -515,7 +515,7 @@ describe("index.ts kills every tracked tree before it removes the files that car
 // `proc === undefined` and returned `ok` while publishing nothing, so the user's
 // Stop button was a silent no-op for a session still on their screen.
 describe("index.ts publishes and de-registers every session its cleanup loop kills (WR-01)", () => {
-  const body = functionBody(code, "cleanupMcpRuntime");
+  const body = functionBody(code, "cleanupMcpRuntimeGeneration");
 
   it("finds a non-empty body carrying the kill loop", () => {
     expect(body).not.toBe("");
@@ -850,7 +850,7 @@ describe("index.ts wires the orphan reap at every counted site and nowhere else 
   // one. Equal totals over two different populations is not a contract.
   it("calls the reap boundary from exactly the three functions that own a reap", () => {
     const sites = {
-      cleanupMcpRuntime: 1,
+      cleanupMcpRuntimeGeneration: 1,
       sweepOrphanedMcpTempDirs: 1,
       reapSessionOrphansIfIdle: 1,
     };
@@ -947,7 +947,7 @@ describe("index.ts wires the orphan reap at every counted site and nowhere else 
   // while the neighbouring `killTree` case stays green, which is the point of
   // asserting them separately.
   it("cleanupMcpRuntime reaps before it removes the temp dir, alongside the kill loop", () => {
-    const body = functionBody(code, "cleanupMcpRuntime");
+    const body = functionBody(code, "cleanupMcpRuntimeGeneration");
 
     expect(body).not.toBe("");
     expect(body.indexOf("reapMcpOrphans(")).not.toBe(-1);
@@ -958,7 +958,7 @@ describe("index.ts wires the orphan reap at every counted site and nowhere else 
   });
 
   it("cleanupMcpRuntime removes only its captured directory and guards stale mutations", () => {
-    const body = functionBody(code, "cleanupMcpRuntime");
+    const body = functionBody(code, "cleanupMcpRuntimeGeneration");
     expect(body).not.toBe("");
     expect(body).toContain("const cleanupTempDir = mcpTempDir");
     expect(body.indexOf("const cleanupTempDir = mcpTempDir")).toBeLessThan(
@@ -1022,7 +1022,7 @@ describe("index.ts wires the orphan reap at every counted site and nowhere else 
   it("binds every reap caller to the gate identity it owns", () => {
     const gates = {
       reapSessionOrphansIfIdle: 'kind: "session-idle"',
-      cleanupMcpRuntime: 'kind: "runtime-cleanup"',
+      cleanupMcpRuntimeGeneration: 'kind: "runtime-cleanup"',
       sweepOrphanedMcpTempDirs: 'kind: "runtime-absent"',
     };
     for (const [name, gateKind] of Object.entries(gates)) {
@@ -1072,7 +1072,7 @@ describe("index.ts wires the orphan reap at every counted site and nowhere else 
   // 5c. Cleanup retires only its captured generation. A global reset is the bug:
   // it lets an old cleanup erase calls acquired by a replacement runtime.
   it("retires direct-call tokens only for cleanup's captured epoch", () => {
-    const cleanup = functionBody(code, "cleanupMcpRuntime");
+    const cleanup = functionBody(code, "cleanupMcpRuntimeGeneration");
     expect(cleanup).not.toBe("");
     expect(cleanup).toContain(
       "const cleanupEpoch = getMcpRuntimeEpoch(mcpLifecycle)",
@@ -1095,6 +1095,45 @@ describe("index.ts wires the orphan reap at every counted site and nowhere else 
       expect(body).toContain("runMcpLifecycleOperation(mcpLifecycle");
       expect(body).toContain(delegatedCall);
     }
+  });
+
+  it("guards only the provider start commit with an epoch-bound lease", () => {
+    const send = functionBody(code, "sendCliMessage");
+    expect(send).not.toBe("");
+    expect(send).not.toContain("runMcpLifecycleOperation(mcpLifecycle");
+
+    const acquire = send.indexOf("acquireProviderStartLease(");
+    const stage = send.indexOf("createSessionRuntimeFiles(");
+    const commit = send.indexOf("commitProviderStartLease({");
+    const spawn = send.indexOf("spawnWithEnv(", commit);
+    const track = send.indexOf("activeProcesses.set(", commit);
+    expect(acquire).not.toBe(-1);
+    expect(stage).not.toBe(-1);
+    expect(commit).not.toBe(-1);
+    expect(spawn).not.toBe(-1);
+    expect(track).not.toBe(-1);
+    expect(acquire).toBeLessThan(stage);
+    expect(stage).toBeLessThan(commit);
+    expect(commit).toBeLessThan(spawn);
+    expect(spawn).toBeLessThan(track);
+    const runtimeFileCalls = callArgumentTexts(
+      send,
+      "createSessionRuntimeFiles",
+    );
+    expect(runtimeFileCalls).toHaveLength(1);
+    expect(runtimeFileCalls[0]).toContain("input.sessionId");
+    expect(runtimeFileCalls[0]).toContain("providerStartLease.tempDir");
+    expect(send).toContain("cleanupUncommittedProviderStart({");
+  });
+
+  it("invalidates provider start leases before teardown's process pass", () => {
+    const cleanup = functionBody(code, "cleanupMcpRuntime");
+    const generation = functionBody(code, "cleanupMcpRuntimeGeneration");
+    expect(cleanup).not.toBe("");
+    expect(generation).not.toBe("");
+    expect(cleanup).toContain("runMcpProviderTeardown(");
+    expect(cleanup).toContain("cleanupMcpRuntimeGeneration(");
+    expect(generation).toContain("killTree(");
   });
 
   // 5b. THE CR-01 CENSUS — every spawn whose argv carries the MCP server script

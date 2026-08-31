@@ -9,10 +9,22 @@ export type DirectMcpCallToken = Readonly<{
   id: number;
 }>;
 
+export type ProviderStartLease = Readonly<{
+  epoch: number;
+  id: number;
+  tempDir: string | undefined;
+}>;
+
+type ProviderTeardownToken = Readonly<{ id: number }>;
+
 export type McpLifecycleState = {
   currentEpoch: number;
   nextDirectCallId: number;
   directCalls: Set<DirectMcpCallToken>;
+  nextProviderStartId: number;
+  providerStarts: Set<ProviderStartLease>;
+  nextProviderTeardownId: number;
+  activeProviderTeardown: ProviderTeardownToken | undefined;
   operationTail: Promise<void>;
 };
 
@@ -30,6 +42,10 @@ export function createMcpLifecycleState(): McpLifecycleState {
     currentEpoch: 0,
     nextDirectCallId: 1,
     directCalls: new Set(),
+    nextProviderStartId: 1,
+    providerStarts: new Set(),
+    nextProviderTeardownId: 1,
+    activeProviderTeardown: undefined,
     operationTail: Promise.resolve(),
   };
 }
@@ -117,6 +133,72 @@ export function countMcpDirectCalls(
     if (token.epoch === epoch) count += 1;
   }
   return count;
+}
+
+// A provider turn is deliberately NOT put on the lifecycle FIFO: doing that
+// would hold Stop behind the entire turn. The lease covers preparation only.
+// Its commit callback is synchronous, so checking the generation and adding the
+// spawned handle to `activeProcesses` form one event-loop turn with no teardown
+// interleaving between them.
+export function acquireProviderStartLease(
+  state: McpLifecycleState,
+  tempDir: string | undefined,
+): ProviderStartLease | undefined {
+  if (state.activeProviderTeardown !== undefined) return undefined;
+  const lease: ProviderStartLease = {
+    epoch: state.currentEpoch,
+    id: state.nextProviderStartId,
+    tempDir,
+  };
+  state.nextProviderStartId += 1;
+  state.providerStarts.add(lease);
+  return lease;
+}
+
+export function releaseProviderStartLease(
+  state: McpLifecycleState,
+  lease: ProviderStartLease,
+): void {
+  state.providerStarts.delete(lease);
+}
+
+export function commitProviderStartLease<T>(input: {
+  state: McpLifecycleState;
+  lease: ProviderStartLease;
+  currentTempDir: string | undefined;
+  commit: () => T;
+}): { kind: "committed"; value: T } | { kind: "stale" } {
+  const current =
+    input.state.activeProviderTeardown === undefined &&
+    input.state.providerStarts.has(input.lease) &&
+    input.state.currentEpoch === input.lease.epoch &&
+    input.currentTempDir === input.lease.tempDir;
+  input.state.providerStarts.delete(input.lease);
+  if (!current) return { kind: "stale" };
+  return { kind: "committed", value: input.commit() };
+}
+
+// Invalidate pending provider starts BEFORE teardown performs its one process
+// pass. A start already committed is present in `activeProcesses` and is killed
+// by that pass; a paused start loses its lease and its later commit is refused.
+// The blocker lasts only for the teardown operation and is restored correctly
+// for a defensive nested call.
+export async function runMcpProviderTeardown<T>(
+  state: McpLifecycleState,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const previousTeardown = state.activeProviderTeardown;
+  const token: ProviderTeardownToken = { id: state.nextProviderTeardownId };
+  state.nextProviderTeardownId += 1;
+  state.activeProviderTeardown = token;
+  state.providerStarts.clear();
+  try {
+    return await operation();
+  } finally {
+    if (state.activeProviderTeardown === token) {
+      state.activeProviderTeardown = previousTeardown;
+    }
+  }
 }
 
 // One FIFO for start, stop and refresh. The tail is a barrier that always

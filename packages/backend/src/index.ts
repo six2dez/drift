@@ -61,17 +61,22 @@ import {
 } from "./provider-launch";
 import {
   acquireMcpDirectCall,
+  acquireProviderStartLease,
   beginMcpRuntimeGeneration,
+  commitProviderStartLease,
   countMcpDirectCalls,
   createMcpLifecycleState,
   getMcpRuntimeEpoch,
   isMcpOrphanReapGateCurrent,
   isMcpRuntimeEpochCurrent,
   releaseMcpDirectCall,
+  releaseProviderStartLease,
   retireMcpDirectCalls,
   runMcpLifecycleOperation,
+  runMcpProviderTeardown,
   type DirectMcpCallToken,
   type McpOrphanReapGate,
+  type ProviderStartLease,
 } from "./mcp-lifecycle";
 import {
   MCP_SELF_TEST_CHECKS,
@@ -434,7 +439,11 @@ let lastPersistenceScope = "";
 let lastPersistenceMessage = "";
 let lastPersistenceTimestamp = 0;
 let pluginVersion = "unknown";
-const sessionRuntimeFiles = new Map<string, { activityFilePath: string; approvalsFilePath: string }>();
+type SessionRuntimeFiles = {
+  activityFilePath: string;
+  approvalsFilePath: string;
+};
+const sessionRuntimeFiles = new Map<string, SessionRuntimeFiles>();
 const sessionDebugLogWriteChains = new Map<string, Promise<void>>();
 const sessionDebugLogInitialized = new Set<string>();
 
@@ -1163,14 +1172,22 @@ async function writeTemp(dir: string, name: string, content: string): Promise<st
   return fp;
 }
 
+function getMcpScriptPath(tempDir: string | undefined): string | undefined {
+  if (tempDir === undefined) return undefined;
+  return path.join(tempDir, "mcp-server.mjs");
+}
+
 function getTempMcpScriptPath(): string | undefined {
-  if (mcpTempDir === undefined) return undefined;
-  return path.join(mcpTempDir, "mcp-server.mjs");
+  return getMcpScriptPath(mcpTempDir);
+}
+
+function getMcpContextPath(tempDir: string | undefined): string | undefined {
+  if (tempDir === undefined) return undefined;
+  return path.join(tempDir, "mcp-context.json");
 }
 
 function getMcpContextFilePath(): string | undefined {
-  if (mcpTempDir === undefined) return undefined;
-  return path.join(mcpTempDir, "mcp-context.json");
+  return getMcpContextPath(mcpTempDir);
 }
 
 // RUN-02 / D-10. The SINGLE projection point: Claude's `mcp-<chatId>.json` and
@@ -1180,11 +1197,12 @@ function getMcpContextFilePath(): string | undefined {
 // `spec.env` — the projection helper in mcp-server-spec.ts states at its own
 // `env` line why that asymmetry is deliberate (T-05-04).
 async function writeChatMcpConfig(
+  tempDir: string | undefined,
   name: string,
   spec: McpServerSpec,
   sdk: BackendSDK,
 ): Promise<string | undefined> {
-  if (mcpTempDir === undefined) return undefined;
+  if (tempDir === undefined) return undefined;
   // `spec.command` is the absolute `node` path the CLI will execute. It was the
   // shared POSIX wrapper script until Phase 5 replaced it here and Phase 7
   // deleted that wrapper outright.
@@ -1210,7 +1228,7 @@ async function writeChatMcpConfig(
   }
 
   return writeTemp(
-    mcpTempDir,
+    tempDir,
     name,
     JSON.stringify(toMcpConfigDocument(spec), null, 2),
   );
@@ -1491,6 +1509,7 @@ function getCurrentMcpToolPolicy(): McpToolPolicy {
 // the Copilot config document's byte shape is a CMP-01 surface.
 function buildMcpRuntimeEnv(input: {
   caidoToken: string;
+  contextFilePath: string | undefined;
   toolPolicy?: McpToolPolicy;
   activityFilePath?: string;
   approvalsFilePath?: string;
@@ -1499,7 +1518,7 @@ function buildMcpRuntimeEnv(input: {
   return buildMcpDriftVars({
     caidoUrl: currentSettings.caidoApi.url,
     caidoToken: input.caidoToken,
-    contextFilePath: getMcpContextFilePath(),
+    contextFilePath: input.contextFilePath,
     allowedToolNames: toolPolicy.allowedToolNames,
     confirmationRequiredToolNames: toolPolicy.confirmationRequiredToolNames,
     confirmSensitiveActions: toolPolicy.confirmSensitiveActions,
@@ -1508,15 +1527,15 @@ function buildMcpRuntimeEnv(input: {
   });
 }
 
-async function createSessionRuntimeFiles(sessionId: string): Promise<{
-  activityFilePath: string;
-  approvalsFilePath: string;
-} | undefined> {
-  if (mcpTempDir === undefined) return undefined;
+async function createSessionRuntimeFiles(
+  sessionId: string,
+  tempDir: string | undefined,
+): Promise<SessionRuntimeFiles | undefined> {
+  if (tempDir === undefined) return undefined;
 
-  await mkdir(mcpTempDir, { recursive: true, mode: 0o700 });
-  const activityFilePath = path.join(mcpTempDir, `mcp-activity-${sessionId}.jsonl`);
-  const approvalsFilePath = path.join(mcpTempDir, `mcp-approvals-${sessionId}.json`);
+  await mkdir(tempDir, { recursive: true, mode: 0o700 });
+  const activityFilePath = path.join(tempDir, `mcp-activity-${sessionId}.jsonl`);
+  const approvalsFilePath = path.join(tempDir, `mcp-approvals-${sessionId}.json`);
   // 0o600 on both, and the two files carry DIFFERENT risks rather than one
   // shared one. The activity log carries tool activity drawn from the user's
   // own Caido history, so its risk is disclosure. The approvals file's risk is
@@ -1528,6 +1547,32 @@ async function createSessionRuntimeFiles(sessionId: string): Promise<{
   const files = { activityFilePath, approvalsFilePath };
   sessionRuntimeFiles.set(sessionId, files);
   return files;
+}
+
+async function cleanupUncommittedProviderStart(input: {
+  sessionId: string;
+  runtimeFiles: SessionRuntimeFiles | undefined;
+  mcpConfigPaths: string[];
+  debugLogPath: string | undefined;
+}): Promise<void> {
+  if (
+    input.runtimeFiles !== undefined &&
+    sessionRuntimeFiles.get(input.sessionId) === input.runtimeFiles
+  ) {
+    sessionRuntimeFiles.delete(input.sessionId);
+  }
+  if (input.runtimeFiles !== undefined) {
+    await rm(input.runtimeFiles.activityFilePath, { force: true }).catch(
+      () => undefined,
+    );
+    await rm(input.runtimeFiles.approvalsFilePath, { force: true }).catch(
+      () => undefined,
+    );
+  }
+  for (const configPath of new Set(input.mcpConfigPaths)) {
+    await rm(configPath, { force: true }).catch(() => undefined);
+  }
+  await disposeSessionDebugLog(input.debugLogPath);
 }
 
 // parseRuntimeActivityEvents used to live here. PERF-02 replaced its ONLY caller
@@ -2354,18 +2399,17 @@ const spawnWithEnv = spawn as unknown as SpawnWithEnv;
 // config-JSON `env` field, never in a `#!/bin/bash` `export` line. That is what
 // makes the health path work on Windows, where a `.sh` is not executable at all.
 //
-// The path it hands to buildMcpServerSpec is getTempMcpScriptPath(), i.e.
-// path.join(mcpTempDir, "mcp-server.mjs") — verified identical to
-// startMcpServer's `mcpScriptLocal`, which is path.join(tempDir, "mcp-server.mjs")
-// with `mcpTempDir = tempDir` assigned immediately above the staging copy. There
-// is therefore no second join to keep in sync, and no override parameter is
-// needed.
+// Ordinary callers project the current mcpTempDir. A provider start that has
+// crossed an await supplies its lease-captured runtimeDir instead, so it cannot
+// silently switch to a replacement generation while preparing config files.
 async function requireMcpServerSpec(options?: {
+  runtimeDir?: string;
   toolPolicy?: McpToolPolicy;
   activityFilePath?: string;
   approvalsFilePath?: string;
 }): Promise<Result<McpServerSpec>> {
-  const mcpScriptPath = getTempMcpScriptPath();
+  const runtimeDir = options?.runtimeDir ?? mcpTempDir;
+  const mcpScriptPath = getMcpScriptPath(runtimeDir);
   if (mcpScriptPath === undefined) return err(MCP_RUNTIME_NOT_RUNNING_MESSAGE);
 
   const caidoToken = getEffectiveCaidoToken();
@@ -2380,6 +2424,7 @@ async function requireMcpServerSpec(options?: {
       mcpScriptPath,
       driftVars: buildMcpRuntimeEnv({
         caidoToken,
+        contextFilePath: getMcpContextPath(runtimeDir),
         toolPolicy: options?.toolPolicy,
         activityFilePath: options?.activityFilePath,
         approvalsFilePath: options?.approvalsFilePath,
@@ -4182,6 +4227,16 @@ async function cleanupMcpRuntime(
   authState: McpAuthState = "unknown",
   authMessage = "",
 ): Promise<void> {
+  return runMcpProviderTeardown(mcpLifecycle, () =>
+    cleanupMcpRuntimeGeneration(sdk, authState, authMessage),
+  );
+}
+
+async function cleanupMcpRuntimeGeneration(
+  sdk: BackendSDK,
+  authState: McpAuthState,
+  authMessage: string,
+): Promise<void> {
   // Capture identity before the first await. Every later destructive mutation
   // is conditional on this epoch and this exact directory still being current;
   // a stale cleanup may finish its own I/O, but it cannot erase a replacement
@@ -4842,22 +4897,41 @@ async function sendCliMessage(
       return err(message);
     }
 
-    // Check if first message BEFORE setting session (for system prompt injection)
-    const isFirstMsg = !cliSessions.has(input.chatId);
-    const caidoToken = getEffectiveCaidoToken();
-    const toolPolicy = getCurrentMcpToolPolicy();
-    const runtimeFiles = await createSessionRuntimeFiles(input.sessionId);
-    const runtimeEnv = buildMcpRuntimeEnv({
-      caidoToken,
-      toolPolicy,
-      activityFilePath: runtimeFiles?.activityFilePath,
-      approvalsFilePath: runtimeFiles?.approvalsFilePath,
-    });
-
-    // ── Build args per provider ──
-    const args: string[] = [];
+    // A short preparation lease, not the lifecycle FIFO. Stop must never wait
+    // for the provider turn to finish; it only needs to prevent a paused start
+    // from committing after teardown's one process pass.
+    const providerStartLease: ProviderStartLease | undefined =
+      acquireProviderStartLease(mcpLifecycle, mcpTempDir);
+    if (providerStartLease === undefined) {
+      const message = "The MCP runtime is stopping. Retry the provider turn after teardown completes.";
+      setSessionState("error", message, { reasonCode: "closed" });
+      return err(message);
+    }
+    let providerStartCommitted = false;
+    let runtimeFiles: SessionRuntimeFiles | undefined;
+    const stagedMcpConfigPaths: string[] = [];
     const sessionDebugLogPath: string | undefined = getSessionDebugLogPath(input.sessionId);
     let claudeMcpConfigPath: string | undefined;
+
+    try {
+      // Check if first message BEFORE setting session (for system prompt injection)
+      const isFirstMsg = !cliSessions.has(input.chatId);
+      const caidoToken = getEffectiveCaidoToken();
+      const toolPolicy = getCurrentMcpToolPolicy();
+      runtimeFiles = await createSessionRuntimeFiles(
+        input.sessionId,
+        providerStartLease.tempDir,
+      );
+      const runtimeEnv = buildMcpRuntimeEnv({
+        caidoToken,
+        contextFilePath: getMcpContextPath(providerStartLease.tempDir),
+        toolPolicy,
+        activityFilePath: runtimeFiles?.activityFilePath,
+        approvalsFilePath: runtimeFiles?.approvalsFilePath,
+      });
+
+      // ── Build args per provider ──
+      const args: string[] = [];
 
     switch (providerId) {
       case "claude-cli": {
@@ -4865,7 +4939,7 @@ async function sendCliMessage(
         // disabled) must restrict Claude to no Drift tools — never fall back to
         // the full set, which would invert the user's deny-all intent.
         const claudeAllowedTools = toolPolicy.allowedToolNames;
-        const mcpScriptPath = getTempMcpScriptPath();
+        const mcpScriptPath = getMcpScriptPath(providerStartLease.tempDir);
         const hasMcpAttached = mcpScriptPath !== undefined;
 
         // Rewrite MCP config on each send so token/url/script path cannot go stale.
@@ -4884,6 +4958,7 @@ async function sendCliMessage(
           // error is routed through the existing setSessionState + err shape
           // rather than being restated.
           const spec = await requireMcpServerSpec({
+            runtimeDir: providerStartLease.tempDir,
             toolPolicy,
             activityFilePath: runtimeFiles?.activityFilePath,
             approvalsFilePath: runtimeFiles?.approvalsFilePath,
@@ -4893,6 +4968,7 @@ async function sendCliMessage(
             return err(spec.error);
           }
           const cfgFile = await writeChatMcpConfig(
+            providerStartLease.tempDir,
             `mcp-${input.chatId}.json`,
             spec.value,
             sdk,
@@ -4901,6 +4977,7 @@ async function sendCliMessage(
             setSessionState("error", "Drift could not prepare the Claude MCP configuration file.");
             return err("Drift could not prepare the Claude MCP configuration file.");
           }
+          stagedMcpConfigPaths.push(cfgFile);
           claudeMcpConfigPath = cfgFile;
           claudeMcpConfigForLaunch = cfgFile;
         }
@@ -4917,14 +4994,16 @@ async function sendCliMessage(
       }
       case "gemini-cli":
         args.push(
-          ...buildGeminiLaunchArgs({ hasMcpAttached: mcpTempDir !== undefined }),
+          ...buildGeminiLaunchArgs({
+            hasMcpAttached: providerStartLease.tempDir !== undefined,
+          }),
         );
         break;
       case "codex-cli":
         args.push(...buildCodexLaunchArgs());
         break;
       case "copilot-cli": {
-        const mcpScriptPath = getTempMcpScriptPath();
+        const mcpScriptPath = getMcpScriptPath(providerStartLease.tempDir);
         let copilotMcpConfigForLaunch: string | undefined;
         if (mcpScriptPath !== undefined) {
           // The shipping template, now reading from the shared spec instead of
@@ -4933,6 +5012,7 @@ async function sendCliMessage(
           // an `env` field carrying the same DRIFT_*/CAIDO_* keys in the same
           // insertion order (CMP-01).
           const spec = await requireMcpServerSpec({
+            runtimeDir: providerStartLease.tempDir,
             toolPolicy,
             activityFilePath: runtimeFiles?.activityFilePath,
             approvalsFilePath: runtimeFiles?.approvalsFilePath,
@@ -4942,6 +5022,7 @@ async function sendCliMessage(
             return err(spec.error);
           }
           const cfgFile = await writeChatMcpConfig(
+            providerStartLease.tempDir,
             `copilot-mcp-${input.chatId}.json`,
             spec.value,
             sdk,
@@ -4950,6 +5031,7 @@ async function sendCliMessage(
             setSessionState("error", "Drift could not prepare the Copilot MCP configuration file.");
             return err("Drift could not prepare the Copilot MCP configuration file.");
           }
+          stagedMcpConfigPaths.push(cfgFile);
           copilotMcpConfigForLaunch = cfgFile;
         }
         args.push(
@@ -5122,10 +5204,6 @@ async function sendCliMessage(
         injectedKeys: Object.keys(injectedDriftVars),
       }),
     );
-    setSessionState("running", "Provider turn running.", {
-      mcpAttached: mcpTempDir !== undefined,
-      reasonCode: "running",
-    });
     const collectedActivities: McpToolActivity[] = [];
     // The dedupe Set below must NOT be deleted as "now redundant" now that the
     // tick reads from a byte offset. The offset makes re-delivery unlikely, not
@@ -5270,7 +5348,7 @@ async function sendCliMessage(
       }
     };
 
-    return new Promise<Result<SendCliMessageOutput>>((resolve) => {
+    return await new Promise<Result<SendCliMessageOutput>>((resolve) => {
       // The parent block first, Drift's own variables overlaid on top - the
       // single merge point, never a hand-rolled spread here. A bare drift-only
       // dict is a defect on BOTH platforms, not a Windows-only one: the spawn
@@ -5288,16 +5366,11 @@ async function sendCliMessage(
       // getNodeExecutable already defends against - throws synchronously too.
       //
       // A synchronous throw inside a Promise executor REJECTS the promise, so
-      // the proc.on("error") handler below can never fire for it. The enclosing
-      // `try { ... } catch (e)` does NOT catch it either: `return <promise>`
-      // from an async function ADOPTS the rejection without passing through the
-      // catch (only `return await` would). Unguarded, the RPC rejects and none
-      // of the executor runs: no terminal session state is published, the
-      // session is never entered into activeProcesses so cancelCliMessage
-      // cannot clean it up, and - the part that matters against PROJECT.md's
-      // token constraint - the token-bearing mcp-<chatId>.json and the
-      // per-session runtime files are left on disk, because finalize()'s rm
-      // calls are their only deleters.
+      // the proc.on("error") handler below can never fire for it. The local
+      // spawn catch converts the known synchronous boundary into the Result
+      // contract; `return await` also deliberately routes any unexpected
+      // executor rejection through the enclosing catch and keeps the provider
+      // lease's staged-file cleanup in the surrounding finally.
       //
       // This stopped being unreachable in Phase 6: the resolver now emits
       // `.cmd` candidates, and the install table Phase 6 added tells Windows
@@ -5318,54 +5391,78 @@ async function sendCliMessage(
       // macOS or Linux. There the spawn does not throw, so the catch arm is not
       // entered and every statement below runs in the order it always did.
       //
-      // The cleanup is written out here rather than delegating to finalize():
-      // finalize is a `const` declared LOWER in this same executor, so it is in
-      // its temporal dead zone at this point and calling it would throw a
-      // ReferenceError - synchronously, inside the executor, rejecting the very
-      // promise this guard exists to keep resolving. The two rm blocks below
-      // mirror finalize()'s exactly.
+      // The lease commit below is deliberately synchronous: the generation
+      // recheck, spawn and activeProcesses registration are one event-loop turn.
+      // Teardown either invalidates this lease before the callback starts, or
+      // sees the registered process in its subsequent kill pass. It never waits
+      // for the provider's lifetime.
       let proc: ChildProcessWithoutNullStreams;
       try {
-        proc = spawnWithEnv(spawnPlan.file, spawnPlan.args, {
-          env: buildSpawnEnv({
-            // G-01, CLOSED 2026-08-28 for this site. `readParentEnv()` is still
-            // empty on a real install - that half is unchanged and still owned by
-            // PHASE 9 - but the consequence is no longer unmitigated here.
-            //
-            // The residual formerly recorded at readParentEnv's header called
-            // this "a degradation" that "demonstrably works on macOS today". Both
-            // halves were wrong, and the measurement that falsified them is in
-            // derivePosixIdentity's docblock: with an empty parent block the
-            // provider CLI cannot authenticate at all, so no turn can start, so
-            // no cancel or timeout reading can ever be taken on real hardware.
-            // That is what promoted this from a degradation to the blocker that
-            // stopped plan 08-16.
-            parentEnv: readParentEnv(),
-            driftVars: injectedDriftVars,
-            identityFallback: getPosixIdentityFallback(),
-          }),
-          stdio: ["pipe", "pipe", "pipe"],
-          // Taken from the plan, never hardcoded: it is true exactly when the
-          // plan assembled and escaped a cmd.exe command line itself, and false
-          // on every direct spawn (all of POSIX, and a Windows `.exe`).
-          windowsVerbatimArguments: spawnPlan.windowsVerbatimArguments,
-          // LIF-02, and the ONE site in this file that says anything other than
-          // false. The provider CLI spawns `node mcp-server.mjs` as its own
-          // child, and that grandchild carries CAIDO_TOKEN. Giving the CLI its
-          // own process group is what makes the grandchild reachable from a
-          // single group signal when the user clicks Stop; without it the
-          // grandchild survives EVERY cancel, which is the defect LIF-02 names.
-          //
-          // Rated `costly`, not free: on POSIX the CLI stops receiving signals
-          // delivered to Caido's own group, so a terminal Ctrl-C on Caido no
-          // longer takes it down (08-RESEARCH.md § Pitfall 6). Caido ships as a
-          // desktop application rather than a foreground job, and the
-          // counterweight — a token-bearing orphan after every cancel — is
-          // decisive. `shouldDetachProviderSpawn` returns false on win32, where
-          // `taskkill /t` walks parentage instead and LLRT's flag would perturb
-          // the console-attachment contract Phase 7 measured.
-          detached: shouldDetachProviderSpawn(host?.platform),
+        const committed = commitProviderStartLease({
+          state: mcpLifecycle,
+          lease: providerStartLease,
+          currentTempDir: mcpTempDir,
+          commit: () => {
+            const started = spawnWithEnv(spawnPlan.file, spawnPlan.args, {
+              env: buildSpawnEnv({
+                // G-01, CLOSED 2026-08-28 for this site. `readParentEnv()` is
+                // still empty on a real install - that half is unchanged and
+                // still owned by PHASE 9 - but the consequence is no longer
+                // unmitigated here.
+                //
+                // The residual formerly recorded at readParentEnv's header
+                // called this "a degradation" that "demonstrably works on
+                // macOS today". Both halves were wrong, and the measurement
+                // that falsified them is in derivePosixIdentity's docblock:
+                // with an empty parent block the provider CLI cannot
+                // authenticate at all, so no turn can start, so no cancel or
+                // timeout reading can ever be taken on real hardware. That is
+                // what promoted this from a degradation to the blocker that
+                // stopped plan 08-16.
+                parentEnv: readParentEnv(),
+                driftVars: injectedDriftVars,
+                identityFallback: getPosixIdentityFallback(),
+              }),
+              stdio: ["pipe", "pipe", "pipe"],
+              // Taken from the plan, never hardcoded: it is true exactly when
+              // the plan assembled and escaped a cmd.exe command line itself,
+              // and false on every direct spawn (all of POSIX, and a Windows
+              // `.exe`).
+              windowsVerbatimArguments: spawnPlan.windowsVerbatimArguments,
+              // LIF-02, and the ONE site in this file that says anything other
+              // than false. The provider CLI spawns `node mcp-server.mjs` as
+              // its own child, and that grandchild carries CAIDO_TOKEN. Giving
+              // the CLI its own process group is what makes the grandchild
+              // reachable from a single group signal when the user clicks
+              // Stop; without it the grandchild survives EVERY cancel, which
+              // is the defect LIF-02 names.
+              //
+              // Rated `costly`, not free: on POSIX the CLI stops receiving
+              // signals delivered to Caido's own group, so a terminal Ctrl-C
+              // on Caido no longer takes it down (08-RESEARCH.md § Pitfall 6).
+              // Caido ships as a desktop application rather than a foreground
+              // job, and the counterweight — a token-bearing orphan after every
+              // cancel — is decisive. `shouldDetachProviderSpawn` returns
+              // false on win32, where `taskkill /t` walks parentage instead and
+              // LLRT's flag would perturb the console-attachment contract Phase
+              // 7 measured.
+              detached: shouldDetachProviderSpawn(host?.platform),
+            });
+            activeProcesses.set(input.sessionId, started);
+            return started;
+          },
         });
+        if (committed.kind === "stale") {
+          const message = "The MCP runtime changed while the provider turn was preparing. Retry the turn against the current runtime.";
+          setSessionState("error", message, {
+            mcpAttached: mcpTempDir !== undefined,
+            reasonCode: "closed",
+          });
+          resolve(err(message));
+          return;
+        }
+        proc = committed.value;
+        providerStartCommitted = true;
       } catch (e) {
         const message = `Spawn error: ${String(e)}`;
         appendSessionDebugLog(sessionDebugLogPath, `spawn() threw synchronously: ${message}`);
@@ -5373,20 +5470,13 @@ async function sendCliMessage(
           mcpAttached: mcpTempDir !== undefined,
           reasonCode: "spawn_error",
         });
-        void (async () => {
-          if (runtimeFiles !== undefined) {
-            sessionRuntimeFiles.delete(input.sessionId);
-            await rm(runtimeFiles.activityFilePath, { force: true }).catch(() => undefined);
-            await rm(runtimeFiles.approvalsFilePath, { force: true }).catch(() => undefined);
-          }
-          if (claudeMcpConfigPath !== undefined) {
-            await rm(claudeMcpConfigPath, { force: true }).catch(() => undefined);
-          }
-          await disposeSessionDebugLog(sessionDebugLogPath);
-          resolve(err(message));
-        })();
+        resolve(err(message));
         return;
       }
+      setSessionState("running", "Provider turn running.", {
+        mcpAttached: providerStartLease.tempDir !== undefined,
+        reasonCode: "running",
+      });
       appendSessionDebugLog(
         sessionDebugLogPath,
         `spawn() started pid=${String(proc.pid ?? "unknown")}`,
@@ -5397,9 +5487,6 @@ async function sendCliMessage(
           `proc.spawn event pid=${String(proc.pid ?? "unknown")}`,
         );
       });
-
-      // Track for cancellation
-      activeProcesses.set(input.sessionId, proc);
 
       // Both-ends retention, because for gemini/codex/copilot this string IS the
       // chat answer (the two read sites in finalizeFromProcessEnd below): the
@@ -5984,6 +6071,17 @@ async function sendCliMessage(
         finalize(err(`Spawn error: ${e.message}`));
       });
     });
+    } finally {
+      releaseProviderStartLease(mcpLifecycle, providerStartLease);
+      if (!providerStartCommitted) {
+        await cleanupUncommittedProviderStart({
+          sessionId: input.sessionId,
+          runtimeFiles,
+          mcpConfigPaths: stagedMcpConfigPaths,
+          debugLogPath: sessionDebugLogPath,
+        });
+      }
+    }
   } catch (e) {
     publishSessionState(sdk, {
       sessionId: input.sessionId,

@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  acquireProviderStartLease,
   acquireMcpDirectCall,
   beginMcpRuntimeGeneration,
+  commitProviderStartLease,
   countMcpDirectCalls,
   createMcpLifecycleState,
   getMcpRuntimeEpoch,
@@ -11,6 +13,7 @@ import {
   releaseMcpDirectCall,
   retireMcpDirectCalls,
   runMcpLifecycleOperation,
+  runMcpProviderTeardown,
 } from "./mcp-lifecycle";
 
 describe("MCP lifecycle generations", () => {
@@ -157,5 +160,76 @@ describe("MCP lifecycle operation queue", () => {
 
     await expect(failed).rejects.toThrow("expected failure");
     await expect(afterFailure).resolves.toBe("ran");
+  });
+});
+
+describe("provider start lease", () => {
+  it("refuses a paused start after teardown and lets the caller remove staged files", async () => {
+    const state = createMcpLifecycleState();
+    beginMcpRuntimeGeneration(state);
+    const runtimeDir = "/tmp/drift-mcp-paused";
+    const lease = acquireProviderStartLease(state, runtimeDir);
+    expect(lease).toBeDefined();
+
+    const stagedFiles = new Set([
+      `${runtimeDir}/mcp-activity-session.jsonl`,
+      `${runtimeDir}/mcp-approvals-session.json`,
+    ]);
+    let spawnAttempts = 0;
+    let trackedProcesses = 0;
+    let resumeCommit: () => void = () => undefined;
+    const commitAllowed = new Promise<void>((resolve) => {
+      resumeCommit = resolve;
+    });
+
+    const pausedSend = (async () => {
+      await commitAllowed;
+      const result = commitProviderStartLease({
+        state,
+        lease: lease!,
+        currentTempDir: runtimeDir,
+        commit: () => {
+          spawnAttempts += 1;
+          trackedProcesses += 1;
+          return "spawned";
+        },
+      });
+      if (result.kind === "stale") stagedFiles.clear();
+      return result.kind;
+    })();
+
+    await runMcpProviderTeardown(state, async () => {
+      // The send remains paused while teardown invalidates every pending lease
+      // and completes its one process pass.
+      expect(spawnAttempts).toBe(0);
+    });
+    resumeCommit();
+
+    await expect(pausedSend).resolves.toBe("stale");
+    expect(spawnAttempts).toBe(0);
+    expect(trackedProcesses).toBe(0);
+    expect(stagedFiles.size).toBe(0);
+  });
+
+  it("commits spawn and process tracking synchronously while its lease is current", () => {
+    const state = createMcpLifecycleState();
+    beginMcpRuntimeGeneration(state);
+    const runtimeDir = "/tmp/drift-mcp-current";
+    const lease = acquireProviderStartLease(state, runtimeDir);
+    expect(lease).toBeDefined();
+    const events: string[] = [];
+
+    const result = commitProviderStartLease({
+      state,
+      lease: lease!,
+      currentTempDir: runtimeDir,
+      commit: () => {
+        events.push("spawn", "track");
+        return 42;
+      },
+    });
+
+    expect(result).toEqual({ kind: "committed", value: 42 });
+    expect(events).toEqual(["spawn", "track"]);
   });
 });
