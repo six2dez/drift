@@ -297,6 +297,10 @@ A6 as *mechanism* claims, for the confounder in (2):
 measured, not both.** A6 was measured. A1's reading is **RETRACTED**. The superseded 2026-08-24 and
 2026-08-27 texts are both preserved as block quotes and neither is deleted.
 
+<!-- DRIFT:A1-CORRECTION:BEGIN -->
+**A1 correction:** The repaired three-valued probe CONFIRMED the favourable A1 outcome on 2026-08-31. The invalid 2026-08-27 reading remains RETRACTED as of 2026-08-28 and is preserved only as history.
+<!-- DRIFT:A1-CORRECTION:END -->
+
 - **A1 — RETRACTED 2026-08-28, NOT measured.** The probe determined liveness with
   `signalRef.process?.kill?.(grandchildPid, 0) ?? false` — an optional call on a primitive the SAME
   diagnostics run measured absent (`typeof process.kill` = `"undefined"`) — and coalesced the absent

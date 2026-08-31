@@ -291,6 +291,10 @@ blobs and accepts seven by name; each unpinned name is a hole in the immutabilit
 Inherited from plan 08-11 and not any later plan's to close. *What would close it:* promote all
 seven to pinned blob hashes once the gap-closure round is finished and the files stop moving.
 
+**CLOSED 2026-08-31 by Plan 08-18.** ARM C now pins 08-11 through 08-17 to their exact HEAD blobs.
+Only the two not-yet-generated execution outputs, 08-18 and 08-19, remain in
+`SUMMARY_EXPECTED_OUTPUTS`; any other discovered SUMMARY still fails ARM C under T-08-83.
+
 **9. Ledger entries 7 and 10 are not byte-identical across their markdown row and their JSON
 object** — a doubled backslash in the row where the JSON carries one (entry 7 at char 226, entry 10
 at char 255). Both are Phase 6 entries, both already `fixed`. Observed by plan 08-16 and left
@@ -299,6 +303,11 @@ escaping fix in whichever representation is wrong, with the parity check re-run.
 
 **10. THE A1 PROPAGATION FOLLOW-UP — `verdict-gate.sh` is RED and is EXPECTED to stay red until
 this lands. NEW 2026-08-31, created by the reading rather than closed by it.**
+
+**CLOSED 2026-08-31 by Plan 08-18.** The eight A1 carriers and the two live pointers in ROADMAP
+and REQUIREMENTS now carry the repaired result while preserving the invalid reading as retracted
+history. Both the executable self-test and unchanged three-arm default gate are green evidence;
+LIF-01 and LIF-02 remain open because this closure repairs record integrity, not runtime proof.
 
 `08-SPIKE.md` now states A1's causal half favourably, in Table 1's verdict cell, and it is the only
 carrier in the tree that does. Its exact wording is block-quoted here rather than restated on a live

@@ -402,6 +402,10 @@ Plans:
 
 *Third gap-closure round (added 2026-08-31 from `08-VERIFICATION.md`; two record-integrity gaps after re-verification at 9/14). Runtime behavior is deliberately out of scope: this round converges the repaired A1 verdict across its live carriers and brings the Phase 8 threat register up to the code and executable support artifacts it claims to audit.*
 
+<!-- DRIFT:A1-CORRECTION:BEGIN -->
+**A1 correction:** The repaired three-valued probe CONFIRMED the favourable A1 outcome on 2026-08-31. The invalid 2026-08-27 reading remains RETRACTED as of 2026-08-28 and is preserved only as history.
+<!-- DRIFT:A1-CORRECTION:END -->
+
 **Gap Wave 11** *(blocked on Gap Wave 10; A1 carrier convergence must land before the shared security record is re-audited)*
 
 - [ ] 08-18-PLAN.md — Propagate the repaired 2026-08-31 A1 verdict across all live carriers and pointers while preserving the invalid 2026-08-27 reading as a marked retraction; harden `verdict-gate.sh` and pin the historical record class (LIF-01, LIF-02)
