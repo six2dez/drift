@@ -1,63 +1,51 @@
 ---
 phase: 08-process-lifecycle
-fixed_at: 2026-08-31T14:15:19Z
+fixed_at: 2026-08-31T14:40:39Z
 review_path: .planning/phases/08-process-lifecycle/08-REVIEW.md
-iteration: 2
-findings_in_scope: 5
-fixed: 5
+iteration: 3
+findings_in_scope: 3
+fixed: 3
 skipped: 0
 status: all_fixed
 ---
 
 # Phase 8: Code Review Fix Report
 
-**Fixed at:** 2026-08-31T14:15:19Z
+**Fixed at:** 2026-08-31T14:40:39Z
 **Source review:** `.planning/phases/08-process-lifecycle/08-REVIEW.md`
-**Iteration:** 2
+**Iteration:** 3 (final fixer iteration)
 
 **Summary:**
 
-- Findings in scope: 5
-- Fixed: 5
+- Findings in scope: 3 warnings
+- Fixed: 3
 - Skipped: 0
-- Atomic fix commits: 5
+- Atomic fix commits: 4 (WR-01 required a second atomic unit for a newly observed retired-root residual)
 
 ## Fixed Issues
 
-### CR-01: A provider start can escape MCP teardown after its one-shot process pass
+### WR-01: A send already in preparation can start after Stop has completed
 
-**Status:** Fixed — requires human/runtime verification of the lifecycle interleaving.
+**Status:** Fixed — requires real-Caido runtime verification of the lifecycle interleaving.
+**Files modified:** `packages/backend/src/index.ts`, `packages/backend/src/index.source.test.ts`
+**Commits:** `8f09a58`, `7f73829`
+**Applied fix:** `sendCliMessage` now acquires its epoch/temp-directory preparation identity synchronously before `await dataReady`, and one outer `finally` releases it across every early return and exception. Stop can therefore invalidate a send already waiting in data, project, or command preparation; the later synchronous commit refuses the spawn. The provider lifetime remains outside the lifecycle FIFO.
+
+During implementation, the earlier identity exposed a second bounded interleaving: preparation resumed after Stop could recreate the retired directory before the stale commit was refused. The per-file cleanup now removes that captured root only when it is no longer the current runtime, preventing an abandoned empty staging directory without touching a replacement generation. This residual was reproduced red and closed in `7f73829`; no fourth fixer pass was opened.
+
+### WR-02: Successful Copilot turns retain their token-bearing MCP config until full runtime teardown
+
+**Status:** Fixed.
+**Files modified:** `packages/backend/src/index.ts`, `packages/backend/src/index.source.test.ts`
+**Commit:** `51155ac`
+**Applied fix:** Claude and Copilot now transfer every per-turn token-bearing config path into one provider-neutral ownership set. Both the committed `finalize` funnel (success, asynchronous spawn error, timeout) and the outer abort funnel (planning error, synchronous spawn throw, stale lease) consume that same owner. Consumption clears the set synchronously before the first unlink await, so the second funnel is an idempotent no-op rather than a double unlink. Diagnostics also iterate the provider-neutral owner.
+
+### WR-03: Start reuses an auth-valid runtime without checking that its runtime files exist
+
+**Status:** Fixed — requires real-Caido runtime verification of filesystem behavior.
 **Files modified:** `packages/backend/src/index.ts`, `packages/backend/src/index.source.test.ts`, `packages/backend/src/mcp-lifecycle.ts`, `packages/backend/src/mcp-lifecycle.test.ts`
-**Commit:** `4e170a7`
-**Applied fix:** Added short provider-start leases bound to the captured MCP epoch and temp directory. Teardown invalidates pending leases before its process pass; immediately before launch, a send revalidates its lease and commits `spawnWithEnv` plus `activeProcesses.set` synchronously. Session files and provider configuration are built against the captured directory and are removed when preparation fails or the lease becomes stale. The provider lifetime is not placed on the lifecycle FIFO.
-
-### CR-02: The COMSPEC fail-closed throw bypasses orchestrator cleanup
-
-**Status:** Fixed — requires human/runtime verification of every orchestration boundary.
-**Files modified:** `packages/backend/src/spawn-plan.ts`, `packages/backend/src/spawn-plan.test.ts`, `packages/backend/src/mcp-server-spec.ts`, `packages/backend/src/mcp-server-spec.test.ts`, `packages/backend/src/index.ts`, `packages/backend/src/index.source.test.ts`
-**Commit:** `8b6b00a`
-**Applied fix:** Added a typed spawn-planning result while retaining the pure planner's fail-closed throw. Start and refresh propagate registration refusals into full runtime cleanup; send removes every staged session/config/debug file; unregister and sweep record `MCP_REMOVE_PLAN_REFUSED` but continue through termination, reap, and directory cleanup. Refusals are diagnosed as `plan=refused` without inventing an exit code.
-
-### WR-01: A second Start abandons the current runtime directory and generation
-
-**Status:** Fixed — requires human/runtime verification of lifecycle reuse/replacement behavior.
-**Files modified:** `packages/backend/src/mcp-lifecycle.ts`, `packages/backend/src/mcp-lifecycle.test.ts`, `packages/backend/src/index.ts`, `packages/backend/src/index.source.test.ts`
-**Commit:** `a77a42c`
-**Applied fix:** Added an explicit `start`, `reuse`, or `replace` disposition inside the lifecycle FIFO. A healthy active runtime returns its current status without advancing the epoch; an unhealthy active runtime receives complete cleanup before replacement. The two-Start model asserts a single live epoch and staging root.
-
-### WR-02: Windows test cleanup can signal a recycled PID after proving the fixture dead
-
-**Status:** Fixed.
-**Files modified:** `packages/backend/src/kill-tree.win32.test.ts`, `packages/backend/src/kill-tree.win32.gate.test.ts`
-**Commit:** `917a3f8`
-**Applied fix:** Cleanup now retains owned parent process handles, removes them as soon as their exit event is observed, and never force-signals a numeric PID already established dead. The unowned grandchild relies on its bounded self-exit instead of a raw PID signal. The portable gate prohibits reintroducing raw `process.kill(..., "SIGKILL")` cleanup.
-
-### WR-03: The Windows kill-tree gate can stay green after deletion of the behavioral test
-
-**Status:** Fixed.
-**Files modified:** `.github/workflows/ci.yml`, `packages/backend/src/kill-tree.win32.gate.test.ts`
-**Commit:** `72dad7c`
-**Applied fix:** The Windows CI predicate now requires exactly two passed assertions, zero pending assertions, and the exact passed behavioral assertion named `the plan's argv brings down a real process tree`. Portable mutation tests prove that a one-test report and a report lacking that behavioral identity are rejected, while the exact two-test report is accepted.
+**Commit:** `b765e3b`
+**Applied fix:** The reuse contract no longer accepts one opaque `runtimeHealthy` boolean. It requires auth, a current token, a present directory, the staged `mcp-server.mjs`, and `mcp-context.json`. While still inside the lifecycle FIFO, Start captures the current directory and measures it with the existing `fs/promises` `stat`/`fileExists` boundary; a missing or non-directory root, or a missing/unstatable script or context, fails closed to full replacement cleanup.
 
 ## Skipped Issues
 
@@ -67,24 +55,26 @@ None.
 
 All verification ran in the **main checkout** because `.planning/config.json` sets `workflow.use_worktrees` to `false`.
 
-- Red/green regression checks were captured before each fix: CR-01 reproduced four failures then passed its 82-test directed set; CR-02 reproduced eight failures then passed 165 directed tests; WR-01 reproduced four failures then passed 90 directed tests; WR-02 and WR-03 each reproduced their unsafe/weak gate condition before their focused portable gates passed.
-- `pnpm exec vitest run`: exit 0; 40 files passed and 2 Windows-only files skipped; 772 tests passed and 8 skipped out of 780.
-- `pnpm typecheck`: exit 0 across shared, backend, and frontend.
-- `pnpm lint`: exit 0 with `--max-warnings 0`.
-- `pnpm build`: exit 0; backend, frontend, package directory, and ZIP built successfully on macOS.
+- WR-01 red/green: the source-order regression failed with lease acquisition after the first await, then the directed lifecycle/source set passed 90/90. The newly observed retired-root ownership test also failed before `cleanupRetiredProviderStartRoot` existed and passed after the fix.
+- WR-02 red/green: the ownership regression failed because neither config entered a common owner; after the fix, all 80 source-orchestration tests passed, with backend typecheck and lint at exit 0.
+- WR-03 red/green: three directed tests failed before the explicit artifact contract and in-FIFO inspection; afterward the Start/lifecycle set passed 96/96.
+- Final `pnpm exec vitest run`: exit 0; 40 test files passed and 2 Windows-only files skipped; 778 tests passed and 8 skipped out of 786.
+- Final `pnpm typecheck`: exit 0 across shared, backend, and frontend.
+- Final `pnpm lint`: exit 0 with `--max-warnings 0`.
+- Final `pnpm build`: exit 0; backend, frontend, package directory, and ZIP built successfully on macOS.
 - `threat-register-gate.test.sh`: exit 0; 26 cases passed.
 - `threat-register-gate.sh --self-scan`: exit 0; `packages=94`, `support=5`, `register=88+SC`.
 - `threat-register-gate.sh`: exit 0 with the same census.
 - `verdict-gate.sh`: exit 0; Arms A, B, and C passed.
 - `verify-a1-patch.sh`: exit 0; the patch applied at `68199fa`, typechecked, and built 5 files / 2,548,188 bytes plus a 2,549,148-byte ZIP. Registered worktrees remained 1 before and after, and `packages/` remained clean.
-- `git diff --check`: exit 0.
+- Final `git diff --check`: exit 0.
 
-The full suite's eight skips are six `spawn-plan.win32.test.ts` cases and two `kill-tree.win32.test.ts` cases. No native-Windows behavior or real-Caido QuickJS/LLRT lifecycle interleaving was executed in this fix pass. The strengthened Windows gate is portable/static and synthetic-report evidence; native behavior remains owned by `windows-latest` CI or real hardware.
+The eight skipped tests are the six native `spawn-plan.win32.test.ts` cases and two native `kill-tree.win32.test.ts` cases. No native-Windows behavior or real-Caido QuickJS/LLRT lifecycle interleaving was executed in this fix pass. Windows gates remain portable/static evidence plus synthetic-report validation; native behavior remains owned by `windows-latest` CI or real hardware.
 
 Pre-existing user changes in `.planning/PROJECT.md`, `.planning/phases/08-process-lifecycle/08-VERIFICATION.md`, and unrelated untracked planning files were preserved and excluded from every fix commit. This report is deliberately not committed; the review orchestrator owns it.
 
 ---
 
-_Fixed: 2026-08-31T14:15:19Z_
+_Fixed: 2026-08-31T14:40:39Z_
 _Fixer: the agent (gsd-code-fixer)_
-_Iteration: 2_
+_Iteration: 3_
