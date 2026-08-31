@@ -172,6 +172,225 @@ QUOTE_STRIP='/^[[:space:]]*(\/\/[[:space:]]*)?>/d'
 FAILED=0
 fail() { echo "FAIL [$1] $2"; FAILED=1; }
 
+# =============================================================================
+# PLAN 08-18 SELF-TEST SPECIFICATION (TDD RED)
+# =============================================================================
+# The production functions named here are intentionally added in the GREEN
+# change. Keeping the executable specification ahead of the implementation
+# proves that --self-test cannot pass merely because the old OPEN-verdict gate
+# still happens to be syntactically valid.
+CURRENT_MEASUREMENT_DATE='2026-08-31'
+LEGACY_READING_DATE='2026-08-27'
+CURRENT_RESULT_TOKEN='CONFIRMED'
+CURRENT_INSTRUMENT_TOKEN='repaired'
+CURRENT_OUTCOME_TOKEN='favourable'
+MARKDOWN_BEGIN='<!-- DRIFT:A1-CORRECTION:BEGIN -->'
+MARKDOWN_END='<!-- DRIFT:A1-CORRECTION:END -->'
+SOURCE_BEGIN='// DRIFT:A1-CORRECTION:BEGIN'
+SOURCE_END='// DRIFT:A1-CORRECTION:END'
+
+self_ok() { echo "   self-test: pass [$1]"; }
+self_bad() { echo "FAIL [SELF-TEST/$1] $2"; SELF_TEST_FAILED=1; }
+
+self_expect_pass() {
+  local label=$1
+  shift
+  if "$@"; then self_ok "$label"; else self_bad "$label" "expected pass"; fi
+}
+
+self_expect_fail() {
+  local label=$1
+  shift
+  if "$@"; then self_bad "$label" "expected red input to fail"; else self_ok "$label"; fi
+}
+
+write_self_markdown_record() {
+  local path=$1
+  {
+    printf '%s\n' "$MARKDOWN_BEGIN"
+    printf '%s\n' '**A1 correction:** The repaired three-valued probe CONFIRMED the favourable A1 outcome on 2026-08-31. The invalid 2026-08-27 reading remains RETRACTED as of 2026-08-28 and is preserved only as history.'
+    printf '%s\n' "$MARKDOWN_END"
+  } >"$path"
+}
+
+write_self_source_record() {
+  local path=$1
+  {
+    printf '%s\n' "$SOURCE_BEGIN"
+    printf '%s\n' '// A1 correction: The repaired three-valued probe CONFIRMED the favourable A1 outcome on 2026-08-31. The invalid 2026-08-27 reading remains RETRACTED as of 2026-08-28 and is preserved only as history.'
+    printf '%s\n' "$SOURCE_END"
+  } >"$path"
+}
+
+write_self_spike() {
+  local path=$1
+  {
+    printf '%s\n' '---'
+    printf '%s\n' 'measured: "2026-08-28 — the 2026-08-27 reading was RETRACTED; 2026-08-31 — repaired probe run"'
+    printf '%s\n' 'assumptions:'
+    printf '%s\n' '  A1: "CONFIRMED 2026-08-31 (causal half, patched probe); topology half measured as a control pair; the 2026-08-27 reading stays RETRACTED"'
+    printf '%s\n' '---'
+  } >"$path"
+}
+
+init_self_git_fixture() {
+  local repo=$1
+  local content=$2
+  mkdir -p "$repo/summaries"
+  git -C "$repo" init -q
+  git -C "$repo" config user.name 'verdict-gate self-test'
+  git -C "$repo" config user.email 'verdict-gate-self-test@invalid.example'
+  printf '%s\n' "$content" >"$repo/summaries/08-11-SUMMARY.md"
+  git -C "$repo" add summaries/08-11-SUMMARY.md
+  git -C "$repo" commit -qm 'fixture: pin summary'
+}
+
+run_self_test() {
+  local required_fn
+  local tmp
+  local valid_digest
+  local pin
+  local current_pin
+  SELF_TEST_FAILED=0
+
+  echo '== SELF-TEST: verdict-gate production functions =='
+  for required_fn in validate_marker_record validate_spike_record \
+    audit_discovered_records validate_pointer_records validate_summary_integrity; do
+    if ! declare -F "$required_fn" >/dev/null; then
+      self_bad 'red-gate' "production function $required_fn is not implemented"
+    fi
+  done
+  [ "$SELF_TEST_FAILED" = "0" ] || return 1
+
+  tmp=$(mktemp -d "${TMPDIR:-/tmp}/drift-verdict-gate.XXXXXX") || return 1
+  trap 'rm -rf "$tmp"' RETURN
+
+  write_self_markdown_record "$tmp/valid.md"
+  self_expect_pass 'valid-markdown-record' validate_marker_record "$tmp/valid.md" markdown
+
+  cp "$tmp/valid.md" "$tmp/duplicate.md"
+  printf '%s\n' "$MARKDOWN_BEGIN" '**duplicate**' "$MARKDOWN_END" >>"$tmp/duplicate.md"
+  self_expect_fail 'duplicate-marker-pair' validate_marker_record "$tmp/duplicate.md" markdown
+
+  printf '%s\n' "$MARKDOWN_BEGIN" 'current only' >"$tmp/unpaired.md"
+  self_expect_fail 'unpaired-marker' validate_marker_record "$tmp/unpaired.md" markdown
+
+  printf '%s\n' "$MARKDOWN_END" 'reversed' "$MARKDOWN_BEGIN" >"$tmp/reversed.md"
+  self_expect_fail 'reversed-markers' validate_marker_record "$tmp/reversed.md" markdown
+
+  {
+    printf '%s\n' "$MARKDOWN_BEGIN"
+    printf '%s\n' "$MARKDOWN_BEGIN"
+    printf '%s\n' 'nested'
+    printf '%s\n' "$MARKDOWN_END"
+    printf '%s\n' "$MARKDOWN_END"
+  } >"$tmp/nested.md"
+  self_expect_fail 'nested-markers' validate_marker_record "$tmp/nested.md" markdown
+
+  {
+    printf '%s\n' "$MARKDOWN_BEGIN"
+    printf '%s\n' 'The repaired probe CONFIRMED the favourable A1 outcome on 2026-08-31.'
+    printf '\n'
+    printf '%s\n' 'The invalid 2026-08-27 reading remains RETRACTED as of 2026-08-28.'
+    printf '%s\n' "$MARKDOWN_END"
+  } >"$tmp/two-paragraphs.md"
+  self_expect_fail 'markdown-paragraph-separation' validate_marker_record "$tmp/two-paragraphs.md" markdown
+
+  write_self_source_record "$tmp/valid.ts"
+  self_expect_pass 'valid-source-record' validate_marker_record "$tmp/valid.ts" source
+
+  {
+    printf '%s\n' "$SOURCE_BEGIN"
+    printf '%s\n' '// The repaired probe CONFIRMED the favourable A1 outcome on 2026-08-31.'
+    printf '%s\n' '//'
+    printf '%s\n' '// The invalid 2026-08-27 reading remains RETRACTED as of 2026-08-28.'
+    printf '%s\n' "$SOURCE_END"
+  } >"$tmp/two-paragraphs.ts"
+  self_expect_fail 'source-paragraph-separation' validate_marker_record "$tmp/two-paragraphs.ts" source
+
+  {
+    printf '%s\n' "$SOURCE_BEGIN"
+    printf '%s\n' '// The repaired probe CONFIRMED the favourable A1 outcome on 2026-08-31.'
+    printf '%s\n' 'const unrelated = true;'
+    printf '%s\n' '// The invalid 2026-08-27 reading remains RETRACTED as of 2026-08-28.'
+    printf '%s\n' "$SOURCE_END"
+  } >"$tmp/non-comment.ts"
+  self_expect_fail 'source-non-comment-line' validate_marker_record "$tmp/non-comment.ts" source
+
+  cp "$tmp/valid.md" "$tmp/missing-current.md"
+  sed -i.bak "s/$CURRENT_MEASUREMENT_DATE/2026-08-30/" "$tmp/missing-current.md"
+  rm -f "$tmp/missing-current.md.bak"
+  self_expect_fail 'missing-current-epoch' validate_marker_record "$tmp/missing-current.md" markdown
+
+  cp "$tmp/valid.md" "$tmp/missing-retraction.md"
+  sed -i.bak "s/$RETRACTION_TOKEN/withdrawn/" "$tmp/missing-retraction.md"
+  rm -f "$tmp/missing-retraction.md.bak"
+  self_expect_fail 'raw-reading-without-marked-retraction' validate_marker_record "$tmp/missing-retraction.md" markdown
+
+  cp "$tmp/valid.md" "$tmp/stale-open.md"
+  sed -i.bak 's/CONFIRMED the favourable A1 outcome/A1 is OPEN/' "$tmp/stale-open.md"
+  rm -f "$tmp/stale-open.md.bak"
+  self_expect_fail 'stale-open-claim' validate_marker_record "$tmp/stale-open.md" markdown
+
+  mkdir -p "$tmp/discovery-empty" "$tmp/discovery-live"
+  cp "$tmp/valid.md" "$tmp/discovery-live/record.md"
+  self_expect_fail 'empty-discovery' audit_discovered_records "$tmp/discovery-empty"
+  self_expect_pass 'live-discovery' audit_discovered_records "$tmp/discovery-live"
+
+  write_self_spike "$tmp/spike-valid.md"
+  valid_digest=$(shasum -a 256 "$tmp/spike-valid.md" | awk '{print $1}')
+  self_expect_pass 'canonical-spike-record' validate_spike_record "$tmp/spike-valid.md" "$valid_digest"
+
+  cp "$tmp/spike-valid.md" "$tmp/spike-changed.md"
+  sed -i.bak 's/CONFIRMED 2026-08-31/OPEN/' "$tmp/spike-changed.md"
+  rm -f "$tmp/spike-changed.md.bak"
+  self_expect_fail 'changed-spike-scalar' validate_spike_record "$tmp/spike-changed.md" "$valid_digest"
+
+  cp "$tmp/spike-valid.md" "$tmp/spike-duplicate.md"
+  sed -n '4p' "$tmp/spike-valid.md" >>"$tmp/spike-duplicate.md"
+  self_expect_fail 'duplicate-spike-scalar' validate_spike_record "$tmp/spike-duplicate.md" "$(shasum -a 256 "$tmp/spike-duplicate.md" | awk '{print $1}')"
+
+  mkdir -p "$tmp/pointers"
+  write_self_markdown_record "$tmp/pointers/ROADMAP.md"
+  printf '%s\n' '- [ ] **Phase 8: Process Lifecycle**' >>"$tmp/pointers/ROADMAP.md"
+  write_self_markdown_record "$tmp/pointers/REQUIREMENTS.md"
+  printf '%s\n' '- [ ] **LIF-01**: open' '- [ ] **LIF-02**: open' >>"$tmp/pointers/REQUIREMENTS.md"
+  self_expect_pass 'open-live-pointers' validate_pointer_records "$tmp/pointers/ROADMAP.md" "$tmp/pointers/REQUIREMENTS.md"
+  sed -i.bak 's/- \[ \] \*\*LIF-02\*\*/- [x] **LIF-02**/' "$tmp/pointers/REQUIREMENTS.md"
+  rm -f "$tmp/pointers/REQUIREMENTS.md.bak"
+  self_expect_fail 'closed-lif-checkbox' validate_pointer_records "$tmp/pointers/ROADMAP.md" "$tmp/pointers/REQUIREMENTS.md"
+
+  init_self_git_fixture "$tmp/git-committed" 'pinned'
+  pin=$(git -C "$tmp/git-committed" rev-parse HEAD:summaries/08-11-SUMMARY.md)
+  self_expect_pass 'summary-valid-pin' validate_summary_integrity "$tmp/git-committed" summaries "08-11-SUMMARY.md $pin" '08-18-SUMMARY.md'
+  printf '%s\n' 'committed rewrite' >"$tmp/git-committed/summaries/08-11-SUMMARY.md"
+  git -C "$tmp/git-committed" add summaries/08-11-SUMMARY.md
+  git -C "$tmp/git-committed" commit -qm 'fixture: rewrite pinned summary'
+  self_expect_fail 'summary-committed-blob-mismatch' validate_summary_integrity "$tmp/git-committed" summaries "08-11-SUMMARY.md $pin" '08-18-SUMMARY.md'
+
+  init_self_git_fixture "$tmp/git-working" 'pinned'
+  current_pin=$(git -C "$tmp/git-working" rev-parse HEAD:summaries/08-11-SUMMARY.md)
+  printf '%s\n' 'uncommitted rewrite' >"$tmp/git-working/summaries/08-11-SUMMARY.md"
+  self_expect_fail 'summary-uncommitted-edit' validate_summary_integrity "$tmp/git-working" summaries "08-11-SUMMARY.md $current_pin" '08-18-SUMMARY.md'
+
+  init_self_git_fixture "$tmp/git-unexpected" 'pinned'
+  current_pin=$(git -C "$tmp/git-unexpected" rev-parse HEAD:summaries/08-11-SUMMARY.md)
+  printf '%s\n' 'unexpected' >"$tmp/git-unexpected/summaries/08-99-SUMMARY.md"
+  self_expect_fail 'summary-unexpected-discovery' validate_summary_integrity "$tmp/git-unexpected" summaries "08-11-SUMMARY.md $current_pin" '08-18-SUMMARY.md'
+
+  if [ "$SELF_TEST_FAILED" = "0" ]; then
+    echo 'verdict-gate.sh --self-test: PASS'
+    return 0
+  fi
+  echo 'verdict-gate.sh --self-test: FAIL'
+  return 1
+}
+
+if [ "${1:-}" = '--self-test' ]; then
+  run_self_test
+  exit $?
+fi
+
 # -----------------------------------------------------------------------------
 # EXCLUSION LIST — the HISTORICAL-RECORD class, plus this script itself.
 #
