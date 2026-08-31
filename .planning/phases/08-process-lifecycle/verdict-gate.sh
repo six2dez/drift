@@ -1,431 +1,52 @@
 #!/usr/bin/env bash
 # =============================================================================
-# verdict-gate.sh — Phase 8 A1/A6 verdict gate
+# verdict-gate.sh — Phase 8 A1/A6 verdict and historical-record gate
 #
-# Authored by plan 08-10 (2026-08-27). RE-POINTED by plan 08-11 (2026-08-28)
-# after `08-VERIFICATION.md` retracted A1. Re-runnable, committed deliberately so
-# it is a standing control rather than a one-time check. Threat T-08-44.
+# Plan 08-18 re-pointed A1 on 2026-08-31 after the repaired three-valued probe
+# produced a favourable measurement. The invalid 2026-08-27 reading remains
+# RETRACTED as of 2026-08-28; the new reading does not rehabilitate the old one.
 #
-# WHAT IT ASSERTS — four things, and A1's verdict is NOT one of them:
-#   1. No LIVING artifact in this repository presents A1 as measured, or as
-#      having closed in A1's favour. A1's verdict is OPEN.
-#   2. Any artifact that quotes the raw 2026-08-27 instrument output carries the
-#      word RETRACTED in the same file, so the reading cannot be met without its
-#      withdrawal.
-#   3. A6 remains FALSIFIED and every carrier that states an A6 verdict says so,
-#      with the 2026-08-27 measurement date.
-#   4. The dated historical-record class (`*-SUMMARY.md`) is UNMODIFIED, in HEAD
-#      and in the working tree.
+# ARM A discovers every explicit A1 correction under .planning/ and packages/
+# with the existing historical-record exclusions. Every discovered record is
+# parsed with the same exact grammar used by --self-test, and zero discovery is
+# an error. ARM B validates the exact eight-carrier census, the two live
+# pointers, the immutable Spike, and the unchanged A6 contract. ARM C pins the
+# dated SUMMARY class by HEAD blob and rejects working-tree rewrites or an
+# unexpected name.
 #
-#   Each arm below states its RED INPUT in one sentence — the concrete condition
-#   under which it fails. A gate whose red input is not stated is the exact
-#   defect this phase has now shipped thirteen times, and the fourteenth was this
-#   script's own previous version.
-#
-#   A1's favourable reading of 2026-08-27 was RETRACTED on 2026-08-28: the probe
-#   at 68199fa decided liveness with
-#   `signalRef.process?.kill?.(pid, 0) ?? false` on a runtime where the SAME
-#   diagnostics run measured `process.kill` ABSENT, so the optional chain
-#   yielded `undefined`, `?? false` made `alive === false`, and the favourable
-#   string was emitted UNCONDITIONALLY. The red input did not exist, so the
-#   reading carries no information. A6 was measured by direct `ps` observation on
-#   the same date and is FALSIFIED; that reading is NOT withdrawn.
-#
-#   Consequently this gate now asserts the OPPOSITE of what plan 08-10 wrote:
-#   the favourable A1 verdict is the STALE string, and `RETRACTED` is the word
-#   every A1 carrier must carry.
-#
-# WHY IT IS A REPO-WIDE SCAN WITH AN EXCLUSION LIST, AND NOT A LIST OF CARRIERS.
-#   The census of carriers was wrong THREE times while plan 08-10 was being
-#   written: four, then seven, then nine. That is the evidence, not an anecdote.
-#   An INCLUSION-list loop can only ever open the files it already names, so a
-#   carrier missing from the list is invisible to it BY CONSTRUCTION — it fails
-#   OPEN, silently green. Two files (.planning/WINDOWS.md and .planning/STATE.md)
-#   were in fact missing from an earlier draft's list and would have shipped
-#   stale under a green gate.
-#
-#   ARM A therefore INVERTS the shape: it scans .planning/ and packages/ and
-#   skips a short, commented EXCLUSION list. The default for any new or
-#   forgotten carrier is FAIL. Do NOT "simplify" ARM A back into ARM B's
-#   enumerated form — ARM B's list is sound ONLY because ARM A already covers
-#   the hard direction, so ARM B can only ever be too short in the harmless
-#   direction.
-#
-# THREE ARMS
-#   A  discovery (fail-closed), TWO scans: A1-STALE (no live favourable A1
-#      verdict anywhere outside the excluded historical-record class) and
-#      A1-READING (a file may quote the raw 2026-08-27 instrument output — it is
-#      a fact and deleting it would falsify the record — but only if the word
-#      RETRACTED travels with it in the same file)
-#   B  positive content on the known carriers
-#   C  historical-record immutability: the dated *-SUMMARY.md class is untouched
-#      — asserted against PINNED BLOB HASHES in HEAD (committed rewrites) plus a
-#        working-tree diff (uncommitted ones). See ARM C's own header for why the
-#        original `git diff --stat HEAD` alone asserted nothing.
-#
-# Exit 0 = pass. Any non-zero exit names the offending file and the failing arm.
+# Diagnostics intentionally contain paths and record labels only. They never
+# echo a matched line, environment value, token, or token-bearing runtime path.
+# Exit 0 = all three arms pass.
 # =============================================================================
 set -u
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
-cd "$REPO_ROOT" || { echo "FAIL: cannot cd to repo root"; exit 3; }
+cd "$REPO_ROOT" || { echo 'FAIL [SETUP] repository root unavailable'; exit 3; }
 
-# -----------------------------------------------------------------------------
-# THE STALE PATTERN — AN ERE COVERING EVERY SPELLING MEASURED IN THE TREE.
-#
-# MEASURED 2026-08-28 by plan 08-11, over `.planning/` and `packages/` with
-# node_modules/dist/.git pruned, case-insensitively on the stem `favourabl`,
-# BEFORE this pattern was written. No count from any plan document was trusted:
-# the carrier census in this phase has now been wrong FIVE times, which is why
-# this gate consumes no count and enumerates nothing it did not measure.
-#
-# The five spellings the tree actually uses, and the file each was verified
-# against BEFORE the alternative shipped (an alternative matching nothing is a
-# vacuous branch, and this phase has shipped thirteen of those):
-#
-#   1. "CLOSED-FAVOURABLY"          hyphenated frontmatter form   3 files
-#                                   e.g. 08-SPIKE.md `A1: CLOSED-FAVOURABLY`
-#   2. "CLOSED FAVOURABLY"          spaced uppercase prose form  15 files
-#                                   e.g. kill-plan.ts `Verdict: **CLOSED FAVOURABLY — measured**`
-#   3. "closed favourably"          lowercase prose form         15 files
-#                                   e.g. STATE.md `(A1 closed favourably, A6 **FALSIFIED** ...)`
-#   4. "measured favourably"        the ROADMAP/REQUIREMENTS form 7 files
-#                                   e.g. REQUIREMENTS.md LIF-02, ROADMAP.md SC-2
-#   5. "favourably by measurement"  the LINE-WRAPPED form         1 file
-#                                   08-SECURITY.md:601-602 wraps between
-#                                   "closed" and "favourably", so spellings 2
-#                                   and 3 both miss it. A line-oriented gate
-#                                   that does not enumerate the wrap fails OPEN
-#                                   on exactly one file, silently.
-#
-# Spellings 1-2 are matched case-SENSITIVELY as written; the pattern is
-# deliberately NOT anchored on the token "A1", because kill-plan.ts:77 states the
-# verdict in a table cell (`Verdict: **CLOSED FAVOURABLY — measured**`) with the
-# assumption name three lines above it. Anchoring on A1 would fail open there.
-# -----------------------------------------------------------------------------
-STALE_VERDICT_ERE='CLOSED[- ]FAVOURABLY|closed favourably|measured favourably|favourably by measurement'
-
-# -----------------------------------------------------------------------------
-# THE OUTCOME-MAPPING EXEMPTION, AND ITS COUNTERWEIGHT.
-#
-# `08-SPIKE.md` § *How to run this spike later* maps each possible instrument
-# output onto the verdict it would license:
-#
-#   - `grandchild-died (detached honoured)` → A1 closed favourably; ...
-#   Equal → A6 closed favourably: the MCP child sits in the CLI's group ...
-#
-# Those two lines are DECISION RULES for a future re-run, not claims about what
-# was measured, and they remain true after the retraction. Byte-for-byte they are
-# indistinguishable from a live claim, so the only discriminator available is the
-# arrow: the verdict phrase appears as the CONSEQUENT of "→".
-#
-# MEASURED 2026-08-28: exactly two lines in the whole tree match this shape, both
-# in 08-SPIKE.md, and both are in the procedure section. This is a hole, so it is
-# closed in the other direction rather than trusted: the A1 line ALSO carries the
-# raw 2026-08-27 reading string, so scan A1-READING below requires its file to
-# carry `RETRACTED`, and the A6 line states a verdict this gate does not police
-# in that direction (A6 is FALSIFIED; a favourable A6 claim would be caught by
-# ARM B's FALSIFIED requirement on the same file).
-#
-# Note that "→" is NOT the em dash "—" used in prose, and ROADMAP.md's
-# `SIGTERM→SIGKILL` is unaffected because that line carries spelling 4 rather
-# than spellings 2-3; verified by measurement before this exemption shipped.
-# -----------------------------------------------------------------------------
-OUTCOME_RULE_ERE='→.*(closed favourably|CLOSED[- ]FAVOURABLY)'
-
-# -----------------------------------------------------------------------------
-# THE RAW READING, AND THE WORD THAT MUST TRAVEL WITH IT.
-#
-# `grandchild-died (detached honoured)` is what the instrument PRINTED on
-# 2026-08-27. That is a fact and deleting it from any artifact would falsify the
-# record — the reading is real; the verdict drawn from it was not. So the raw
-# string is allowed to live anywhere, on ONE condition: the file that quotes it
-# must also carry RETRACTION_TOKEN, so a reader cannot meet the reading without
-# meeting its withdrawal.
-#
-# Parentheses are escaped: this is consumed as an ERE, not a fixed string.
-# -----------------------------------------------------------------------------
-READING_ERE='grandchild-died \(detached honoured\)'
-
-# One word, in one variable, so ARM A and ARM B can never drift onto two
-# different spellings of the same requirement.
-RETRACTION_TOKEN='RETRACTED'
-
-# The date the retraction landed in the carriers. A carrier that still says only
-# 2026-08-27 is a carrier nobody corrected, so ARM B requires BOTH dates on every
-# file that states an A1 verdict: the measurement date and the retraction date.
-RETRACTION_DATE='2026-08-28'
-
-# The date A6 was measured. NOT withdrawn, NOT softened, NOT bundled into the A1
-# retraction — the two assumptions were measured by different instruments and
-# only one reading is being taken back.
-MEASUREMENT_DATE='2026-08-27'
-
-# Strips MARKED-CORRECTION block quotes in both dialects before counting:
-#   markdown  "> superseded text"
-#   source    "// > superseded text"
-# Preserved superseded text must NOT satisfy the gate, and a re-introduced
-# ACTIVE claim must not be able to hide inside a quote. Stripping first is what
-# makes the gate red in both directions.
-QUOTE_STRIP='/^[[:space:]]*(\/\/[[:space:]]*)?>/d'
-
-FAILED=0
-fail() { echo "FAIL [$1] $2"; FAILED=1; }
-
-# =============================================================================
-# PLAN 08-18 SELF-TEST SPECIFICATION (TDD RED)
-# =============================================================================
-# The production functions named here are intentionally added in the GREEN
-# change. Keeping the executable specification ahead of the implementation
-# proves that --self-test cannot pass merely because the old OPEN-verdict gate
-# still happens to be syntactically valid.
 CURRENT_MEASUREMENT_DATE='2026-08-31'
 LEGACY_READING_DATE='2026-08-27'
+RETRACTION_DATE='2026-08-28'
 CURRENT_RESULT_TOKEN='CONFIRMED'
 CURRENT_INSTRUMENT_TOKEN='repaired'
 CURRENT_OUTCOME_TOKEN='favourable'
+RETRACTION_TOKEN='RETRACTED'
+
 MARKDOWN_BEGIN='<!-- DRIFT:A1-CORRECTION:BEGIN -->'
 MARKDOWN_END='<!-- DRIFT:A1-CORRECTION:END -->'
 SOURCE_BEGIN='// DRIFT:A1-CORRECTION:BEGIN'
 SOURCE_END='// DRIFT:A1-CORRECTION:END'
 
-self_ok() { echo "   self-test: pass [$1]"; }
-self_bad() { echo "FAIL [SELF-TEST/$1] $2"; SELF_TEST_FAILED=1; }
+SPIKE_PATH='.planning/phases/08-process-lifecycle/08-SPIKE.md'
+SPIKE_SHA256='7c482d7fd539f84c8e44fcfe9036b454a868767b719bd8a91d35ac70d8a9745f'
+SPIKE_A1_LINE='  A1: "CONFIRMED 2026-08-31 (causal half, patched probe); topology half measured as a control pair; the 2026-08-27 reading stays RETRACTED"'
 
-self_expect_pass() {
-  local label=$1
-  shift
-  if "$@"; then self_ok "$label"; else self_bad "$label" "expected pass"; fi
-}
+FAILED=0
+fail() { echo "FAIL [$1] $2"; FAILED=1; }
 
-self_expect_fail() {
-  local label=$1
-  shift
-  if "$@"; then self_bad "$label" "expected red input to fail"; else self_ok "$label"; fi
-}
-
-write_self_markdown_record() {
-  local path=$1
-  {
-    printf '%s\n' "$MARKDOWN_BEGIN"
-    printf '%s\n' '**A1 correction:** The repaired three-valued probe CONFIRMED the favourable A1 outcome on 2026-08-31. The invalid 2026-08-27 reading remains RETRACTED as of 2026-08-28 and is preserved only as history.'
-    printf '%s\n' "$MARKDOWN_END"
-  } >"$path"
-}
-
-write_self_source_record() {
-  local path=$1
-  {
-    printf '%s\n' "$SOURCE_BEGIN"
-    printf '%s\n' '// A1 correction: The repaired three-valued probe CONFIRMED the favourable A1 outcome on 2026-08-31. The invalid 2026-08-27 reading remains RETRACTED as of 2026-08-28 and is preserved only as history.'
-    printf '%s\n' "$SOURCE_END"
-  } >"$path"
-}
-
-write_self_spike() {
-  local path=$1
-  {
-    printf '%s\n' '---'
-    printf '%s\n' 'measured: "2026-08-28 — the 2026-08-27 reading was RETRACTED; 2026-08-31 — repaired probe run"'
-    printf '%s\n' 'assumptions:'
-    printf '%s\n' '  A1: "CONFIRMED 2026-08-31 (causal half, patched probe); topology half measured as a control pair; the 2026-08-27 reading stays RETRACTED"'
-    printf '%s\n' '---'
-  } >"$path"
-}
-
-init_self_git_fixture() {
-  local repo=$1
-  local content=$2
-  mkdir -p "$repo/summaries"
-  git -C "$repo" init -q
-  git -C "$repo" config user.name 'verdict-gate self-test'
-  git -C "$repo" config user.email 'verdict-gate-self-test@invalid.example'
-  printf '%s\n' "$content" >"$repo/summaries/08-11-SUMMARY.md"
-  git -C "$repo" add summaries/08-11-SUMMARY.md
-  git -C "$repo" commit -qm 'fixture: pin summary'
-}
-
-run_self_test() {
-  local required_fn
-  local tmp
-  local valid_digest
-  local pin
-  local current_pin
-  SELF_TEST_FAILED=0
-
-  echo '== SELF-TEST: verdict-gate production functions =='
-  for required_fn in validate_marker_record validate_spike_record \
-    audit_discovered_records validate_pointer_records validate_summary_integrity; do
-    if ! declare -F "$required_fn" >/dev/null; then
-      self_bad 'red-gate' "production function $required_fn is not implemented"
-    fi
-  done
-  [ "$SELF_TEST_FAILED" = "0" ] || return 1
-
-  tmp=$(mktemp -d "${TMPDIR:-/tmp}/drift-verdict-gate.XXXXXX") || return 1
-  trap 'rm -rf "$tmp"' RETURN
-
-  write_self_markdown_record "$tmp/valid.md"
-  self_expect_pass 'valid-markdown-record' validate_marker_record "$tmp/valid.md" markdown
-
-  cp "$tmp/valid.md" "$tmp/duplicate.md"
-  printf '%s\n' "$MARKDOWN_BEGIN" '**duplicate**' "$MARKDOWN_END" >>"$tmp/duplicate.md"
-  self_expect_fail 'duplicate-marker-pair' validate_marker_record "$tmp/duplicate.md" markdown
-
-  printf '%s\n' "$MARKDOWN_BEGIN" 'current only' >"$tmp/unpaired.md"
-  self_expect_fail 'unpaired-marker' validate_marker_record "$tmp/unpaired.md" markdown
-
-  printf '%s\n' "$MARKDOWN_END" 'reversed' "$MARKDOWN_BEGIN" >"$tmp/reversed.md"
-  self_expect_fail 'reversed-markers' validate_marker_record "$tmp/reversed.md" markdown
-
-  {
-    printf '%s\n' "$MARKDOWN_BEGIN"
-    printf '%s\n' "$MARKDOWN_BEGIN"
-    printf '%s\n' 'nested'
-    printf '%s\n' "$MARKDOWN_END"
-    printf '%s\n' "$MARKDOWN_END"
-  } >"$tmp/nested.md"
-  self_expect_fail 'nested-markers' validate_marker_record "$tmp/nested.md" markdown
-
-  {
-    printf '%s\n' "$MARKDOWN_BEGIN"
-    printf '%s\n' 'The repaired probe CONFIRMED the favourable A1 outcome on 2026-08-31.'
-    printf '\n'
-    printf '%s\n' 'The invalid 2026-08-27 reading remains RETRACTED as of 2026-08-28.'
-    printf '%s\n' "$MARKDOWN_END"
-  } >"$tmp/two-paragraphs.md"
-  self_expect_fail 'markdown-paragraph-separation' validate_marker_record "$tmp/two-paragraphs.md" markdown
-
-  write_self_source_record "$tmp/valid.ts"
-  self_expect_pass 'valid-source-record' validate_marker_record "$tmp/valid.ts" source
-
-  {
-    printf '%s\n' "$SOURCE_BEGIN"
-    printf '%s\n' '// The repaired probe CONFIRMED the favourable A1 outcome on 2026-08-31.'
-    printf '%s\n' '//'
-    printf '%s\n' '// The invalid 2026-08-27 reading remains RETRACTED as of 2026-08-28.'
-    printf '%s\n' "$SOURCE_END"
-  } >"$tmp/two-paragraphs.ts"
-  self_expect_fail 'source-paragraph-separation' validate_marker_record "$tmp/two-paragraphs.ts" source
-
-  {
-    printf '%s\n' "$SOURCE_BEGIN"
-    printf '%s\n' '// The repaired probe CONFIRMED the favourable A1 outcome on 2026-08-31.'
-    printf '%s\n' 'const unrelated = true;'
-    printf '%s\n' '// The invalid 2026-08-27 reading remains RETRACTED as of 2026-08-28.'
-    printf '%s\n' "$SOURCE_END"
-  } >"$tmp/non-comment.ts"
-  self_expect_fail 'source-non-comment-line' validate_marker_record "$tmp/non-comment.ts" source
-
-  cp "$tmp/valid.md" "$tmp/missing-current.md"
-  sed -i.bak "s/$CURRENT_MEASUREMENT_DATE/2026-08-30/" "$tmp/missing-current.md"
-  rm -f "$tmp/missing-current.md.bak"
-  self_expect_fail 'missing-current-epoch' validate_marker_record "$tmp/missing-current.md" markdown
-
-  cp "$tmp/valid.md" "$tmp/missing-retraction.md"
-  sed -i.bak "s/$RETRACTION_TOKEN/withdrawn/" "$tmp/missing-retraction.md"
-  rm -f "$tmp/missing-retraction.md.bak"
-  self_expect_fail 'raw-reading-without-marked-retraction' validate_marker_record "$tmp/missing-retraction.md" markdown
-
-  cp "$tmp/valid.md" "$tmp/stale-open.md"
-  sed -i.bak 's/CONFIRMED the favourable A1 outcome/A1 is OPEN/' "$tmp/stale-open.md"
-  rm -f "$tmp/stale-open.md.bak"
-  self_expect_fail 'stale-open-claim' validate_marker_record "$tmp/stale-open.md" markdown
-
-  mkdir -p "$tmp/discovery-empty" "$tmp/discovery-live"
-  cp "$tmp/valid.md" "$tmp/discovery-live/record.md"
-  self_expect_fail 'empty-discovery' audit_discovered_records "$tmp/discovery-empty"
-  self_expect_pass 'live-discovery' audit_discovered_records "$tmp/discovery-live"
-
-  write_self_spike "$tmp/spike-valid.md"
-  valid_digest=$(shasum -a 256 "$tmp/spike-valid.md" | awk '{print $1}')
-  self_expect_pass 'canonical-spike-record' validate_spike_record "$tmp/spike-valid.md" "$valid_digest"
-
-  cp "$tmp/spike-valid.md" "$tmp/spike-changed.md"
-  sed -i.bak 's/CONFIRMED 2026-08-31/OPEN/' "$tmp/spike-changed.md"
-  rm -f "$tmp/spike-changed.md.bak"
-  self_expect_fail 'changed-spike-scalar' validate_spike_record "$tmp/spike-changed.md" "$valid_digest"
-
-  cp "$tmp/spike-valid.md" "$tmp/spike-duplicate.md"
-  sed -n '4p' "$tmp/spike-valid.md" >>"$tmp/spike-duplicate.md"
-  self_expect_fail 'duplicate-spike-scalar' validate_spike_record "$tmp/spike-duplicate.md" "$(shasum -a 256 "$tmp/spike-duplicate.md" | awk '{print $1}')"
-
-  mkdir -p "$tmp/pointers"
-  write_self_markdown_record "$tmp/pointers/ROADMAP.md"
-  printf '%s\n' '- [ ] **Phase 8: Process Lifecycle**' >>"$tmp/pointers/ROADMAP.md"
-  write_self_markdown_record "$tmp/pointers/REQUIREMENTS.md"
-  printf '%s\n' '- [ ] **LIF-01**: open' '- [ ] **LIF-02**: open' >>"$tmp/pointers/REQUIREMENTS.md"
-  self_expect_pass 'open-live-pointers' validate_pointer_records "$tmp/pointers/ROADMAP.md" "$tmp/pointers/REQUIREMENTS.md"
-  sed -i.bak 's/- \[ \] \*\*LIF-02\*\*/- [x] **LIF-02**/' "$tmp/pointers/REQUIREMENTS.md"
-  rm -f "$tmp/pointers/REQUIREMENTS.md.bak"
-  self_expect_fail 'closed-lif-checkbox' validate_pointer_records "$tmp/pointers/ROADMAP.md" "$tmp/pointers/REQUIREMENTS.md"
-
-  init_self_git_fixture "$tmp/git-committed" 'pinned'
-  pin=$(git -C "$tmp/git-committed" rev-parse HEAD:summaries/08-11-SUMMARY.md)
-  self_expect_pass 'summary-valid-pin' validate_summary_integrity "$tmp/git-committed" summaries "08-11-SUMMARY.md $pin" '08-18-SUMMARY.md'
-  printf '%s\n' 'committed rewrite' >"$tmp/git-committed/summaries/08-11-SUMMARY.md"
-  git -C "$tmp/git-committed" add summaries/08-11-SUMMARY.md
-  git -C "$tmp/git-committed" commit -qm 'fixture: rewrite pinned summary'
-  self_expect_fail 'summary-committed-blob-mismatch' validate_summary_integrity "$tmp/git-committed" summaries "08-11-SUMMARY.md $pin" '08-18-SUMMARY.md'
-
-  init_self_git_fixture "$tmp/git-working" 'pinned'
-  current_pin=$(git -C "$tmp/git-working" rev-parse HEAD:summaries/08-11-SUMMARY.md)
-  printf '%s\n' 'uncommitted rewrite' >"$tmp/git-working/summaries/08-11-SUMMARY.md"
-  self_expect_fail 'summary-uncommitted-edit' validate_summary_integrity "$tmp/git-working" summaries "08-11-SUMMARY.md $current_pin" '08-18-SUMMARY.md'
-
-  init_self_git_fixture "$tmp/git-unexpected" 'pinned'
-  current_pin=$(git -C "$tmp/git-unexpected" rev-parse HEAD:summaries/08-11-SUMMARY.md)
-  printf '%s\n' 'unexpected' >"$tmp/git-unexpected/summaries/08-99-SUMMARY.md"
-  self_expect_fail 'summary-unexpected-discovery' validate_summary_integrity "$tmp/git-unexpected" summaries "08-11-SUMMARY.md $current_pin" '08-18-SUMMARY.md'
-
-  if [ "$SELF_TEST_FAILED" = "0" ]; then
-    echo 'verdict-gate.sh --self-test: PASS'
-    return 0
-  fi
-  echo 'verdict-gate.sh --self-test: FAIL'
-  return 1
-}
-
-if [ "${1:-}" = '--self-test' ]; then
-  run_self_test
-  exit $?
-fi
-
-# -----------------------------------------------------------------------------
-# EXCLUSION LIST — the HISTORICAL-RECORD class, plus this script itself.
-#
-# Deliberately short. EVERY entry is a hole in the scan, so every entry carries
-# a written reason and was verified to actually carry the stale string rather
-# than assumed to.
-#
-#   *-SUMMARY.md      Dated execution records. A SUMMARY dated 2026-08-24 stating
-#                     the verdicts were open, or one dated 2026-08-27 stating A1
-#                     closed favourably, was CORRECT ON ITS DATE; rewriting one
-#                     would falsify the record rather than correct it.
-#                     ARM C asserts this class is UNMODIFIED, so the exclusion is
-#                     checked in both directions rather than merely trusted.
-#   *-PLAN.md         08-06-PLAN.md, 08-10-PLAN.md and 08-11-PLAN.md quote the
-#                     stale string as their SUBJECT. Without this, the gate is
-#                     red on the very plan that defines it.
-#   08-REVIEW-FIX.md  A dated review record. Same rule as a SUMMARY.
-#   *-VERIFICATION.md ADDED 2026-08-28 by plan 08-11. A verification report is a
-#                     dated historical record, and `08-VERIFICATION.md` is the
-#                     document that RETRACTED the reading — its prose necessarily
-#                     quotes the retracted claim in order to describe it (4 live
-#                     occurrences, measured), and the report states explicitly
-#                     that it must not be reworded to make this gate green.
-#                     Excluding it is unavoidable; leaving it unchecked is not,
-#                     so ARM A closes this hole in the other direction exactly as
-#                     ARM C closes the SUMMARY hole: every *-VERIFICATION.md
-#                     under .planning/phases/ that mentions A1 at all MUST carry
-#                     RETRACTION_TOKEN. Verified by inspection 2026-08-28:
-#                     08-VERIFICATION.md carries "reading RETRACTED" (§ Truth
-#                     Verification, A1 row) and "RECORDS A RETRACTED READING"
-#                     (§ Required Artifacts, 08-SPIKE.md row).
-#   verdict-gate.sh   THIS FILE defines the pattern. A repo-wide scan that did
-#                     not skip itself would match its own source and be
-#                     permanently, unfixably red. Easy to miss; not optional.
-# -----------------------------------------------------------------------------
+# Existing exclusions only. Plans, summaries, verification reports, and the
+# dated review record may quote obsolete claims as their subject. ARM C closes
+# the SUMMARY exclusion in the other direction; the immutable Spike is checked
+# explicitly by ARM B rather than excluded here.
 is_excluded() {
   case "$1" in
     *-SUMMARY.md)      return 0 ;;
@@ -437,151 +58,337 @@ is_excluded() {
   return 1
 }
 
-# TRUE when a file makes a claim that the retraction must travel with:
-#   (a) it carries a LIVE (non-block-quoted) occurrence of the raw reading, or
-#   (b) it is a *-VERIFICATION.md under .planning/phases/ that mentions A1 —
-#       the counterweight to that class's exclusion from scan A1-STALE.
-requires_retraction() {
-  case "$1" in
-    .planning/phases/*-VERIFICATION.md)
-      [ "$(grep -c 'A1' "$1")" != "0" ] && return 0 ;;
+# Exact marker parser shared by default mode and --self-test.
+VALIDATION_REASON=''
+validate_marker_record() {
+  local file=$1 style=$2 begin end begin_count end_count begin_line end_line body flattened
+  VALIDATION_REASON=''
+  if [ ! -f "$file" ]; then VALIDATION_REASON='record file missing'; return 1; fi
+  case "$style" in
+    markdown) begin=$MARKDOWN_BEGIN; end=$MARKDOWN_END ;;
+    source) begin=$SOURCE_BEGIN; end=$SOURCE_END ;;
+    *) VALIDATION_REASON='unknown record style'; return 1 ;;
   esac
-  [ "$(sed -E "$QUOTE_STRIP" "$1" | grep -cE "$READING_ERE")" != "0" ] && return 0
-  return 1
+  begin_count=$(grep -Fxc "$begin" "$file" 2>/dev/null || true)
+  end_count=$(grep -Fxc "$end" "$file" 2>/dev/null || true)
+  if [ "$begin_count" != '1' ] || [ "$end_count" != '1' ]; then
+    VALIDATION_REASON='expected exactly one marker pair'; return 1
+  fi
+  begin_line=$(grep -nFx "$begin" "$file" | cut -d: -f1)
+  end_line=$(grep -nFx "$end" "$file" | cut -d: -f1)
+  if [ "$begin_line" -ge "$end_line" ]; then VALIDATION_REASON='marker order is reversed'; return 1; fi
+  if [ $((end_line - begin_line)) -le 1 ]; then VALIDATION_REASON='correction body is empty'; return 1; fi
+  body=$(sed -n "$((begin_line + 1)),$((end_line - 1))p" "$file")
+  if printf '%s\n' "$body" | grep -Fq 'DRIFT:A1-CORRECTION:'; then
+    VALIDATION_REASON='nested or malformed marker in body'; return 1
+  fi
+  if [ "$style" = 'markdown' ]; then
+    if printf '%s\n' "$body" | grep -Eq '^[[:space:]]*$'; then
+      VALIDATION_REASON='Markdown body spans more than one paragraph'; return 1
+    fi
+    flattened=$(printf '%s\n' "$body" | tr '\n' ' ')
+  else
+    if printf '%s\n' "$body" | grep -Evq '^[[:space:]]*//'; then
+      VALIDATION_REASON='source body contains a non-comment line'; return 1
+    fi
+    if printf '%s\n' "$body" | grep -Eq '^[[:space:]]*//[[:space:]]*$'; then
+      VALIDATION_REASON='source body spans more than one comment paragraph'; return 1
+    fi
+    flattened=$(printf '%s\n' "$body" | sed -E 's/^[[:space:]]*\/\/[[:space:]]?//' | tr '\n' ' ')
+  fi
+  if ! printf '%s\n' "$flattened" | grep -Eq "${CURRENT_INSTRUMENT_TOKEN}.*${CURRENT_RESULT_TOKEN}.*${CURRENT_OUTCOME_TOKEN}.*${CURRENT_MEASUREMENT_DATE}"; then
+    VALIDATION_REASON='current repaired-probe epoch/result clause missing'; return 1
+  fi
+  if ! printf '%s\n' "$flattened" | grep -Eq "${LEGACY_READING_DATE}.*${RETRACTION_TOKEN}.*${RETRACTION_DATE}"; then
+    VALIDATION_REASON='legacy reading/retraction epoch clause missing'; return 1
+  fi
+  if printf '%s\n' "$flattened" | grep -Eiq 'A1.{0,24}(is |remains |stays )?(OPEN|unmeasured|not measured)|OPEN.{0,24}A1'; then
+    VALIDATION_REASON='marked current record carries the stale OPEN verdict'; return 1
+  fi
+  return 0
 }
 
-# =============================================================================
-# ARM A — DISCOVERY (FAIL-CLOSED)
-# =============================================================================
-# WHITESPACE-SAFE DISCOVERY (review WR-05), and this is the arm's own design
-# argument applied to its own plumbing rather than a tidy-up.
-#
-# WHAT IT USED TO BE:
-#
-#   find … -type f -print | xargs grep -lE "$STALE_ERE" 2>/dev/null
-#
-# `xargs` without `-0` splits on WHITESPACE and honours quotes, so a path
-# containing a space, a tab, a single quote or a double quote was silently split
-# into operands that do not exist. `grep` reported "No such file or directory"
-# into the `2>/dev/null`, the real carrier never reached the loop, and the gate
-# stayed GREEN with the stale claim sitting in it. That is the FAIL-OPEN property
-# ARM A's header spends a paragraph arguing an inclusion list has — reintroduced
-# through the pipe, in the arm built to avoid it.
-#
-# Measured before the fix: the repo has zero such paths today, so this was LATENT
-# rather than live. It does not stay latent by itself — "Application Support" is
-# a path this project already reasons about, and one artifact named
-# `08 UAT notes.md` is the whole exploit. Verified on exactly that fixture: the
-# old pipeline finds 0, the new one names the file.
-#
-# `-exec … {} +` rather than `xargs -0`, and this is the SECOND attempt at this
-# line rather than the first — the record is kept because the first attempt was
-# worse than the bug. It used `grep -lIZE` plus `read -r -d ''`, on the assumption
-# that `-Z` means `--null`. On GNU grep it does. On FreeBSD/macOS grep, and on the
-# `ugrep` many developers have shadowing `grep` on PATH, **`-Z` means
-# `--decompress`** — so the output stayed newline-delimited, `read -d ''` found no
-# NUL, and the loop ran ZERO times. ARM A would have gone from failing open on
-# whitespace paths to failing open on EVERYTHING, while still printing "pass".
-# Caught by running the fixture; recorded so the flag is not "restored" later.
-#
-# So: only flags GNU grep, BSD grep and ugrep all agree on — `-l`, `-I`, `-E` —
-# and a newline-delimited read. `-I` skips binary files, which `grep -l` would
-# otherwise name and the loop below would then `sed` as text.
-#
-# THE ONE PATH SHAPE THIS STILL CANNOT ENUMERATE is a filename containing a
-# NEWLINE. Rather than leave that as an unstated hole in a fail-closed arm, it is
-# DETECTED: `find -print0` and `find -print` must agree on the number of names,
-# and they cannot when one contains a newline. A repository that ever grows such
-# a path turns this arm RED instead of quietly skipping it.
-#
-# RED INPUT: a non-excluded file under .planning/ or packages/ carrying, outside
-# a block quote, any of the five measured spellings of A1's favourable verdict —
-# or carrying the raw 2026-08-27 reading string without the word RETRACTED
-# anywhere in the same file.
-N_NUL=$(find .planning packages \
-        \( -name node_modules -o -name dist -o -name .git \) -prune -o \
-        -type f -print0 2>/dev/null | tr -cd '\0' | wc -c | tr -d ' ')
-N_LINE=$(find .planning packages \
-         \( -name node_modules -o -name dist -o -name .git \) -prune -o \
-         -type f -print 2>/dev/null | wc -l | tr -d ' ')
-if [ "$N_NUL" != "$N_LINE" ]; then
-  fail "ARM A" "a path under .planning/ or packages/ contains a NEWLINE ($N_NUL names, $N_LINE lines) — the discovery loop cannot enumerate it safely."
-fi
-
-echo "== ARM A: repo-wide discovery (.planning/ and packages/, exclusion-list) =="
-ARM_A_HITS=0
-
-# --- Scan A1-STALE ----------------------------------------------------------
-while IFS= read -r f; do
-  [ -n "$f" ] || continue
-  if is_excluded "$f"; then continue; fi
-  n=$(sed -E "$QUOTE_STRIP" "$f" | grep -E "$STALE_VERDICT_ERE" | grep -cvE "$OUTCOME_RULE_ERE")
-  n=$(printf '%s' "$n" | tr -d ' ')
-  if [ "$n" != "0" ]; then
-    fail "ARM A/A1-STALE" "$f states A1's WITHDRAWN favourable verdict on $n live line(s) (outside any block quote). A1's reading was retracted $RETRACTION_DATE; the verdict is OPEN."
-    ARM_A_HITS=$((ARM_A_HITS + n))
+# Immutable canonical Spike parser. Content checks precede the digest check so
+# a scalar mutation is diagnosed as content rather than merely as changed bytes.
+SPIKE_REASON=''
+validate_spike_record() {
+  local file=$1 expected_digest=$2 frontmatter measured_line measured_count scalar_count actual_digest
+  SPIKE_REASON=''
+  if [ ! -f "$file" ]; then SPIKE_REASON='canonical Spike missing'; return 1; fi
+  scalar_count=$(grep -Fxc "$SPIKE_A1_LINE" "$file" 2>/dev/null || true)
+  if [ "$scalar_count" != '1' ]; then SPIKE_REASON='canonical assumptions.A1 scalar changed or duplicated'; return 1; fi
+  if grep -Fq 'DRIFT:A1-CORRECTION:' "$file"; then SPIKE_REASON='immutable Spike must not contain mutable-carrier markers'; return 1; fi
+  frontmatter=$(awk '
+    NR == 1 && $0 == "---" { inside = 1; next }
+    inside && $0 == "---" { exit }
+    inside { print }
+  ' "$file")
+  measured_count=$(printf '%s\n' "$frontmatter" | grep -c '^measured:' || true)
+  if [ "$measured_count" != '1' ]; then SPIKE_REASON='frontmatter measured scalar missing or duplicated'; return 1; fi
+  measured_line=$(printf '%s\n' "$frontmatter" | grep '^measured:')
+  if ! printf '%s\n' "$measured_line" | grep -Fq "$LEGACY_READING_DATE" ||
+     ! printf '%s\n' "$measured_line" | grep -Fq "$RETRACTION_DATE" ||
+     ! printf '%s\n' "$measured_line" | grep -Fq "$RETRACTION_TOKEN"; then
+    SPIKE_REASON='frontmatter measured scalar lost the legacy retraction epoch'; return 1
   fi
-done < <(
-  find .planning packages \
-       \( -name node_modules -o -name dist -o -name .git \) -prune -o \
-       -type f -exec grep -lIE "$STALE_VERDICT_ERE" {} + 2>/dev/null
-)
+  actual_digest=$(shasum -a 256 "$file" | awk '{print $1}')
+  if [ "$actual_digest" != "$expected_digest" ]; then SPIKE_REASON='canonical Spike digest mismatch'; return 1; fi
+  return 0
+}
 
-# --- Scan A1-READING --------------------------------------------------------
-# The raw instrument output may be quoted anywhere — but only with its
-# withdrawal. The *-VERIFICATION.md class is deliberately NOT skipped here: this
-# is the counterweight to its exclusion from scan A1-STALE above.
-while IFS= read -r f; do
-  [ -n "$f" ] || continue
-  case "$f" in
-    *-VERIFICATION.md) ;;
-    *) if is_excluded "$f"; then continue; fi ;;
-  esac
-  requires_retraction "$f" || continue
-  if [ "$(grep -c "$RETRACTION_TOKEN" "$f")" = "0" ]; then
-    fail "ARM A/A1-READING" "$f carries the raw 2026-08-27 A1 reading (or states an A1 claim in a verification report) but never says $RETRACTION_TOKEN — the reading is a fact, the verdict drawn from it is withdrawn, and the two must travel together."
-    ARM_A_HITS=$((ARM_A_HITS + 1))
+# Fail-closed discovery. Newline-bearing paths are rejected before the portable
+# newline-delimited loop; any correction token found is parsed, not just counted.
+DISCOVERY_REASON=''
+DISCOVERY_PATH='record-set'
+DISCOVERY_COUNT=0
+audit_discovered_records() {
+  local roots=("$@") n_nul n_line root file style
+  DISCOVERY_REASON=''; DISCOVERY_PATH='record-set'; DISCOVERY_COUNT=0
+  if [ "${#roots[@]}" -eq 0 ]; then DISCOVERY_REASON='no discovery roots supplied'; return 1; fi
+  for root in "${roots[@]}"; do
+    if [ ! -e "$root" ]; then DISCOVERY_PATH=$root; DISCOVERY_REASON='discovery root missing'; return 1; fi
+  done
+  n_nul=$(find "${roots[@]}" \
+    \( -name node_modules -o -name dist -o -name .git \) -prune -o \
+    -type f -print0 2>/dev/null | tr -cd '\0' | wc -c | tr -d ' ')
+  n_line=$(find "${roots[@]}" \
+    \( -name node_modules -o -name dist -o -name .git \) -prune -o \
+    -type f -print 2>/dev/null | wc -l | tr -d ' ')
+  if [ "$n_nul" != "$n_line" ]; then DISCOVERY_REASON='newline-bearing path cannot be enumerated safely'; return 1; fi
+  while IFS= read -r file; do
+    [ -n "$file" ] || continue
+    if is_excluded "$file"; then continue; fi
+    DISCOVERY_COUNT=$((DISCOVERY_COUNT + 1))
+    case "$file" in *.ts|*.js|*.mjs) style=source ;; *) style=markdown ;; esac
+    if ! validate_marker_record "$file" "$style"; then
+      DISCOVERY_PATH=$file; DISCOVERY_REASON=$VALIDATION_REASON; return 1
+    fi
+  done < <(
+    find "${roots[@]}" \
+      \( -name node_modules -o -name dist -o -name .git \) -prune -o \
+      -type f -exec grep -lIF 'DRIFT:A1-CORRECTION:' {} + 2>/dev/null | sort -u
+  )
+  if [ "$DISCOVERY_COUNT" = '0' ]; then DISCOVERY_REASON='zero current-verdict records discovered'; return 1; fi
+  return 0
+}
+
+# ROADMAP/REQUIREMENTS are pointers outside CARRIERS_A1. Open checkboxes prevent
+# this evidence-only plan from closing Phase 8 or either lifecycle requirement.
+POINTER_REASON=''
+POINTER_PATH='pointer-set'
+validate_pointer_records() {
+  local roadmap=$1 requirements=$2 pointer_failures=0
+  POINTER_REASON=''; POINTER_PATH="$roadmap, $requirements"
+  if ! validate_marker_record "$roadmap" markdown; then pointer_failures=$((pointer_failures + 1)); fi
+  if [ "$(grep -F -c -- '- [ ] **Phase 8: Process Lifecycle**' "$roadmap" 2>/dev/null || true)" != '1' ]; then
+    pointer_failures=$((pointer_failures + 1))
   fi
-done < <(
+  if ! validate_marker_record "$requirements" markdown; then pointer_failures=$((pointer_failures + 1)); fi
+  if [ "$(grep -F -c -- '- [ ] **LIF-01**' "$requirements" 2>/dev/null || true)" != '1' ]; then
+    pointer_failures=$((pointer_failures + 1))
+  fi
+  if [ "$(grep -F -c -- '- [ ] **LIF-02**' "$requirements" 2>/dev/null || true)" != '1' ]; then
+    pointer_failures=$((pointer_failures + 1))
+  fi
+  if [ "$pointer_failures" != '0' ]; then POINTER_REASON='one or more marker/open-state checks failed'; return 1; fi
+  return 0
+}
+
+# ARM C implementation shared by default mode and temporary Git fixtures.
+# Pins are "name blob" lines. Expected outputs may be absent or present because
+# their executor writes them only after this gate revision.
+SUMMARY_REASON=''
+SUMMARY_PATH='summary-class'
+SUMMARY_PINNED_COUNT=0
+SUMMARY_ON_DISK_COUNT=0
+validate_summary_integrity() {
+  local repo=$1 summary_dir=$2 pins=$3 expected_outputs=$4 name pin actual path base pin_match expected_match
+  SUMMARY_REASON=''; SUMMARY_PATH='summary-class'; SUMMARY_PINNED_COUNT=0; SUMMARY_ON_DISK_COUNT=0
+  if [ ! -d "$repo/$summary_dir" ]; then SUMMARY_REASON='summary directory missing'; return 1; fi
+  if ! git -C "$repo" rev-parse --verify HEAD >/dev/null 2>&1; then SUMMARY_REASON='Git HEAD unavailable'; return 1; fi
+  while read -r name pin; do
+    [ -n "$name" ] || continue
+    SUMMARY_PINNED_COUNT=$((SUMMARY_PINNED_COUNT + 1)); SUMMARY_PATH=$name
+    if [ -z "$pin" ]; then SUMMARY_REASON='pin entry has no blob id'; return 1; fi
+    actual=$(git -C "$repo" rev-parse "HEAD:$summary_dir/$name" 2>/dev/null || true)
+    if [ "$actual" != "$pin" ]; then SUMMARY_REASON='pinned HEAD blob mismatch'; return 1; fi
+  done <<EOF
+$pins
+EOF
+  if [ "$SUMMARY_PINNED_COUNT" = '0' ]; then SUMMARY_REASON='zero pinned summaries'; return 1; fi
+  while IFS= read -r path; do
+    [ -n "$path" ] || continue
+    base=$(basename "$path"); SUMMARY_ON_DISK_COUNT=$((SUMMARY_ON_DISK_COUNT + 1))
+    pin_match=$(printf '%s\n' "$pins" | awk -v wanted="$base" '$1 == wanted { count++ } END { print count + 0 }')
+    expected_match=$(printf '%s\n' "$expected_outputs" | awk -v wanted="$base" '$1 == wanted { count++ } END { print count + 0 }')
+    if [ "$pin_match" -gt 1 ] || [ "$expected_match" -gt 1 ]; then
+      SUMMARY_PATH=$base; SUMMARY_REASON='duplicate pin or expected-output entry'; return 1
+    fi
+    if [ "$pin_match" = '0' ] && [ "$expected_match" = '0' ]; then
+      SUMMARY_PATH=$base; SUMMARY_REASON='unexpected unpinned SUMMARY discovered'; return 1
+    fi
+  done < <(find "$repo/$summary_dir" -maxdepth 1 -name '*-SUMMARY.md' -type f 2>/dev/null | sort)
+  if [ "$SUMMARY_ON_DISK_COUNT" = '0' ]; then SUMMARY_REASON='zero summaries discovered'; return 1; fi
+  if ! git -C "$repo" diff --quiet HEAD -- "$summary_dir/*-SUMMARY.md" 2>/dev/null; then
+    SUMMARY_REASON='dated SUMMARY modified in working tree'; return 1
+  fi
+  return 0
+}
+
+# Executable self-test. Every case calls the same production functions as the
+# default audit. Fixture contents are never printed.
+self_ok() { echo "   self-test: pass [$1]"; }
+self_bad() { echo "FAIL [SELF-TEST/$1] $2"; SELF_TEST_FAILED=1; }
+self_expect_pass() { local label=$1; shift; if "$@"; then self_ok "$label"; else self_bad "$label" 'expected pass'; fi; }
+self_expect_fail() { local label=$1; shift; if "$@"; then self_bad "$label" 'expected red input to fail'; else self_ok "$label"; fi; }
+
+write_self_markdown_record() {
+  local path=$1
   {
-    find .planning packages \
-         \( -name node_modules -o -name dist -o -name .git \) -prune -o \
-         -type f -exec grep -lIE "$READING_ERE" {} + 2>/dev/null
-    find .planning/phases -type f -name '*-VERIFICATION.md' 2>/dev/null
-  } | sort -u
-)
+    printf '%s\n' "$MARKDOWN_BEGIN"
+    printf '%s\n' '**A1 correction:** The repaired three-valued probe CONFIRMED the favourable A1 outcome on 2026-08-31. The invalid 2026-08-27 reading remains RETRACTED as of 2026-08-28 and is preserved only as history.'
+    printf '%s\n' "$MARKDOWN_END"
+  } >"$path"
+}
+write_self_source_record() {
+  local path=$1
+  {
+    printf '%s\n' "$SOURCE_BEGIN"
+    printf '%s\n' '// A1 correction: The repaired three-valued probe CONFIRMED the favourable A1 outcome on 2026-08-31. The invalid 2026-08-27 reading remains RETRACTED as of 2026-08-28 and is preserved only as history.'
+    printf '%s\n' "$SOURCE_END"
+  } >"$path"
+}
+write_self_spike() {
+  local path=$1
+  {
+    printf '%s\n' '---'
+    printf '%s\n' 'measured: "2026-08-27 reading RETRACTED 2026-08-28; repaired probe run 2026-08-31"'
+    printf '%s\n' 'assumptions:'
+    printf '%s\n' "$SPIKE_A1_LINE"
+    printf '%s\n' '---'
+  } >"$path"
+}
+init_self_git_fixture() {
+  local repo=$1 content=$2
+  mkdir -p "$repo/summaries"
+  git -C "$repo" init -q
+  git -C "$repo" config user.name 'verdict-gate self-test'
+  git -C "$repo" config user.email 'verdict-gate-self-test@invalid.example'
+  printf '%s\n' "$content" >"$repo/summaries/08-11-SUMMARY.md"
+  git -C "$repo" add summaries/08-11-SUMMARY.md
+  git -C "$repo" commit -qm 'fixture: pin summary'
+}
 
-[ "$ARM_A_HITS" = "0" ] && echo "   ARM A: pass (0 live favourable-A1 verdicts and 0 unretracted readings outside the excluded historical-record class)"
+run_self_test() {
+  local tmp valid_digest pin current_pin
+  SELF_TEST_FAILED=0
+  echo '== SELF-TEST: exact A1 records and historical pins =='
+  tmp=$(mktemp -d "${TMPDIR:-/tmp}/drift-verdict-gate.XXXXXX") || return 1
 
-# =============================================================================
-# ARM B — POSITIVE CONTENT ON THE KNOWN CARRIERS
-#
-# An explicit list, and that is sound ONLY because ARM A covers the hard
-# direction: a carrier forgotten entirely still trips ARM A, so this list can
-# only ever be too short in the harmless direction.
-#
-# A6 IS UNCHANGED BY THE 2026-08-28 RE-POINTING. Every carrier that states an A6
-# verdict must still carry the word FALSIFIED and the 2026-08-27 measurement
-# date, because A6 was measured that day by direct `ps` observation and that
-# measurement is NOT being withdrawn. Only the A1 half is flipped.
-#
-# THE A1 HALF, FLIPPED. Every carrier that states an A1 verdict must now carry
-# RETRACTION_TOKEN and the RETRACTION_DATE. The second date is the point: a
-# carrier that still says only 2026-08-27 is a carrier nobody corrected, and it
-# would otherwise satisfy the arm on the strength of the very date whose reading
-# was withdrawn.
-#
-# `08-VERIFICATION.md` is in the A6 list but NOT in the A1 list, and that is
-# deliberate rather than an omission: it is the report that performed the
-# retraction on 2026-08-27, it carries no 2026-08-28 date, and plan 08-11
-# prohibits editing it. Its A1 obligation is asserted instead by ARM A's
-# A1-READING scan, which requires every *-VERIFICATION.md mentioning A1 to carry
-# RETRACTION_TOKEN.
-#
-# RED INPUT: any listed carrier that loses the word FALSIFIED or its 2026-08-27
-# date, or any A1 carrier that does not carry both RETRACTED and 2026-08-28.
-# =============================================================================
-echo "== ARM B: positive content on the known carriers =="
+  write_self_markdown_record "$tmp/valid.md"
+  self_expect_pass 'valid-markdown-record' validate_marker_record "$tmp/valid.md" markdown
+  cp "$tmp/valid.md" "$tmp/duplicate.md"
+  printf '%s\n' "$MARKDOWN_BEGIN" '**duplicate**' "$MARKDOWN_END" >>"$tmp/duplicate.md"
+  self_expect_fail 'duplicate-marker-pair' validate_marker_record "$tmp/duplicate.md" markdown
+  printf '%s\n' "$MARKDOWN_BEGIN" 'current only' >"$tmp/unpaired.md"
+  self_expect_fail 'unpaired-marker' validate_marker_record "$tmp/unpaired.md" markdown
+  printf '%s\n' "$MARKDOWN_END" 'reversed' "$MARKDOWN_BEGIN" >"$tmp/reversed.md"
+  self_expect_fail 'reversed-markers' validate_marker_record "$tmp/reversed.md" markdown
+  printf '%s\n' "$MARKDOWN_BEGIN" "$MARKDOWN_BEGIN" 'nested' "$MARKDOWN_END" "$MARKDOWN_END" >"$tmp/nested.md"
+  self_expect_fail 'nested-markers' validate_marker_record "$tmp/nested.md" markdown
+  {
+    printf '%s\n' "$MARKDOWN_BEGIN"
+    printf '%s\n' 'The repaired probe CONFIRMED the favourable A1 outcome on 2026-08-31.'
+    printf '\n'
+    printf '%s\n' 'The invalid 2026-08-27 reading remains RETRACTED as of 2026-08-28.'
+    printf '%s\n' "$MARKDOWN_END"
+  } >"$tmp/two-paragraphs.md"
+  self_expect_fail 'markdown-paragraph-separation' validate_marker_record "$tmp/two-paragraphs.md" markdown
+
+  write_self_source_record "$tmp/valid.ts"
+  self_expect_pass 'valid-source-record' validate_marker_record "$tmp/valid.ts" source
+  {
+    printf '%s\n' "$SOURCE_BEGIN"
+    printf '%s\n' '// The repaired probe CONFIRMED the favourable A1 outcome on 2026-08-31.'
+    printf '%s\n' '//'
+    printf '%s\n' '// The invalid 2026-08-27 reading remains RETRACTED as of 2026-08-28.'
+    printf '%s\n' "$SOURCE_END"
+  } >"$tmp/two-paragraphs.ts"
+  self_expect_fail 'source-paragraph-separation' validate_marker_record "$tmp/two-paragraphs.ts" source
+  {
+    printf '%s\n' "$SOURCE_BEGIN"
+    printf '%s\n' '// The repaired probe CONFIRMED the favourable A1 outcome on 2026-08-31.'
+    printf '%s\n' 'const unrelated = true;'
+    printf '%s\n' '// The invalid 2026-08-27 reading remains RETRACTED as of 2026-08-28.'
+    printf '%s\n' "$SOURCE_END"
+  } >"$tmp/non-comment.ts"
+  self_expect_fail 'source-non-comment-line' validate_marker_record "$tmp/non-comment.ts" source
+
+  cp "$tmp/valid.md" "$tmp/missing-current.md"
+  sed -i.bak "s/$CURRENT_MEASUREMENT_DATE/2026-08-30/" "$tmp/missing-current.md"; rm -f "$tmp/missing-current.md.bak"
+  self_expect_fail 'missing-current-epoch' validate_marker_record "$tmp/missing-current.md" markdown
+  {
+    printf '%s\n' 'Outside record: repaired probe CONFIRMED favourable A1 on 2026-08-31.'
+    printf '%s\n' "$MARKDOWN_BEGIN"
+    printf '%s\n' 'The invalid 2026-08-27 reading remains RETRACTED as of 2026-08-28.'
+    printf '%s\n' "$MARKDOWN_END"
+  } >"$tmp/epoch-outside.md"
+  self_expect_fail 'epoch-outside-marker' validate_marker_record "$tmp/epoch-outside.md" markdown
+  cp "$tmp/valid.md" "$tmp/missing-retraction.md"
+  sed -i.bak "s/$RETRACTION_TOKEN/withdrawn/" "$tmp/missing-retraction.md"; rm -f "$tmp/missing-retraction.md.bak"
+  self_expect_fail 'raw-reading-without-marked-retraction' validate_marker_record "$tmp/missing-retraction.md" markdown
+  cp "$tmp/valid.md" "$tmp/stale-open.md"
+  sed -i.bak 's/CONFIRMED the favourable A1 outcome/A1 is OPEN/' "$tmp/stale-open.md"; rm -f "$tmp/stale-open.md.bak"
+  self_expect_fail 'stale-open-claim' validate_marker_record "$tmp/stale-open.md" markdown
+
+  mkdir -p "$tmp/discovery-empty" "$tmp/discovery-live"
+  cp "$tmp/valid.md" "$tmp/discovery-live/record.md"
+  self_expect_fail 'empty-discovery' audit_discovered_records "$tmp/discovery-empty"
+  self_expect_pass 'live-discovery' audit_discovered_records "$tmp/discovery-live"
+
+  write_self_spike "$tmp/spike-valid.md"
+  valid_digest=$(shasum -a 256 "$tmp/spike-valid.md" | awk '{print $1}')
+  self_expect_pass 'canonical-spike-record' validate_spike_record "$tmp/spike-valid.md" "$valid_digest"
+  cp "$tmp/spike-valid.md" "$tmp/spike-changed.md"
+  sed -i.bak 's/CONFIRMED 2026-08-31/OPEN/' "$tmp/spike-changed.md"; rm -f "$tmp/spike-changed.md.bak"
+  self_expect_fail 'changed-spike-scalar' validate_spike_record "$tmp/spike-changed.md" "$valid_digest"
+  cp "$tmp/spike-valid.md" "$tmp/spike-duplicate.md"
+  sed -n '4p' "$tmp/spike-valid.md" >>"$tmp/spike-duplicate.md"
+  self_expect_fail 'duplicate-spike-scalar' validate_spike_record "$tmp/spike-duplicate.md" "$(shasum -a 256 "$tmp/spike-duplicate.md" | awk '{print $1}')"
+  cp "$tmp/spike-valid.md" "$tmp/spike-measured.md"
+  sed -i.bak 's/2026-08-28/2026-08-29/' "$tmp/spike-measured.md"; rm -f "$tmp/spike-measured.md.bak"
+  self_expect_fail 'spike-measured-retraction-date' validate_spike_record "$tmp/spike-measured.md" "$(shasum -a 256 "$tmp/spike-measured.md" | awk '{print $1}')"
+
+  mkdir -p "$tmp/pointers"
+  write_self_markdown_record "$tmp/pointers/ROADMAP.md"
+  printf '%s\n' '- [ ] **Phase 8: Process Lifecycle**' >>"$tmp/pointers/ROADMAP.md"
+  write_self_markdown_record "$tmp/pointers/REQUIREMENTS.md"
+  printf '%s\n' '- [ ] **LIF-01**: open' '- [ ] **LIF-02**: open' >>"$tmp/pointers/REQUIREMENTS.md"
+  self_expect_pass 'open-live-pointers' validate_pointer_records "$tmp/pointers/ROADMAP.md" "$tmp/pointers/REQUIREMENTS.md"
+  sed -i.bak 's/- \[ \] \*\*LIF-02\*\*/- [x] **LIF-02**/' "$tmp/pointers/REQUIREMENTS.md"; rm -f "$tmp/pointers/REQUIREMENTS.md.bak"
+  self_expect_fail 'closed-lif-checkbox' validate_pointer_records "$tmp/pointers/ROADMAP.md" "$tmp/pointers/REQUIREMENTS.md"
+
+  init_self_git_fixture "$tmp/git-committed" 'pinned'
+  pin=$(git -C "$tmp/git-committed" rev-parse HEAD:summaries/08-11-SUMMARY.md)
+  self_expect_pass 'summary-valid-pin' validate_summary_integrity "$tmp/git-committed" summaries "08-11-SUMMARY.md $pin" '08-18-SUMMARY.md'
+  printf '%s\n' 'committed rewrite' >"$tmp/git-committed/summaries/08-11-SUMMARY.md"
+  git -C "$tmp/git-committed" add summaries/08-11-SUMMARY.md
+  git -C "$tmp/git-committed" commit -qm 'fixture: rewrite pinned summary'
+  self_expect_fail 'summary-committed-blob-mismatch' validate_summary_integrity "$tmp/git-committed" summaries "08-11-SUMMARY.md $pin" '08-18-SUMMARY.md'
+  init_self_git_fixture "$tmp/git-working" 'pinned'
+  current_pin=$(git -C "$tmp/git-working" rev-parse HEAD:summaries/08-11-SUMMARY.md)
+  printf '%s\n' 'uncommitted rewrite' >"$tmp/git-working/summaries/08-11-SUMMARY.md"
+  self_expect_fail 'summary-uncommitted-edit' validate_summary_integrity "$tmp/git-working" summaries "08-11-SUMMARY.md $current_pin" '08-18-SUMMARY.md'
+  init_self_git_fixture "$tmp/git-unexpected" 'pinned'
+  current_pin=$(git -C "$tmp/git-unexpected" rev-parse HEAD:summaries/08-11-SUMMARY.md)
+  printf '%s\n' 'unexpected' >"$tmp/git-unexpected/summaries/08-99-SUMMARY.md"
+  self_expect_fail 'summary-unexpected-discovery' validate_summary_integrity "$tmp/git-unexpected" summaries "08-11-SUMMARY.md $current_pin" '08-18-SUMMARY.md'
+
+  rm -R -- "$tmp"
+  if [ "$SELF_TEST_FAILED" = '0' ]; then echo 'verdict-gate.sh --self-test: PASS'; return 0; fi
+  echo 'verdict-gate.sh --self-test: FAIL'; return 1
+}
+
 CARRIERS_A6=(
   .planning/phases/08-process-lifecycle/08-SPIKE.md
   .planning/phases/08-process-lifecycle/08-VALIDATION.md
@@ -592,16 +399,6 @@ CARRIERS_A6=(
   packages/backend/src/kill-plan.ts
   packages/backend/src/kill-tree.posix.test.ts
 )
-for f in "${CARRIERS_A6[@]}"; do
-  [ -f "$f" ] || { fail "ARM B" "$f does not exist"; continue; }
-  [ "$(grep -c "$MEASUREMENT_DATE" "$f")" != "0" ] || fail "ARM B" "$f carries no $MEASUREMENT_DATE measurement date"
-  [ "$(grep -c 'FALSIFIED' "$f")" != "0" ] || fail "ARM B" "$f states an A6 verdict but never says FALSIFIED"
-done
-
-# The A1 carriers: every file that states an A1 VERDICT. index.ts is here rather
-# than in the A6 list for the reason plan 08-06 recorded — its carrier is
-# killTree's single-pid-rung comment, which states A1's verdict and only
-# CROSS-REFERENCES A6 from the rung that does not defend against it.
 CARRIERS_A1=(
   .planning/phases/08-process-lifecycle/08-SPIKE.md
   .planning/phases/08-process-lifecycle/08-VALIDATION.md
@@ -612,79 +409,8 @@ CARRIERS_A1=(
   packages/backend/src/kill-plan.ts
   packages/backend/src/kill-tree.posix.test.ts
 )
-for f in "${CARRIERS_A1[@]}"; do
-  [ -f "$f" ] || { fail "ARM B" "$f does not exist"; continue; }
-  [ "$(grep -c "$MEASUREMENT_DATE" "$f")" != "0" ] || fail "ARM B" "$f carries no $MEASUREMENT_DATE measurement date"
-  [ "$(grep -c "$RETRACTION_TOKEN" "$f")" != "0" ] || fail "ARM B" "$f states an A1 verdict but never says $RETRACTION_TOKEN"
-  [ "$(grep -c "$RETRACTION_DATE" "$f")" != "0" ] || fail "ARM B" "$f states an A1 verdict but carries no $RETRACTION_DATE retraction date"
-done
-[ "$FAILED" = "0" ] && echo "   ARM B: pass (${#CARRIERS_A6[@]} A6 carriers carry FALSIFIED and $MEASUREMENT_DATE; ${#CARRIERS_A1[@]} A1 carriers carry $RETRACTION_TOKEN and $RETRACTION_DATE)"
 
-# =============================================================================
-# ARM C — HISTORICAL-RECORD IMMUTABILITY
-#
-# The dated SUMMARY class is excluded from ARM A. That exclusion is checked in
-# the OTHER direction here: the class must be UNMODIFIED. Rewriting a SUMMARY
-# dated 2026-08-24 that recorded the verdicts as open would be falsifying the
-# record, not correcting it.
-#
-# REWRITTEN 2026-08-27 (review WR-04). WHAT THIS ARM USED TO BE, AND WHY IT
-# ASSERTED NOTHING:
-#
-#   SUMMARY_DIFF=$(git diff --stat HEAD -- '…/*-SUMMARY.md')
-#
-# `git diff HEAD` compares the index and the working tree against HEAD. At every
-# COMMIT BOUNDARY — which is the only state a standing control is ever run in: a
-# CI checkout, a fresh clone, a `git bisect` checkout — that output is empty BY
-# CONSTRUCTION, whatever the history contains. Someone who rewrote a SUMMARY and
-# COMMITTED it got a green ARM C forever after; only an UNCOMMITTED edit was ever
-# red, and only until it was committed. The arm that exists to police the
-# exclusion list was itself the "green by accident" shape ARM A's commentary sets
-# out to eliminate.
-#
-# WHY A PINNED BLOB HASH AND NOT `git log --oneline --follow | wc -l`. Counting
-# commits per file asserts the right thing but only where the full history is
-# present: under `actions/checkout`'s default `fetch-depth: 1`, or any shallow
-# clone, every file reads as one commit and the check passes VACUOUSLY — the same
-# failure being fixed, relocated. `git rev-parse HEAD:<path>` reads the blob out
-# of HEAD's own tree, which exists in a shallow clone, so this arm asserts
-# CONTENT rather than history and is depth-independent.
-#
-# THE PIN IS DELIBERATE FRICTION. Regenerating one of these files now requires
-# editing this script, in a commit that says so. That is the point: "historical
-# records are never rewritten" should cost something to override. That paragraph
-# still applies, unchanged, to the PINNED class below.
-#
-# AMENDED 2026-08-28 (plan 08-11) — WHY THE STRICT COUNT EQUALITY HAD TO GO.
-# The fail-closed half used to require `count(*-SUMMARY.md on disk) ==
-# count(pins)`. The second gap-closure round writes SEVEN new summaries, so that
-# equality breaks the moment 08-11's own SUMMARY lands — and it CANNOT be
-# repaired by pinning, because a plan cannot know the blob hash of a file written
-# after it finishes. Left alone, ARM C goes red for the rest of the phase and
-# stays red, which is the same "a gate that forbids the correct next step" defect
-# this whole plan exists to remove, relocated one arm to the right.
-#
-# The equality is replaced by a MEMBERSHIP rule: every `*-SUMMARY.md` on disk
-# must be EITHER in the pin list OR in SUMMARY_KNOWN_UNPINNED. Anything else is a
-# FAIL naming the file. The arm stays fail-closed against a summary nobody
-# expected while letting the expected ones land.
-#
-# OUTSTANDING ACTION, WRITTEN DOWN RATHER THAN LEFT IMPLICIT — when this
-# gap-closure round closes, every name in SUMMARY_KNOWN_UNPINNED must be PROMOTED
-# to a pinned blob hash (`git rev-parse HEAD:<path>`) and the known-unpinned list
-# must return to EMPTY. Until that happens, seven files in the historical-record
-# class are protected only by the working-tree diff check below and not by a
-# content pin. This is recorded in 08-11-SUMMARY.md's follow-ups as well, so it
-# survives this file being skimmed.
-#
-# RED INPUT: a `*-SUMMARY.md` in the phase directory that is in neither list; a
-# pinned summary whose blob in HEAD differs from its pin; or any modification to
-# a dated summary sitting uncommitted in the working tree.
-# =============================================================================
-echo "== ARM C: the dated *-SUMMARY.md class is unmodified =="
-
-# path-relative-to-repo-root  <space>  blob hash in HEAD, pinned 2026-08-27.
-SUMMARY_PINS="
+SUMMARY_PINS='
 08-01-SUMMARY.md 725ba461b1468a9b8017ea18e6852627766b62cf
 08-02-SUMMARY.md 1c7c7026c3d408f5e900bd28a1201fb2ff359059
 08-03-SUMMARY.md d8f71008292acd043a7e842bc59c95b68eeaad59
@@ -695,66 +421,69 @@ SUMMARY_PINS="
 08-08-SUMMARY.md f29ce7df415c746c54b4c958e915602ee7a5edbb
 08-09-SUMMARY.md 54ac7039438bb414a318f42326895c38cd133d21
 08-10-SUMMARY.md b6d79bd04cc77491bf7d23603e49ac92e501d065
-"
+08-11-SUMMARY.md 7e59a0a6f3389bc99915f971113f6043dec6065e
+08-12-SUMMARY.md 4593ca8062d2254f5e7e4964012708b0c73de9f0
+08-13-SUMMARY.md e1be4120d7c89517aac7ed9aeb437eae3322a5f9
+08-14-SUMMARY.md bd4173658bf7826b70ff9c72c405524ba8cae934
+08-15-SUMMARY.md 1f42ea26f2808838c9f790fa02d06cafb272e837
+08-16-SUMMARY.md d5a9740cd61418d977578ff38be0d4b6951d0cab
+08-17-SUMMARY.md a0959cbec16e8d12156777f63ad799dc1476e115
+'
+SUMMARY_EXPECTED_OUTPUTS='
+08-18-SUMMARY.md
+08-19-SUMMARY.md
+'
+SUMMARY_DIR='.planning/phases/08-process-lifecycle'
 
-# The summaries this gap-closure round is EXPECTED to produce, and which no plan
-# in the round can pin because each is written after the plan that would pin it.
-# Promote every one of these to SUMMARY_PINS when the round closes, and empty
-# this list.
-SUMMARY_KNOWN_UNPINNED="
-08-11-SUMMARY.md
-08-12-SUMMARY.md
-08-13-SUMMARY.md
-08-14-SUMMARY.md
-08-15-SUMMARY.md
-08-16-SUMMARY.md
-08-17-SUMMARY.md
-"
-
-SUMMARY_DIR=.planning/phases/08-process-lifecycle
-PINNED_COUNT=0
-while read -r name pin; do
-  [ -n "$name" ] || continue
-  PINNED_COUNT=$((PINNED_COUNT + 1))
-  actual=$(git rev-parse "HEAD:$SUMMARY_DIR/$name" 2>/dev/null || echo "MISSING")
-  if [ "$actual" != "$pin" ]; then
-    fail "ARM C" "$name is $actual in HEAD, pinned at $pin — a dated SUMMARY is written once"
+run_default_gate() {
+  local file style arm_b_failures=0 arm_c_failures=0 current_records=0
+  echo '== ARM A: fail-closed correction-record discovery =='
+  if audit_discovered_records .planning packages; then
+    echo "   ARM A: pass ($DISCOVERY_COUNT exact current-verdict record(s) discovered and parsed)"
+  else
+    fail 'ARM A/A1-DISCOVERY' "$DISCOVERY_PATH — $DISCOVERY_REASON"
   fi
-done <<EOF
-$SUMMARY_PINS
-EOF
 
-# THE FAIL-CLOSED HALF. A pin list is an INCLUSION list, and ARM A's own header
-# explains what those are worth on their own: a SUMMARY added later and never
-# pinned would be invisible to the loop above. The membership rule is what stops
-# that — a summary in NEITHER list makes this red until somebody accounts for it.
-ON_DISK_COUNT=0
-UNEXPECTED_COUNT=0
-while IFS= read -r path; do
-  [ -n "$path" ] || continue
-  base=$(basename "$path")
-  ON_DISK_COUNT=$((ON_DISK_COUNT + 1))
-  if printf '%s\n' "$SUMMARY_PINS" | grep -q "^$base "; then continue; fi
-  if printf '%s\n' "$SUMMARY_KNOWN_UNPINNED" | grep -qx "$base"; then continue; fi
-  fail "ARM C" "$base is in the dated SUMMARY class but is in NEITHER the pin list NOR the known-unpinned list — pin it, or say why it exists"
-  UNEXPECTED_COUNT=$((UNEXPECTED_COUNT + 1))
-done < <(find "$SUMMARY_DIR" -maxdepth 1 -name '*-SUMMARY.md' -type f 2>/dev/null | sort)
+  echo '== ARM B: fixed carriers, live pointers, and immutable Spike =='
+  if [ "${#CARRIERS_A1[@]}" != '8' ]; then fail 'ARM B/A1-CENSUS' 'CARRIERS_A1 — expected exactly eight paths'; arm_b_failures=$((arm_b_failures + 1)); fi
+  if [ "${#CARRIERS_A6[@]}" = '0' ]; then fail 'ARM B/A6-CENSUS' 'CARRIERS_A6 — zero carriers is invalid'; arm_b_failures=$((arm_b_failures + 1)); fi
+  for file in "${CARRIERS_A6[@]}"; do
+    if [ ! -f "$file" ]; then fail 'ARM B/A6' "$file — carrier missing"; arm_b_failures=$((arm_b_failures + 1)); continue; fi
+    if [ "$(grep -c "$LEGACY_READING_DATE" "$file" 2>/dev/null || true)" = '0' ] || [ "$(grep -c 'FALSIFIED' "$file" 2>/dev/null || true)" = '0' ]; then
+      fail 'ARM B/A6' "$file — unchanged 2026-08-27 FALSIFIED contract missing"; arm_b_failures=$((arm_b_failures + 1))
+    fi
+  done
+  for file in "${CARRIERS_A1[@]}"; do
+    if [ "$file" = "$SPIKE_PATH" ]; then
+      if validate_spike_record "$file" "$SPIKE_SHA256"; then current_records=$((current_records + 1)); else fail 'ARM B/A1-SPIKE' "$file — $SPIKE_REASON"; arm_b_failures=$((arm_b_failures + 1)); fi
+      continue
+    fi
+    case "$file" in *.ts|*.js|*.mjs) style=source ;; *) style=markdown ;; esac
+    if validate_marker_record "$file" "$style"; then current_records=$((current_records + 1)); else fail 'ARM B/A1-RECORD' "$file — $VALIDATION_REASON"; arm_b_failures=$((arm_b_failures + 1)); fi
+  done
+  if validate_pointer_records .planning/ROADMAP.md .planning/REQUIREMENTS.md; then current_records=$((current_records + 2)); else fail 'ARM B/A1-POINTER' "$POINTER_PATH — $POINTER_REASON"; arm_b_failures=$((arm_b_failures + 1)); fi
+  if [ "$current_records" = '0' ]; then fail 'ARM B/A1-LIVENESS' 'record-set — zero current-verdict records validated'; arm_b_failures=$((arm_b_failures + 1)); fi
+  if [ "$arm_b_failures" = '0' ]; then echo "   ARM B: pass (${#CARRIERS_A1[@]} A1 carriers, 2 pointers, ${#CARRIERS_A6[@]} unchanged A6 carriers)"; fi
 
-# THE SECOND, CHEAPER ARM, KEPT. The pins read HEAD's tree, so they cannot see an
-# edit that has not been committed yet. This is the original check, retained for
-# exactly the one case it does cover.
-SUMMARY_DIFF=$(git diff --stat HEAD -- "$SUMMARY_DIR/*-SUMMARY.md" 2>/dev/null)
-if [ -n "$SUMMARY_DIFF" ]; then
-  fail "ARM C" "a dated SUMMARY is modified in the working tree — historical records are never rewritten:"
-  echo "$SUMMARY_DIFF"
-fi
+  echo '== ARM C: pinned dated SUMMARY class =='
+  if ! validate_spike_record "$SPIKE_PATH" "$SPIKE_SHA256"; then
+    fail 'ARM C/SPIKE' "$SPIKE_PATH — $SPIKE_REASON"
+    arm_c_failures=$((arm_c_failures + 1))
+  fi
+  if validate_summary_integrity "$REPO_ROOT" "$SUMMARY_DIR" "$SUMMARY_PINS" "$SUMMARY_EXPECTED_OUTPUTS"; then
+    if [ "$arm_c_failures" = '0' ]; then
+      echo "   ARM C: pass (canonical Spike digest; $SUMMARY_PINNED_COUNT pinned blobs; $SUMMARY_ON_DISK_COUNT summaries accounted for)"
+    fi
+  else
+    fail 'ARM C/SUMMARY' "$SUMMARY_PATH — $SUMMARY_REASON"
+    arm_c_failures=$((arm_c_failures + 1))
+  fi
+  echo
+  if [ "$FAILED" = '0' ]; then echo 'verdict-gate.sh: PASS (ARM A, ARM B, ARM C)'; return 0; fi
+  echo 'verdict-gate.sh: FAIL'; return 1
+}
 
-[ "$FAILED" = "0" ] && echo "   ARM C: pass ($PINNED_COUNT pinned blobs match HEAD; $ON_DISK_COUNT summaries on disk, $UNEXPECTED_COUNT unaccounted for; working tree clean)"
-
-echo
-if [ "$FAILED" = "0" ]; then
-  echo "verdict-gate.sh: PASS (ARM A, ARM B, ARM C)"
-  exit 0
-fi
-echo "verdict-gate.sh: FAIL"
-exit 1
+if [ "${1:-}" = '--self-test' ]; then run_self_test; exit $?; fi
+if [ "$#" != '0' ]; then echo 'FAIL [USAGE] supported mode: --self-test'; exit 2; fi
+run_default_gate
+exit $?

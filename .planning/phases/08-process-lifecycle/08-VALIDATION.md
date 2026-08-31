@@ -66,6 +66,10 @@ boundary), ARM A (`find | xargs` without `-0`, invisible to any path containing 
 bare-name arm, duplicating the case above it). **695 is the floor for anything that follows.**
 Full detail, per finding, in `08-REVIEW-GAPS-FIX.md`.
 
+<!-- DRIFT:A1-CORRECTION:BEGIN -->
+**A1 correction (Plan 08-18):** The repaired three-valued probe CONFIRMED the favourable A1 outcome on 2026-08-31. The invalid 2026-08-27 reading remains RETRACTED as of 2026-08-28 and is preserved only as historical evidence; this evidence correction does not close the native-Windows or real-turn causality limitations below. With only this tracer carrier corrected, the unchanged default gate passed ARM A and ARM C and was red only for the six remaining mutable carriers plus the ROADMAP and REQUIREMENTS live pointers.
+<!-- DRIFT:A1-CORRECTION:END -->
+
 ---
 
 ## Sampling Rate
