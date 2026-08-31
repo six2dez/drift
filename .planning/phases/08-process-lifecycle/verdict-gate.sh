@@ -38,6 +38,10 @@ SOURCE_END='// DRIFT:A1-CORRECTION:END'
 TRACEABILITY_BEGIN='<!-- DRIFT:LIF-02-TRACEABILITY:BEGIN -->'
 TRACEABILITY_END='<!-- DRIFT:LIF-02-TRACEABILITY:END -->'
 TRACEABILITY_CURRENT_LINE='**CURRENT LIF-02 traceability correction (2026-08-31, Plan 08-23):** Plan 08-18 CLOSED deferred item 10 by propagating the repaired A1 result to exactly eight mutable A1 carriers and two live pointers. LIF-01 and LIF-02 remain unchecked. LIF-02 remains open because the argv-marker reap lacks an executed shipping-runtime assertion, no Control exists for a non-Claude provider, and the redundancy question is unresolved.'
+WINDOWS_BEGIN='<!-- DRIFT:WINDOWS-TWO-CASE:BEGIN -->'
+WINDOWS_END='<!-- DRIFT:WINDOWS-TWO-CASE:END -->'
+WINDOWS_CURRENT_DESCRIPTION="Exactly two native win32 kill-tree cases form the 2/2 contract; both remain unexecuted because no windows-latest/native run exists. CI pins expectedTotal=2 and the behavioral full name win32 process-tree termination (LIF-01) the plan's argv brings down a real process tree. Commit e1ac837 removed the former already-exited/dead-pid exit-code and stderr measurement because a recycled pid could target an unrelated process. No reserved block exists. The missing exit-code/stderr datum is deferred and accepted until a safe owned-live-process measurement is designed; LIF-01 remains open."
+WINDOWS_CURRENT_LINE="**CURRENT Windows two-case correction (2026-08-31, Plan 08-23):** $WINDOWS_CURRENT_DESCRIPTION"
 
 SPIKE_PATH='.planning/phases/08-process-lifecycle/08-SPIKE.md'
 SPIKE_SHA256='7c482d7fd539f84c8e44fcfe9036b454a868767b719bd8a91d35ac70d8a9745f'
@@ -207,6 +211,77 @@ validate_lif02_traceability() {
   return 0
 }
 
+# Five living files carry the Windows contract, while WINDOWS.md carries it in
+# both a table and JSON register. The marker parser establishes which prose is
+# current; the ledger parser additionally requires its two machine-readable
+# representations to be byte-identical in meaning and still open.
+WINDOWS_REASON=''
+WINDOWS_PATH='windows-contract'
+validate_windows_carrier_record() {
+  local file=$1 begin_count end_count begin_line end_line body flattened
+  WINDOWS_REASON=''; WINDOWS_PATH=$file
+  if [ ! -f "$file" ]; then WINDOWS_REASON='Windows carrier missing'; return 1; fi
+  begin_count=$(grep -Fxc "$WINDOWS_BEGIN" "$file" 2>/dev/null || true)
+  end_count=$(grep -Fxc "$WINDOWS_END" "$file" 2>/dev/null || true)
+  if [ "$begin_count" != '1' ] || [ "$end_count" != '1' ]; then
+    WINDOWS_REASON='expected exactly one bounded current Windows record'; return 1
+  fi
+  begin_line=$(grep -nFx "$WINDOWS_BEGIN" "$file" | cut -d: -f1)
+  end_line=$(grep -nFx "$WINDOWS_END" "$file" | cut -d: -f1)
+  if [ "$begin_line" -ge "$end_line" ]; then WINDOWS_REASON='Windows marker order is reversed'; return 1; fi
+  if [ $((end_line - begin_line)) -le 1 ]; then WINDOWS_REASON='Windows record is empty'; return 1; fi
+  body=$(sed -n "$((begin_line + 1)),$((end_line - 1))p" "$file")
+  if printf '%s\n' "$body" | grep -Eq '^[[:space:]]*$'; then WINDOWS_REASON='Windows record is separated'; return 1; fi
+  flattened=$(printf '%s\n' "$body" | tr '\n' ' ' | sed -E 's/[[:space:]]+$//')
+  if [ "$flattened" != "$WINDOWS_CURRENT_LINE" ]; then
+    WINDOWS_REASON='safe 2/2/e1ac837/recycled-pid/open contract missing or contradictory'; return 1
+  fi
+  return 0
+}
+
+validate_windows_ledger() {
+  local file=$1 table_record json_record expected_record
+  WINDOWS_REASON=''; WINDOWS_PATH=$file
+  table_record=$(awk -F '|' '
+    function trim(value) { gsub(/^[[:space:]]+|[[:space:]]+$/, "", value); return value }
+    trim($2) == "12" { count += 1; description = trim($7); status = trim($8) }
+    END { if (count != 1) exit 1; print description; print status }
+  ' "$file" 2>/dev/null) || { WINDOWS_REASON='entry 12 table row missing or duplicated'; return 1; }
+  json_record=$(awk '
+    $0 == "````json" { inside = 1; next }
+    inside && $0 == "````" { exit }
+    inside { print }
+  ' "$file" | node -e '
+    let input = "";
+    process.stdin.setEncoding("utf8");
+    process.stdin.on("data", (chunk) => { input += chunk; });
+    process.stdin.on("end", () => {
+      try {
+        const rows = JSON.parse(input);
+        const matches = Array.isArray(rows) ? rows.filter((row) => row?.id === 12) : [];
+        if (matches.length !== 1 || typeof matches[0].description !== "string" || typeof matches[0].status !== "string") process.exit(1);
+        process.stdout.write(`${matches[0].description}\n${matches[0].status}`);
+      } catch { process.exit(1); }
+    });
+  ' 2>/dev/null) || { WINDOWS_REASON='entry 12 JSON object missing, duplicated, or malformed'; return 1; }
+  expected_record=$(printf '%s\n%s' "$WINDOWS_CURRENT_DESCRIPTION" 'open')
+  if [ "$table_record" != "$json_record" ]; then WINDOWS_REASON='entry 12 table and JSON meanings diverge'; return 1; fi
+  if [ "$table_record" != "$expected_record" ]; then WINDOWS_REASON='entry 12 safe two-case meaning or open status is stale'; return 1; fi
+  return 0
+}
+
+validate_windows_two_case_contract() {
+  local windows=$1 file
+  shift
+  if [ "$#" != '4' ]; then WINDOWS_PATH='windows-contract'; WINDOWS_REASON='expected exactly five living carriers'; return 1; fi
+  if ! validate_windows_ledger "$windows"; then return 1; fi
+  if ! validate_windows_carrier_record "$windows"; then return 1; fi
+  for file in "$@"; do
+    if ! validate_windows_carrier_record "$file"; then return 1; fi
+  done
+  return 0
+}
+
 # ROADMAP/REQUIREMENTS are pointers outside CARRIERS_A1. Open checkboxes prevent
 # this evidence-only plan from closing Phase 8 or either lifecycle requirement.
 POINTER_REASON=''
@@ -313,6 +388,29 @@ write_self_traceability_record() {
     printf '%s\n' "$line"
     printf '%s\n' "$TRACEABILITY_END"
   } >>"$path"
+}
+write_self_windows_record() {
+  local path=$1 line=${2:-$WINDOWS_CURRENT_LINE}
+  {
+    printf '%s\n' "$WINDOWS_BEGIN"
+    printf '%s\n' "$line"
+    printf '%s\n' "$WINDOWS_END"
+  } >>"$path"
+}
+write_self_windows_ledger() {
+  local path=$1 table_description json_description status
+  table_description=${2:-$WINDOWS_CURRENT_DESCRIPTION}
+  json_description=${3:-$table_description}
+  status=${4:-open}
+  {
+    printf '%s\n' '| id | phase | kind | file | line | description | status | reason | recorded_at | resolved_at |'
+    printf '%s\n' '|----|-------|------|------|------|-------------|--------|--------|-------------|-------------|'
+    printf '| 12 | 08 | unrun-verify | fixture.ts |  | %s | %s |  | date |  |\n' "$table_description" "$status"
+    printf '%s\n' '````json'
+    printf '[{"id":12,"description":"%s","status":"%s"}]\n' "$json_description" "$status"
+    printf '%s\n' '````'
+  } >"$path"
+  write_self_windows_record "$path"
 }
 init_self_git_fixture() {
   local repo=$1 content=$2
@@ -431,6 +529,22 @@ run_self_test() {
   sed -i.bak 's/- \[ \] \*\*LIF-02\*\*/- [x] **LIF-02**/' "$tmp/pointers/REQUIREMENTS.md"; rm -f "$tmp/pointers/REQUIREMENTS.md.bak"
   self_expect_fail 'closed-lif-checkbox' validate_pointer_records "$tmp/pointers/ROADMAP.md" "$tmp/pointers/REQUIREMENTS.md"
 
+  mkdir -p "$tmp/windows"
+  write_self_windows_ledger "$tmp/windows/WINDOWS.md"
+  for file in REQUIREMENTS.md 08-VALIDATION.md 08-UAT.md STATE.md; do
+    : >"$tmp/windows/$file"
+    write_self_windows_record "$tmp/windows/$file"
+  done
+  self_expect_pass 'current-windows-two-case-contract' validate_windows_two_case_contract "$tmp/windows/WINDOWS.md" "$tmp/windows/REQUIREMENTS.md" "$tmp/windows/08-VALIDATION.md" "$tmp/windows/08-UAT.md" "$tmp/windows/STATE.md"
+  write_self_windows_ledger "$tmp/windows/stale-three.md" 'Three native cases form the 3/3 contract and remain pending.'
+  self_expect_fail 'stale-windows-three-of-three' validate_windows_two_case_contract "$tmp/windows/stale-three.md" "$tmp/windows/REQUIREMENTS.md" "$tmp/windows/08-VALIDATION.md" "$tmp/windows/08-UAT.md" "$tmp/windows/STATE.md"
+  write_self_windows_ledger "$tmp/windows/promised-reserved.md" 'The reserved dead-pid block must record an exit code and stderr.'
+  self_expect_fail 'promised-windows-reserved-block' validate_windows_two_case_contract "$tmp/windows/promised-reserved.md" "$tmp/windows/REQUIREMENTS.md" "$tmp/windows/08-VALIDATION.md" "$tmp/windows/08-UAT.md" "$tmp/windows/STATE.md"
+  write_self_windows_ledger "$tmp/windows/divergent.md" "$WINDOWS_CURRENT_DESCRIPTION" 'The JSON representation is stale.'
+  self_expect_fail 'windows-table-json-divergence' validate_windows_two_case_contract "$tmp/windows/divergent.md" "$tmp/windows/REQUIREMENTS.md" "$tmp/windows/08-VALIDATION.md" "$tmp/windows/08-UAT.md" "$tmp/windows/STATE.md"
+  write_self_windows_ledger "$tmp/windows/closed.md" "$WINDOWS_CURRENT_DESCRIPTION" "$WINDOWS_CURRENT_DESCRIPTION" 'fixed'
+  self_expect_fail 'windows-entry-must-stay-open' validate_windows_two_case_contract "$tmp/windows/closed.md" "$tmp/windows/REQUIREMENTS.md" "$tmp/windows/08-VALIDATION.md" "$tmp/windows/08-UAT.md" "$tmp/windows/STATE.md"
+
   init_self_git_fixture "$tmp/git-committed" 'pinned'
   pin=$(git -C "$tmp/git-committed" rev-parse HEAD:summaries/08-11-SUMMARY.md)
   self_expect_pass 'summary-valid-pin' validate_summary_integrity "$tmp/git-committed" summaries "08-11-SUMMARY.md $pin" '08-18-SUMMARY.md'
@@ -529,6 +643,10 @@ run_default_gate() {
     if validate_marker_record "$file" "$style"; then current_records=$((current_records + 1)); else fail 'ARM B/A1-RECORD' "$file — $VALIDATION_REASON"; arm_b_failures=$((arm_b_failures + 1)); fi
   done
   if validate_pointer_records .planning/ROADMAP.md .planning/REQUIREMENTS.md; then current_records=$((current_records + 2)); else fail 'ARM B/A1-POINTER' "$POINTER_PATH — $POINTER_REASON"; arm_b_failures=$((arm_b_failures + 1)); fi
+  if ! validate_windows_two_case_contract .planning/WINDOWS.md .planning/REQUIREMENTS.md .planning/phases/08-process-lifecycle/08-VALIDATION.md .planning/phases/08-process-lifecycle/08-UAT.md .planning/STATE.md; then
+    fail 'ARM B/WINDOWS-TWO-CASE' "$WINDOWS_PATH — $WINDOWS_REASON"
+    arm_b_failures=$((arm_b_failures + 1))
+  fi
   if [ "$current_records" = '0' ]; then fail 'ARM B/A1-LIVENESS' 'record-set — zero current-verdict records validated'; arm_b_failures=$((arm_b_failures + 1)); fi
   if [ "$arm_b_failures" = '0' ]; then echo "   ARM B: pass (${#CARRIERS_A1[@]} A1 carriers, 2 pointers, ${#CARRIERS_A6[@]} unchanged A6 carriers)"; fi
 
