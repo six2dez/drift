@@ -265,11 +265,25 @@ describe("index.ts makes Start idempotent inside the lifecycle FIFO (WR-01)", ()
     expect(disposition).toBeLessThan(reuse);
 
     const health = functionBody(code, "inspectMcpRuntimeArtifacts");
-    expect(health).toContain("await stat(tempDir)");
-    expect(health).toContain("directoryInfo.isDirectory()");
-    expect(health).toContain("getMcpScriptPath(tempDir)");
-    expect(health).toContain("getMcpContextPath(tempDir)");
-    expect(health.match(/await fileExists\(/g) ?? []).toHaveLength(2);
+    expect(health).not.toBe("");
+    const inspections = callArgumentTexts(
+      health,
+      "inspectRequiredMcpRuntimeArtifacts",
+    );
+    expect(inspections).toHaveLength(1);
+    const inspection = inspections[0] ?? "";
+    expect(code).toContain('from "./mcp-runtime-artifacts"');
+    expect(inspection).toContain("tempDir");
+    expect(inspection).toContain("scriptPath: getMcpScriptPath(tempDir)");
+    expect(inspection).toContain("contextPath: getMcpContextPath(tempDir)");
+    expect(inspection).toContain("statPath: stat");
+    expect(inspection).toContain(
+      'openReadable: async (artifactPath) => openFile(artifactPath, "r")',
+    );
+    expect(inspection).toContain(
+      'readText: async (artifactPath) => readFile(artifactPath, "utf-8")',
+    );
+    expect(health).not.toContain("fileExists(");
   });
 });
 
