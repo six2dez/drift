@@ -836,6 +836,12 @@ export function classifyOrphanScanOutcome(input: {
   if (!Number.isFinite(input.scanAgeMs)) {
     return { kind: "noop", kill: false, reason: "scan-stale" };
   }
+  // `Date.now()` can step backwards. A negative result is not evidence that a
+  // sampled pid is newer than the budget; its age is unknowable. Leave the
+  // orphan for a later sweep rather than signal a potentially recycled pid.
+  if (input.scanAgeMs < 0) {
+    return { kind: "noop", kill: false, reason: "scan-stale" };
+  }
   if (input.scanAgeMs > input.scanFreshnessBudgetMs) {
     return { kind: "noop", kill: false, reason: "scan-stale" };
   }

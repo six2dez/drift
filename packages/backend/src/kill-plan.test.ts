@@ -1036,11 +1036,11 @@ describe("classifyOrphanScanOutcome — every unavailable-enumeration outcome is
     }
   });
 
-  it("keeps a NEGATIVE age reapable, because a clock that went backwards is not a stale scan", () => {
+  it("treats a NEGATIVE age as stale because a backward clock step makes freshness unknowable", () => {
     // `Date.now()` is not monotonic. A system clock stepped backwards between
-    // the spawn and the settle yields a negative age, and refusing on it would
-    // disable the reaper for the length of the step — the reaper erring toward
-    // never firing, which recreates the defect it exists to fix.
+    // the spawn and settle yields a negative age, but that does not make an
+    // arbitrarily old pid list fresh. The next sweep is safer than signaling a
+    // process whose sampling age cannot be bounded.
     expect(
       classifyOrphanScanOutcome({
         spawnThrew: false,
@@ -1050,7 +1050,7 @@ describe("classifyOrphanScanOutcome — every unavailable-enumeration outcome is
         scanAgeMs: -5000,
         scanFreshnessBudgetMs: 1000,
       }),
-    ).toEqual({ kind: "reap", kill: true, pids: [44284] });
+    ).toEqual({ kind: "noop", kill: false, reason: "scan-stale" });
   });
 });
 
