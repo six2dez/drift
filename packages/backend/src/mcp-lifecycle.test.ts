@@ -6,6 +6,7 @@ import {
   countMcpDirectCalls,
   createMcpLifecycleState,
   getMcpRuntimeEpoch,
+  isMcpOrphanReapGateCurrent,
   isMcpRuntimeEpochCurrent,
   releaseMcpDirectCall,
   retireMcpDirectCalls,
@@ -37,6 +38,83 @@ describe("MCP lifecycle generations", () => {
     const replacementEpoch = beginMcpRuntimeGeneration(state);
     expect(getMcpRuntimeEpoch(state)).toBe(replacementEpoch);
     expect(isMcpRuntimeEpochCurrent(state, cleanupEpoch)).toBe(false);
+  });
+});
+
+describe("orphan reap generation gates", () => {
+  it("turns a delayed session scan into a no-op after a replacement session registers", () => {
+    const state = createMcpLifecycleState();
+    const epoch = beginMcpRuntimeGeneration(state);
+    const gate = {
+      kind: "session-idle" as const,
+      epoch,
+      tempDir: "/tmp/drift-mcp-deadbeef",
+    };
+    let signalAttempts = 0;
+
+    // This closure is the scanner's controllable delayed `close` callback. A
+    // new turn has registered by the time it is released (`sessionIdle=false`).
+    const settleDelayedScan = (): void => {
+      if (
+        isMcpOrphanReapGateCurrent({
+          state,
+          gate,
+          currentTempDir: gate.tempDir,
+          sessionIdle: false,
+        })
+      ) {
+        signalAttempts += 1;
+      }
+    };
+
+    settleDelayedScan();
+    expect(signalAttempts).toBe(0);
+  });
+
+  it("invalidates a previous-run scan as soon as startup stages a runtime", () => {
+    const state = createMcpLifecycleState();
+    const gate = {
+      kind: "runtime-absent" as const,
+      epoch: beginMcpRuntimeGeneration(state),
+    };
+
+    expect(
+      isMcpOrphanReapGateCurrent({
+        state,
+        gate,
+        currentTempDir: "/tmp/drift-mcp-newruntime",
+        sessionIdle: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("allows cleanup to settle after clearing its dir but not after replacement", () => {
+    const state = createMcpLifecycleState();
+    const cleanupEpoch = beginMcpRuntimeGeneration(state);
+    const gate = {
+      kind: "runtime-cleanup" as const,
+      epoch: cleanupEpoch,
+      tempDir: "/tmp/drift-mcp-oldruntime",
+    };
+
+    expect(
+      isMcpOrphanReapGateCurrent({
+        state,
+        gate,
+        currentTempDir: undefined,
+        sessionIdle: true,
+      }),
+    ).toBe(true);
+
+    beginMcpRuntimeGeneration(state);
+    expect(
+      isMcpOrphanReapGateCurrent({
+        state,
+        gate,
+        currentTempDir: "/tmp/drift-mcp-newruntime",
+        sessionIdle: true,
+      }),
+    ).toBe(false);
   });
 });
 

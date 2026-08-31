@@ -16,6 +16,15 @@ export type McpLifecycleState = {
   operationTail: Promise<void>;
 };
 
+export type McpOrphanReapGate =
+  | { kind: "session-idle"; epoch: number; tempDir: string | undefined }
+  | { kind: "runtime-absent"; epoch: number }
+  | {
+      kind: "runtime-cleanup";
+      epoch: number;
+      tempDir: string | undefined;
+    };
+
 export function createMcpLifecycleState(): McpLifecycleState {
   return {
     currentEpoch: 0,
@@ -39,6 +48,33 @@ export function isMcpRuntimeEpochCurrent(
   epoch: number,
 ): boolean {
   return state.currentEpoch === epoch;
+}
+
+export function isMcpOrphanReapGateCurrent(input: {
+  state: McpLifecycleState;
+  gate: McpOrphanReapGate;
+  currentTempDir: string | undefined;
+  sessionIdle: boolean;
+}): boolean {
+  if (!isMcpRuntimeEpochCurrent(input.state, input.gate.epoch)) return false;
+
+  if (input.gate.kind === "runtime-absent") {
+    return input.currentTempDir === undefined;
+  }
+
+  if (input.gate.kind === "runtime-cleanup") {
+    // Cleanup may clear its captured directory before the scanner's close event
+    // is delivered. That remains the same retired generation. A replacement
+    // start increments the epoch, so it is rejected above (T-08-27).
+    return (
+      input.currentTempDir === input.gate.tempDir ||
+      input.currentTempDir === undefined
+    );
+  }
+
+  return (
+    input.currentTempDir === input.gate.tempDir && input.sessionIdle
+  );
 }
 
 export function acquireMcpDirectCall(

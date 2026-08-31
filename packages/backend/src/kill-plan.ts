@@ -716,8 +716,10 @@ export function buildOrphanKillPlan(input: {
 // What the enumerator's outcome MEANS — the no-op arms and the one reaping arm,
 // as a pure function.
 //
-// FOUR NO-OP ARMS AT 08-06, FIVE SINCE 2026-08-27. `scan-stale` was added by
-// review WR-03 and is documented at the FRESHNESS BOUND block below. The count is stated rather than left implicit because
+// FOUR NO-OP ARMS AT 08-06, FIVE classifier arms since 2026-08-27, plus the
+// orchestrator's `gate-stale` arm when a scan's runtime identity changes before
+// consumption. `scan-stale` is documented at the FRESHNESS BOUND block below.
+// The count is stated rather than left implicit because
 // `08-06-PLAN.md` must_haves truth 4 names four, and `08-SECURITY.md`'s T-08-24
 // row carried the same number — both are historical records of what was true
 // when they were written, and the correction travels here and in T-08-24's
@@ -738,6 +740,7 @@ export type OrphanScanNoopReason =
   | "enumerator-unavailable"
   | "scan-timeout"
   | "scan-stale"
+  | "gate-stale"
   | "scan-failed"
   | "no-match";
 

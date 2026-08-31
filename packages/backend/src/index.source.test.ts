@@ -1001,6 +1001,39 @@ describe("index.ts wires the orphan reap at every counted site and nowhere else 
     expect(code).toContain("reapSessionOrphansIfIdle(");
   });
 
+  it("revalidates the reap generation gate immediately before the signal loop", () => {
+    const body = functionBody(code, "reapMcpOrphans");
+    expect(body).not.toBe("");
+    const recheck = body.indexOf("isMcpOrphanReapGateCurrent({");
+    const signalLoop = body.indexOf("for (const pid of outcome.pids)");
+    expect(recheck).not.toBe(-1);
+    expect(signalLoop).not.toBe(-1);
+    expect(recheck).toBeLessThan(signalLoop);
+    expect(body.slice(recheck, signalLoop)).toContain(
+      'reason: "gate-stale"',
+    );
+    expect(body.slice(recheck, signalLoop)).toContain("return;");
+    expect(body).toContain("activeSessionCount: activeProcesses.size");
+    expect(body).toContain(
+      "directMcpCallDepth: countMcpDirectCalls(mcpLifecycle)",
+    );
+  });
+
+  it("binds every reap caller to the gate identity it owns", () => {
+    const gates = {
+      reapSessionOrphansIfIdle: 'kind: "session-idle"',
+      cleanupMcpRuntime: 'kind: "runtime-cleanup"',
+      sweepOrphanedMcpTempDirs: 'kind: "runtime-absent"',
+    };
+    for (const [name, gateKind] of Object.entries(gates)) {
+      const body = functionBody(code, name);
+      expect(body).not.toBe("");
+      expect(body.match(/reapMcpOrphans\(/g) ?? []).toHaveLength(1);
+      expect(body).toContain(gateKind);
+      expect(body).toContain("getMcpRuntimeEpoch(mcpLifecycle)");
+    }
+  });
+
   // 5. THE GENERATION TOKEN'S SYMMETRY. `callMcpMethod` spawns `node
   // mcp-server.mjs` directly and that child's argv is byte-identical to a CLI's
   // MCP child, so the idle reap would select it (T-08-28). An acquire now

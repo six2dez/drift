@@ -1713,6 +1713,7 @@ describe("formatOrphanReapRecord renders one scalar-only line per reap outcome",
     "enumerator-unavailable",
     "scan-timeout",
     "scan-stale",
+    "gate-stale",
     "scan-failed",
     "no-match",
   ];

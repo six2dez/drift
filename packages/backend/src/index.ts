@@ -65,11 +65,13 @@ import {
   countMcpDirectCalls,
   createMcpLifecycleState,
   getMcpRuntimeEpoch,
+  isMcpOrphanReapGateCurrent,
   isMcpRuntimeEpochCurrent,
   releaseMcpDirectCall,
   retireMcpDirectCalls,
   runMcpLifecycleOperation,
   type DirectMcpCallToken,
+  type McpOrphanReapGate,
 } from "./mcp-lifecycle";
 import {
   MCP_SELF_TEST_CHECKS,
@@ -3870,6 +3872,7 @@ function reapMcpOrphans(
   sdk: BackendSDK,
   plan: KillTreePlan,
   excludePids: number[],
+  gate: McpOrphanReapGate,
 ): void {
   if (plan.kind === "none") {
     sdk.console.log(`[drift lifecycle] no orphan reap: ${plan.reason}`);
@@ -3947,6 +3950,37 @@ function reapMcpOrphans(
       recordOrphanReapOutcome({
         kind: "noop",
         reason: outcome.reason,
+        exitCode: result.exitCode,
+        ageMs: settledAgeMs,
+      });
+      return;
+    }
+
+    // Re-evaluate the issuance gate at consumption time, immediately before
+    // the synchronous signal loop. The scanner is asynchronous: a new turn or
+    // runtime can become current after `pgrep` starts. Any uncertainty or stale
+    // identity resolves toward killing nothing (T-08-27/T-08-28).
+    let gateCurrent: boolean;
+    try {
+      gateCurrent = isMcpOrphanReapGateCurrent({
+        state: mcpLifecycle,
+        gate,
+        currentTempDir: mcpTempDir,
+        sessionIdle: shouldReapSessionOrphans({
+          activeSessionCount: activeProcesses.size,
+          directMcpCallDepth: countMcpDirectCalls(mcpLifecycle),
+        }),
+      });
+    } catch {
+      gateCurrent = false;
+    }
+    if (!gateCurrent) {
+      sdk.console.log(
+        `[drift lifecycle] orphan reap: kind=noop reason=gate-stale exit=${String(result.exitCode)} attempted=0`,
+      );
+      recordOrphanReapOutcome({
+        kind: "noop",
+        reason: "gate-stale",
         exitCode: result.exitCode,
         ageMs: settledAgeMs,
       });
@@ -4097,6 +4131,8 @@ function reapMcpOrphans(
 // and change their signatures, which recorded decision OQ-4 forbids. It also
 // keeps the RPC handler off the event-loop starvation path CLAUDE.md names.
 function reapSessionOrphansIfIdle(sdk: BackendSDK): void {
+  const reapEpoch = getMcpRuntimeEpoch(mcpLifecycle);
+  const reapTempDir = mcpTempDir;
   const activeSessionCount = activeProcesses.size;
   const directMcpCallDepth = countMcpDirectCalls(mcpLifecycle);
   if (!shouldReapSessionOrphans({ activeSessionCount, directMcpCallDepth })) {
@@ -4105,10 +4141,11 @@ function reapSessionOrphansIfIdle(sdk: BackendSDK): void {
     // and `kind=noop reason=… exit=… attempted=0` for all enumerator
     // outcomes. This gate was the exception, and it is the ONE arm that can
     // suppress the reap for a whole Caido session — through AR-07's accepted
-    // multi-session window, through a depth that leaked, or through any future
-    // arithmetic error. "The reap ran and found nothing" and "the reap never
-    // ran" are the two outcomes a reader of the diagnostics most needs to tell
-    // apart, and until now they were indistinguishable.
+    // multi-session window, through a direct-call token whose terminal event
+    // never arrived, or through any future invalid count. "The reap ran and
+    // found nothing" and "the reap never ran" are the two outcomes a reader of
+    // the diagnostics most needs to tell apart, and until now they were
+    // indistinguishable.
     //
     // TWO SCALARS AND NOTHING ELSE, per T-04-04: no pid, no path, no argv, no
     // environment value — the same rendering rule the reap's own log line
@@ -4132,9 +4169,11 @@ function reapSessionOrphansIfIdle(sdk: BackendSDK): void {
     sdk,
     buildSessionOrphanScanPlan({
       platform: host?.platform,
-      sessionDirName: getMcpSessionDirName(),
+      sessionDirName:
+        reapTempDir === undefined ? undefined : path.basename(reapTempDir),
     }),
     [],
+    { kind: "session-idle", epoch: reapEpoch, tempDir: reapTempDir },
   );
 }
 
@@ -4257,12 +4296,10 @@ async function cleanupMcpRuntime(
   // not reliably deliver during an await — the starvation anti-pattern CLAUDE.md
   // names, and the reason `killTree` is fire-and-forget in the first place.
   //
-  // Losing that race costs this reaper NOTHING, and that is a property it has
-  // and `killTree` does not: it identifies its target by the TARGET'S OWN ARGV,
-  // which is fixed at the target's exec and is unaffected by the directory
-  // disappearing underneath it. `pgrep -f` matches the command line the kernel
-  // recorded, not a path that must still resolve. Plan 08-10 records the
-  // completion-order residual as AR-05.
+  // Losing that filesystem race costs this reaper nothing: it identifies its
+  // target by the target's argv, which survives directory removal. The
+  // generation gate separately makes a late callback harmless once a
+  // replacement runtime starts; it records `gate-stale` and signals nothing.
   reapMcpOrphans(
     sdk,
     buildSessionOrphanScanPlan({
@@ -4273,6 +4310,11 @@ async function cleanupMcpRuntime(
           : path.basename(cleanupTempDir),
     }),
     [],
+    {
+      kind: "runtime-cleanup",
+      epoch: cleanupEpoch,
+      tempDir: cleanupTempDir,
+    },
   );
 
   if (cleanupTempDir !== undefined) {
@@ -4335,6 +4377,7 @@ async function sweepOrphanedMcpTempDirs(
   sdk: BackendSDK,
   hostFacts: HostFacts,
 ): Promise<void> {
+  const sweepEpoch = getMcpRuntimeEpoch(mcpLifecycle);
   // KILL BEFORE REMOVE — the SC-4 statement order this file already applies at
   // `cleanupMcpRuntime`, `closeCliSession` and `deleteChat`, extended to the one
   // removal site that had no termination above it at all. The directories the
@@ -4366,10 +4409,9 @@ async function sweepOrphanedMcpTempDirs(
   // function is called from inside an RPC handler, and awaiting a child-process
   // callback there is the event-loop starvation anti-pattern CLAUDE.md names.
   // What this statement's POSITION guarantees is that the scan is issued before
-  // any `rm`; the COMPLETION order is not enforced, and plan 08-10 records that
-  // residual as AR-05. Losing that race costs this reaper nothing — `pgrep -f`
-  // matches the command line the kernel recorded at exec, not a path that must
-  // still resolve.
+  // any `rm`; completion remains fire-and-forget. The generation gate consumed
+  // in `reapMcpOrphans` now makes a late callback subtractive: once startup has
+  // staged a runtime it records `gate-stale` and signals nothing.
   reapMcpOrphans(
     sdk,
     buildPreviousRunOrphanScanPlan({
@@ -4377,6 +4419,7 @@ async function sweepOrphanedMcpTempDirs(
       currentSessionDirName: getMcpSessionDirName(),
     }),
     [],
+    { kind: "runtime-absent", epoch: sweepEpoch },
   );
 
   for (const root of getSweepRoots(hostFacts)) {
