@@ -162,9 +162,11 @@ import {
   formatMcpRemoveUnusable,
   formatMcpSweepBlockedResidual,
   formatSpawnDebugLine,
+  MCP_REMOVE_PLAN_REFUSED,
   planMcpCliRegistration,
   planMcpCliRemoval,
   toMcpConfigDocument,
+  type McpCliRemovalFailureCode,
   type McpCliRemovalScope,
   type McpServerSpec,
 } from "./mcp-server-spec";
@@ -175,7 +177,7 @@ import {
 // POSIX host). Exercised by spawn-plan.test.ts and, on a real Windows runner,
 // spawn-plan.win32.test.ts — which is the whole point, because index.ts is not
 // importable under vitest and nothing in THIS file is test-reachable.
-import { buildSpawnPlan } from "./spawn-plan";
+import { buildSpawnPlanResult } from "./spawn-plan";
 import { withFsRetry } from "./fs-retry";
 import { createActivityCursor, readActivityTick } from "./activity-tail";
 import {
@@ -2259,7 +2261,11 @@ async function refreshActiveMcpRuntimeOperation(
   }
 
   setMcpAuthStatus("valid", "");
-  await tryRegisterMcpForProviders(spec.value, sdk);
+  const registration = await tryRegisterMcpForProviders(spec.value, sdk);
+  if (registration.kind === "Error") {
+    await cleanupMcpRuntime(sdk, "error", registration.error);
+    return registration.error;
+  }
   await publishMcpStatus(sdk);
   return undefined;
 }
@@ -3303,7 +3309,7 @@ const skippedMcpCliReasons = new Map<"gemini" | "codex", string>();
 // security line about a stale entry it did not remove.
 const mcpCliRemovalFailures = new Map<
   "gemini" | "codex",
-  Map<McpCliRemovalScope, number>
+  Map<McpCliRemovalScope, McpCliRemovalFailureCode>
 >();
 
 // WR-04. Which blocked-sweep residual notices this PROCESS has already emitted,
@@ -3322,7 +3328,7 @@ const mcpCliBlockedSweepNotices = new Set<string>();
 function recordMcpCliRemovalOutcome(input: {
   cli: "gemini" | "codex";
   scope: McpCliRemovalScope;
-  exitCode: number;
+  exitCode: McpCliRemovalFailureCode;
   failed: boolean;
 }): void {
   const existing = mcpCliRemovalFailures.get(input.cli);
@@ -3332,9 +3338,30 @@ function recordMcpCliRemovalOutcome(input: {
     if (existing.size === 0) mcpCliRemovalFailures.delete(input.cli);
     return;
   }
-  const bucket = existing ?? new Map<McpCliRemovalScope, number>();
+  const bucket =
+    existing ?? new Map<McpCliRemovalScope, McpCliRemovalFailureCode>();
   bucket.set(input.scope, input.exitCode);
   mcpCliRemovalFailures.set(input.cli, bucket);
+}
+
+function recordMcpCliPlanRefusal(input: {
+  cli: "gemini" | "codex";
+  scope: McpCliRemovalScope;
+  sdk: BackendSDK;
+}): void {
+  recordMcpCliRemovalOutcome({
+    cli: input.cli,
+    scope: input.scope,
+    exitCode: MCP_REMOVE_PLAN_REFUSED,
+    failed: true,
+  });
+  const line = formatMcpRemoveFailure({
+    cli: input.cli,
+    scope: input.scope,
+    exitCode: MCP_REMOVE_PLAN_REFUSED,
+  });
+  input.sdk.console.error(line);
+  skippedMcpCliReasons.set(input.cli, line);
 }
 
 type McpCliProviderId = "gemini-cli" | "codex-cli";
@@ -3407,7 +3434,7 @@ async function registerMcpWithCli(
   cliBinary: string,
   argv: string[],
   sdk: BackendSDK,
-): Promise<boolean> {
+): Promise<Result<boolean>> {
   // Pre-clean, across EVERY scope the policy covers — and no longer
   // best-effort. The scope list is `planMcpCliRemoval`'s, the same one the
   // startup sweep and the session cleanup iterate, so the three removal sites
@@ -3417,16 +3444,27 @@ async function registerMcpWithCli(
   // stale entry that survives a removal keeps holding a Caido session token,
   // and for Gemini's working-directory scope it also SHADOWS the fresh
   // user-scope entry the `mcp add` below is about to write.
+  let firstPlanningError: string | undefined;
   for (const removal of planMcpCliRemoval({ cli, platform: host?.platform })) {
-    const removePlan = buildSpawnPlan({
+    const removePlan = buildSpawnPlanResult({
       command: cliBinary,
       args: removal.argv,
       platform: host?.platform,
       comspec: getComspec(),
     });
-    const removeResult = await spawnAndWait(removePlan.file, removePlan.args, {
-      windowsVerbatimArguments: removePlan.windowsVerbatimArguments,
-    });
+    if (removePlan.kind === "Error") {
+      recordMcpCliPlanRefusal({ cli, scope: removal.scope, sdk });
+      firstPlanningError ??= removePlan.error;
+      continue;
+    }
+    const removeResult = await spawnAndWait(
+      removePlan.value.file,
+      removePlan.value.args,
+      {
+        windowsVerbatimArguments:
+          removePlan.value.windowsVerbatimArguments,
+      },
+    );
     // WR-05. `unusable` is the spawn that never started - an EINVAL, an ENOENT,
     // a binary deleted between resolve and spawn - and spawnAndWait reports it
     // with the same synthetic `code: 1` a genuine failure carries. It is logged
@@ -3460,12 +3498,20 @@ async function registerMcpWithCli(
     }
   }
 
-  const addPlan = buildSpawnPlan({
+  if (firstPlanningError !== undefined) return err(firstPlanningError);
+
+  const addPlan = buildSpawnPlanResult({
     command: cliBinary,
     args: argv,
     platform: host?.platform,
     comspec: getComspec(),
   });
+  if (addPlan.kind === "Error") {
+    const registrationFailure = `Drift refused to launch this CLI because it could not construct a safe process plan: ${addPlan.error}`;
+    skippedMcpCliReasons.set(cli, registrationFailure);
+    sdk.console.error(`[drift] ${cli} mcp add planning refused`);
+    return err(addPlan.error);
+  }
   // GUARDED (CR-01). `argv` comes from `buildMcpCliRegistrationArgv`, which ends
   // `…, nodeExecutable, mcpScriptPath` for gemini and `…, --, nodeExecutable,
   // mcpScriptPath` for codex — so THIS process's own command line carries
@@ -3475,8 +3521,8 @@ async function registerMcpWithCli(
   // deliberately NOT wrapped: their argv is `mcp remove drift --scope …` and
   // carries no script path.
   const result = await withDirectMcpCall(() =>
-    spawnAndWait(addPlan.file, addPlan.args, {
-      windowsVerbatimArguments: addPlan.windowsVerbatimArguments,
+    spawnAndWait(addPlan.value.file, addPlan.value.args, {
+      windowsVerbatimArguments: addPlan.value.windowsVerbatimArguments,
     }),
   );
   // THREE SCALARS, and no stderr — the CLI name, the resolved binary and the
@@ -3507,7 +3553,7 @@ async function registerMcpWithCli(
     } else {
       skippedMcpCliReasons.delete(cli);
     }
-    return true;
+    return ok(true);
   }
   // D-08: this sentence renders on the provider card and must disambiguate
   // "never registered" from "registered, but limited" on its own.
@@ -3539,7 +3585,7 @@ async function registerMcpWithCli(
         // the user working out by eye where the command stops.
         `${outstanding}\n${registrationFailure}`,
   );
-  return false;
+  return ok(false);
 }
 
 // D-03 / PRV-03. The ONE place Gemini and Codex are registered, and it now runs
@@ -3558,13 +3604,16 @@ async function registerMcpWithCli(
 // The four per-CLI guards below keep their sentences byte-for-byte: 07-02 wired
 // this map to the Settings → CLI Providers card, so rewording one would silently
 // change what a user reads.
-async function tryRegisterMcpForProviders(spec: McpServerSpec, sdk: BackendSDK): Promise<void> {
+async function tryRegisterMcpForProviders(
+  spec: McpServerSpec,
+  sdk: BackendSDK,
+): Promise<Result<void>> {
   // Structurally always present — buildMcpServerSpec sets `args` to exactly
   // `[mcpScriptPath]` — but `noUncheckedIndexedAccess` makes the read optional,
   // and registering a server with an empty script path would be worse than not
   // registering at all.
   const mcpScriptPath = spec.args[0];
-  if (mcpScriptPath === undefined) return;
+  if (mcpScriptPath === undefined) return ok(undefined);
   // The literal token, from the same source the spec itself uses. Only Codex's
   // payload embeds it; Gemini's carries a reference (see the payload builder).
   const caidoToken = getEffectiveCaidoToken();
@@ -3654,8 +3703,17 @@ async function tryRegisterMcpForProviders(spec: McpServerSpec, sdk: BackendSDK):
       sdk.console.log(`[drift] ${cli} mcp register skipped: ${registration.reason}`);
       continue;
     }
-    await registerMcpWithCli(cli, resolved, registration.argv, sdk);
+    const registrationResult = await registerMcpWithCli(
+      cli,
+      resolved,
+      registration.argv,
+      sdk,
+    );
+    if (registrationResult.kind === "Error") {
+      return err(registrationResult.error);
+    }
   }
+  return ok(undefined);
 }
 
 // The session-cleanup removal: what THIS run registered, taken back out.
@@ -3683,12 +3741,16 @@ async function unregisterMcpFromCli(cli: "gemini" | "codex", sdk: BackendSDK): P
     return;
   }
   for (const removal of planMcpCliRemoval({ cli, platform: host?.platform })) {
-    const removePlan = buildSpawnPlan({
+    const removePlan = buildSpawnPlanResult({
       command: storedPath,
       args: removal.argv,
       platform: host?.platform,
       comspec: getComspec(),
     });
+    if (removePlan.kind === "Error") {
+      recordMcpCliPlanRefusal({ cli, scope: removal.scope, sdk });
+      continue;
+    }
     // windowsVerbatimArguments is a LITERAL key here, with its value taken from
     // the plan. These spawns pass no environment, so they take spawnAndWait's
     // NO-ENV branch, whose options object was hardcoded before 07-01 widened
@@ -3696,9 +3758,14 @@ async function unregisterMcpFromCli(cli: "gemini" | "codex", sdk: BackendSDK): P
     // leaves the credential in place, which is the precise failure this whole
     // plan exists to prevent — so the phase's source criteria assert the flag's
     // DELIVERY at each removal site, not merely that the builder was called.
-    const result = await spawnAndWait(removePlan.file, removePlan.args, {
-      windowsVerbatimArguments: removePlan.windowsVerbatimArguments,
-    });
+    const result = await spawnAndWait(
+      removePlan.value.file,
+      removePlan.value.args,
+      {
+        windowsVerbatimArguments:
+          removePlan.value.windowsVerbatimArguments,
+      },
+    );
     // The same three-way read as the pre-clean, for the same reason (WR-05).
     const outcome = classifyMcpRemoveExit({
       cli,
@@ -3822,19 +3889,28 @@ async function sweepStaleMcpCliRegistrations(sdk: BackendSDK): Promise<void> {
         cli,
         platform: host?.platform,
       })) {
-        const removePlan = buildSpawnPlan({
+        const removePlan = buildSpawnPlanResult({
           command: resolved,
           args: removal.argv,
           platform: host?.platform,
           comspec: getComspec(),
         });
+        if (removePlan.kind === "Error") {
+          recordMcpCliPlanRefusal({ cli, scope: removal.scope, sdk });
+          continue;
+        }
         // The literal key again, value from the plan — see the identical note
         // at unregisterMcpFromCli. This is the removal that runs on the machine
         // where the credential exposure is greatest, so a dropped flag here is
         // the worst of the three.
-        const result = await spawnAndWait(removePlan.file, removePlan.args, {
-          windowsVerbatimArguments: removePlan.windowsVerbatimArguments,
-        });
+        const result = await spawnAndWait(
+          removePlan.value.file,
+          removePlan.value.args,
+          {
+            windowsVerbatimArguments:
+              removePlan.value.windowsVerbatimArguments,
+          },
+        );
         // WR-05, and this is the site where it mattered most: the sweep runs
         // UNCONDITIONALLY at every MCP start, so a spawn that cannot start -
         // rather than a removal that failed - used to paint the SECURITY line
@@ -4714,7 +4790,11 @@ async function startMcpServerOperation(
   // Since Phase 7 the helper registers on EVERY platform: it writes no shell
   // script, spawns no permission-bit step, and passes the environment through
   // each CLI's own `-e`/`--env` surface instead (PRV-03).
-  await tryRegisterMcpForProviders(spec.value, sdk);
+  const registration = await tryRegisterMcpForProviders(spec.value, sdk);
+  if (registration.kind === "Error") {
+    await cleanupMcpRuntime(sdk, "error", registration.error);
+    return err(registration.error);
+  }
   cliSessions.clear();
 
   await publishMcpStatus(sdk);
@@ -5158,12 +5238,21 @@ async function sendCliMessage(
     // AR-01 — because the correct primitive is a Windows Job Object, which
     // neither LLRT nor Node exposes without a native addon, and native addons are
     // banned by the QuickJS runtime constraint.
-    const spawnPlan = buildSpawnPlan({
+    const spawnPlanResult = buildSpawnPlanResult({
       command: resolved,
       args,
       platform: host?.platform,
       comspec: getComspec(),
     });
+    if (spawnPlanResult.kind === "Error") {
+      const message = `Drift refused to launch the provider because it could not construct a safe process plan: ${spawnPlanResult.error}`;
+      setSessionState("error", message, {
+        mcpAttached: providerStartLease.tempDir !== undefined,
+        reasonCode: "spawn_error",
+      });
+      return err(message);
+    }
+    const spawnPlan = spawnPlanResult.value;
 
     lastSpawnArgs = [spawnPlan.file, ...spawnPlan.args];
     appendSessionDebugLog(
@@ -6777,7 +6866,9 @@ async function getDiagnostics(_sdk: BackendSDK): Promise<Result<Record<string, s
                 [...scopes.entries()]
                   .map(
                     ([scope, exitCode]) =>
-                      `scope=${scope} exit=${String(exitCode)}`,
+                      exitCode === MCP_REMOVE_PLAN_REFUSED
+                        ? `scope=${scope} plan=refused`
+                        : `scope=${scope} exit=${String(exitCode)}`,
                   )
                   .join(", ") +
                 ")",

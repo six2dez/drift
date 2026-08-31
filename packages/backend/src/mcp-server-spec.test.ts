@@ -12,6 +12,7 @@ import {
   MCP_CLI_ENV_FLAG,
   MCP_CLI_REGISTRATION_SCOPES,
   MCP_CLI_REMOVE_REMEDIATION,
+  MCP_REMOVE_PLAN_REFUSED,
   MCP_CLI_UNSCOPED,
   type McpCliRemovalScope,
   buildMcpCliRegistrationArgv,
@@ -1041,6 +1042,19 @@ describe("formatMcpRemoveFailure", () => {
     );
   });
 
+  it("records a planning refusal without claiming that a process exited", () => {
+    const line = formatMcpRemoveFailure({
+      cli: "gemini",
+      scope: "user",
+      exitCode: MCP_REMOVE_PLAN_REFUSED,
+    });
+
+    expect(line).toContain("could not be planned safely");
+    expect(line).toContain("may remain");
+    expect(line).not.toContain("exited");
+    expect(line.endsWith(MCP_CLI_REMOVE_REMEDIATION.gemini.user)).toBe(true);
+  });
+
   it("carries no path, no environment value and no CLI output", () => {
     for (const cli of ["gemini", "codex"] as const) {
       for (const scope of ["user", "project", MCP_CLI_UNSCOPED] as const) {
@@ -1125,6 +1139,16 @@ describe("formatMcpRemoveFailures", () => {
     expect(
       formatMcpRemoveFailures({ cli: "codex", outstanding: new Map() }),
     ).toBeUndefined();
+  });
+
+  it("preserves a planning refusal in the outstanding-scope ledger", () => {
+    const line = formatMcpRemoveFailures({
+      cli: "codex",
+      outstanding: new Map([[MCP_CLI_UNSCOPED, MCP_REMOVE_PLAN_REFUSED]]),
+    });
+
+    expect(line).toContain("could not be planned safely");
+    expect(line).not.toContain("exited");
   });
 
   it("inherits the value-free property from the single-scope formatter", () => {

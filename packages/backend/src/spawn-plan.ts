@@ -240,15 +240,21 @@ export type SpawnPlan = {
   windowsVerbatimArguments: boolean;
 };
 
-// The ONLY way a resolved provider binary becomes a spawn on this codebase.
-//
-// Branch order is part of the contract and the non-win32 arm is written FIRST.
-export function buildSpawnPlan(input: {
+export type SpawnPlanInput = {
   command: string;
   args: string[];
   platform: Platform | undefined;
   comspec?: string;
-}): SpawnPlan {
+};
+
+export type SpawnPlanResult =
+  | { kind: "Ok"; value: SpawnPlan }
+  | { kind: "Error"; error: string };
+
+// The ONLY way a resolved provider binary becomes a spawn on this codebase.
+//
+// Branch order is part of the contract and the non-win32 arm is written FIRST.
+export function buildSpawnPlan(input: SpawnPlanInput): SpawnPlan {
   // Non-win32, `undefined` INCLUDED: on macOS and Linux the spawn must be
   // byte-identical to what shipped before this module existed — same file, same
   // argv array, no interpreter — and that byte-identity is CMP-01's obligation
@@ -322,4 +328,17 @@ export function buildSpawnPlan(input: {
     args: ["/d", "/s", "/c", `"${parts.join(" ")}"`],
     windowsVerbatimArguments: true,
   };
+}
+
+// The planner's COMSPEC refusal is deliberately still a throw at its pure,
+// legacy API: existing callers/tests that ask for a plan directly must not be
+// able to ignore it. I/O orchestrators use this typed boundary instead. That
+// keeps the refusal fail-closed while ensuring a predictable host-state error
+// cannot jump over their staged-file or teardown cleanup.
+export function buildSpawnPlanResult(input: SpawnPlanInput): SpawnPlanResult {
+  try {
+    return { kind: "Ok", value: buildSpawnPlan(input) };
+  } catch (error) {
+    return { kind: "Error", error: String(error) };
+  }
 }

@@ -137,18 +137,16 @@ function functionBody(source: string, name: string): string {
 
 const code = stripCommentLines(indexSource);
 
-// CR-01. `buildSpawnPlan`'s cmd.exe arm falls back to the BARE name "cmd.exe",
-// which Windows resolves through a search order that includes the working
-// directory Caido's plugin host chose. The pure module keeps that literal as a
-// last resort and states that reading the environment is the caller's job; this
-// is the assertion that the caller does it, at every site, without exception.
+// CR-01 / CR-02. `buildSpawnPlan` refuses a Windows shim when there is no
+// absolute command interpreter. Production consumes its typed boundary so that
+// the refusal remains fail-closed without escaping the caller's cleanup.
 //
 // The count is asserted too. A sixth site added without `comspec` fails the
 // per-site check; a sixth site added WITH it still fails this count, which is
 // the point — a new spawn of a provider binary is a decision that should be read
 // by a human, not absorbed silently by a passing suite.
-describe("index.ts wires COMSPEC into every buildSpawnPlan call site (CR-01)", () => {
-  const calls = callArgumentTexts(code, "buildSpawnPlan");
+describe("index.ts contains every spawn-plan refusal at its orchestration boundary (CR-02)", () => {
+  const calls = callArgumentTexts(code, "buildSpawnPlanResult");
 
   it("has exactly the five call sites the review inventoried", () => {
     expect(calls).toHaveLength(5);
@@ -168,6 +166,53 @@ describe("index.ts wires COMSPEC into every buildSpawnPlan call site (CR-01)", (
     expect(helper).toHaveLength(1);
     expect(helper[0]).toContain("env: readParentEnv()");
     expect(helper[0]).toContain("platform: host?.platform");
+  });
+
+  it("has no throwing planner call in the production orchestrator", () => {
+    expect(callArgumentTexts(code, "buildSpawnPlan")).toHaveLength(0);
+  });
+
+  it("turns registration planning failure into start and refresh cleanup", () => {
+    const register = functionBody(code, "tryRegisterMcpForProviders");
+    const start = functionBody(code, "startMcpServerOperation");
+    const refresh = functionBody(code, "refreshActiveMcpRuntimeOperation");
+    expect(register).toContain('registrationResult.kind === "Error"');
+    for (const body of [start, refresh]) {
+      expect(body).toContain('registration.kind === "Error"');
+      const refusal = body.indexOf('registration.kind === "Error"');
+      const cleanup = body.indexOf("cleanupMcpRuntime(", refusal);
+      expect(refusal).not.toBe(-1);
+      expect(cleanup).toBeGreaterThan(refusal);
+    }
+  });
+
+  it("records cleanup plan refusals and continues to the termination pass", () => {
+    const unregister = functionBody(code, "unregisterMcpFromCli");
+    const recorder = functionBody(code, "recordMcpCliPlanRefusal");
+    const cleanup = functionBody(code, "cleanupMcpRuntimeGeneration");
+    expect(unregister).toContain('removePlan.kind === "Error"');
+    expect(unregister).toContain("recordMcpCliPlanRefusal(");
+    expect(recorder).toContain("MCP_REMOVE_PLAN_REFUSED");
+    expect(unregister).toContain("continue;");
+    expect(cleanup.indexOf("unregisterMcpFromCli(")).toBeLessThan(
+      cleanup.indexOf("killTree("),
+    );
+    expect(cleanup.indexOf("killTree(")).toBeLessThan(
+      cleanup.indexOf("reapMcpOrphans("),
+    );
+    expect(cleanup.indexOf("reapMcpOrphans(")).toBeLessThan(
+      cleanup.indexOf("await rm("),
+    );
+  });
+
+  it("reports send planning failure inside the provider lease cleanup", () => {
+    const send = functionBody(code, "sendCliMessage");
+    const plan = send.indexOf("buildSpawnPlanResult(");
+    const refusal = send.indexOf('spawnPlanResult.kind === "Error"', plan);
+    const stagedCleanup = send.indexOf("cleanupUncommittedProviderStart(");
+    expect(plan).not.toBe(-1);
+    expect(refusal).toBeGreaterThan(plan);
+    expect(stagedCleanup).toBeGreaterThan(refusal);
   });
 });
 
@@ -1179,8 +1224,8 @@ describe("index.ts wires the orphan reap at every counted site and nowhere else 
     // The registration argv, its own population of one.
     const register = topLevelDeclarationSlice(code, "registerMcpWithCli");
     expect(register).not.toBe("");
-    expect(register.match(/addPlan\.args/g) ?? []).toHaveLength(1);
-    expect(code.match(/addPlan\.args/g) ?? []).toHaveLength(1);
+    expect(register.match(/addPlan\.value\.args/g) ?? []).toHaveLength(1);
+    expect(code.match(/addPlan\.value\.args/g) ?? []).toHaveLength(1);
 
     // THE GUARD ITSELF, at the two AWAITED sites. `withDirectMcpCall(` matches
     // the two CALLS and not the declaration — that is spelled

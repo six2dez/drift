@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildSpawnPlan,
+  buildSpawnPlanResult,
   CMD_INTERPRETED_EXTENSIONS,
   CMD_META_CHARACTERS,
   escapeCmdArgument,
@@ -195,6 +196,38 @@ describe("buildSpawnPlan — win32 cmd.exe branch (SC-2)", () => {
         }),
       ).toThrow("without an absolute command interpreter");
     }
+  });
+
+  it("contains the fail-closed COMSPEC refusal in a typed result at orchestration boundaries", () => {
+    for (const comspec of [undefined, "", "cmd.exe", ".\\cmd.exe"]) {
+      const result = buildSpawnPlanResult({
+        command: GLOBAL_SHIM,
+        args: ["mcp", "remove", "drift"],
+        platform: "win32",
+        comspec,
+      });
+
+      expect(result).toEqual({
+        kind: "Error",
+        error:
+          "Error: Refusing to launch a Windows command shim without an absolute command interpreter.",
+      });
+    }
+
+    expect(
+      buildSpawnPlanResult({
+        command: "/usr/local/bin/claude",
+        args: ["-p", "hello"],
+        platform: "darwin",
+      }),
+    ).toEqual({
+      kind: "Ok",
+      value: {
+        file: "/usr/local/bin/claude",
+        args: ["-p", "hello"],
+        windowsVerbatimArguments: false,
+      },
+    });
   });
 
   it("composes every relative COMSPEC shape through the selector without producing a bare interpreter", () => {

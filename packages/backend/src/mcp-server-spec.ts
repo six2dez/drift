@@ -411,6 +411,13 @@ export const MCP_CLI_UNSCOPED = "unscoped";
 // therefore takes no scope argument at all.
 export type McpCliRemovalScope = "user" | "project" | typeof MCP_CLI_UNSCOPED;
 
+// A removal can fail after the CLI starts (numeric exit), or be refused before
+// spawn because Drift cannot construct a safe platform plan. Keeping the latter
+// as an explicit ledger value prevents diagnostics from inventing an exit code
+// for a process that never existed.
+export const MCP_REMOVE_PLAN_REFUSED = "plan-refused" as const;
+export type McpCliRemovalFailureCode = number | typeof MCP_REMOVE_PLAN_REFUSED;
+
 // Every scope name this module can produce, so the remediation record below is
 // TOTAL over the type rather than partial with a fallback nobody exercises.
 const MCP_CLI_REMOVAL_SCOPE_VALUES: readonly McpCliRemovalScope[] = [
@@ -857,16 +864,20 @@ export function formatMcpRemoveUnusable(input: {
 export function formatMcpRemoveFailure(input: {
   cli: McpCliName;
   scope: McpCliRemovalScope;
-  exitCode: number;
+  exitCode: McpCliRemovalFailureCode;
 }): string {
   const where =
     input.scope === MCP_CLI_UNSCOPED
       ? `${input.cli} is unscoped`
       : `scope=${input.scope}`;
+  const outcome =
+    input.exitCode === MCP_REMOVE_PLAN_REFUSED
+      ? "could not be planned safely"
+      : `exited ${String(input.exitCode)}`;
   return (
-    `[drift] SECURITY: ${input.cli} mcp remove (${where}) exited ` +
-    `${String(input.exitCode)} — a Drift MCP entry carrying a Caido session ` +
-    `token may remain in this CLI's configuration. Remove it with: ` +
+    `[drift] SECURITY: ${input.cli} mcp remove (${where}) ${outcome} — a ` +
+    `Drift MCP entry carrying a Caido session token may remain in this CLI's ` +
+    `configuration. Remove it with: ` +
     MCP_CLI_REMOVE_REMEDIATION[input.cli][input.scope]
   );
 }
@@ -900,7 +911,7 @@ const REMOVE_FAILURE_SEPARATOR = "\n";
 
 export function formatMcpRemoveFailures(input: {
   cli: McpCliName;
-  outstanding: ReadonlyMap<McpCliRemovalScope, number>;
+  outstanding: ReadonlyMap<McpCliRemovalScope, McpCliRemovalFailureCode>;
 }): string | undefined {
   const lines = [...input.outstanding.entries()].map(([scope, exitCode]) =>
     formatMcpRemoveFailure({ cli: input.cli, scope, exitCode }),
