@@ -1183,16 +1183,22 @@ describe("index.ts wires the orphan reap at every counted site and nowhere else 
     expect(send).not.toContain("runMcpLifecycleOperation(mcpLifecycle");
 
     const acquire = send.indexOf("acquireProviderStartLease(");
+    const firstAwait = send.indexOf("await dataReady");
     const stage = send.indexOf("createSessionRuntimeFiles(");
     const commit = send.indexOf("commitProviderStartLease({");
     const spawn = send.indexOf("spawnWithEnv(", commit);
     const track = send.indexOf("activeProcesses.set(", commit);
     expect(acquire).not.toBe(-1);
+    expect(firstAwait).not.toBe(-1);
     expect(stage).not.toBe(-1);
     expect(commit).not.toBe(-1);
     expect(spawn).not.toBe(-1);
     expect(track).not.toBe(-1);
-    expect(acquire).toBeLessThan(stage);
+    // A send owns its preparation identity before it can yield even once.
+    // Otherwise Stop can complete while the send is invisible, after which a
+    // newly acquired lease would be current and could commit a provider spawn.
+    expect(acquire).toBeLessThan(firstAwait);
+    expect(firstAwait).toBeLessThan(stage);
     expect(stage).toBeLessThan(commit);
     expect(commit).toBeLessThan(spawn);
     expect(spawn).toBeLessThan(track);

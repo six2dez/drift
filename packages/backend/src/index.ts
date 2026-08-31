@@ -4949,6 +4949,33 @@ async function sendCliMessage(
     httpContext?: HttpContextPayload;
   }
 ): Promise<Result<SendCliMessageOutput>> {
+  // Capture this turn's preparation identity synchronously, before the first
+  // await. Stop invalidates identities that already exist; acquiring later
+  // would let a turn hidden in data/project/command preparation appear only
+  // after teardown had completed its sole process pass.
+  const providerStartLease: ProviderStartLease | undefined =
+    acquireProviderStartLease(mcpLifecycle, mcpTempDir);
+  if (providerStartLease === undefined) {
+    const message = "The MCP runtime is stopping. Retry the provider turn after teardown completes.";
+    publishSessionState(sdk, {
+      sessionId: input.sessionId,
+      chatId: input.chatId,
+      providerId:
+        currentChats.find((c) => c.id === input.chatId)?.providerId ??
+        currentSettings.activeProvider,
+      state: "error",
+      reason: message,
+      reasonCode: "closed",
+      mcpAttached: mcpTempDir !== undefined,
+    });
+    return err(message);
+  }
+  let providerStartCommitted = false;
+  let runtimeFiles: SessionRuntimeFiles | undefined;
+  const stagedMcpConfigPaths: string[] = [];
+  let sessionDebugLogPath: string | undefined;
+  let claudeMcpConfigPath: string | undefined;
+
   try {
     await dataReady;
     await refreshProjectContext(sdk);
@@ -4995,24 +5022,8 @@ async function sendCliMessage(
       return err(message);
     }
 
-    // A short preparation lease, not the lifecycle FIFO. Stop must never wait
-    // for the provider turn to finish; it only needs to prevent a paused start
-    // from committing after teardown's one process pass.
-    const providerStartLease: ProviderStartLease | undefined =
-      acquireProviderStartLease(mcpLifecycle, mcpTempDir);
-    if (providerStartLease === undefined) {
-      const message = "The MCP runtime is stopping. Retry the provider turn after teardown completes.";
-      setSessionState("error", message, { reasonCode: "closed" });
-      return err(message);
-    }
-    let providerStartCommitted = false;
-    let runtimeFiles: SessionRuntimeFiles | undefined;
-    const stagedMcpConfigPaths: string[] = [];
-    const sessionDebugLogPath: string | undefined = getSessionDebugLogPath(input.sessionId);
-    let claudeMcpConfigPath: string | undefined;
-
-    try {
-      // Check if first message BEFORE setting session (for system prompt injection)
+    sessionDebugLogPath = getSessionDebugLogPath(input.sessionId);
+    // Check if first message BEFORE setting session (for system prompt injection)
       const isFirstMsg = !cliSessions.has(input.chatId);
       const caidoToken = getEffectiveCaidoToken();
       const toolPolicy = getCurrentMcpToolPolicy();
@@ -6178,17 +6189,6 @@ async function sendCliMessage(
         finalize(err(`Spawn error: ${e.message}`));
       });
     });
-    } finally {
-      releaseProviderStartLease(mcpLifecycle, providerStartLease);
-      if (!providerStartCommitted) {
-        await cleanupUncommittedProviderStart({
-          sessionId: input.sessionId,
-          runtimeFiles,
-          mcpConfigPaths: stagedMcpConfigPaths,
-          debugLogPath: sessionDebugLogPath,
-        });
-      }
-    }
   } catch (e) {
     publishSessionState(sdk, {
       sessionId: input.sessionId,
@@ -6202,6 +6202,16 @@ async function sendCliMessage(
       mcpAttached: mcpTempDir !== undefined,
     });
     return err(`sendCliMessage failed: ${String(e)}`);
+  } finally {
+    releaseProviderStartLease(mcpLifecycle, providerStartLease);
+    if (!providerStartCommitted) {
+      await cleanupUncommittedProviderStart({
+        sessionId: input.sessionId,
+        runtimeFiles,
+        mcpConfigPaths: stagedMcpConfigPaths,
+        debugLogPath: sessionDebugLogPath,
+      });
+    }
   }
 }
 
