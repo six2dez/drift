@@ -1232,6 +1232,20 @@ describe("index.ts wires the orphan reap at every counted site and nowhere else 
     expect(runtimeFileCalls[0]).toContain("input.sessionId");
     expect(runtimeFileCalls[0]).toContain("providerStartLease.tempDir");
     expect(send).toContain("cleanupUncommittedProviderStart({");
+
+    // If Stop removed the captured generation while one of the preparation
+    // awaits was pending, createSessionRuntimeFiles may have recreated that
+    // retired root before the stale commit is refused. Per-file cleanup must be
+    // followed by ownership cleanup of the now-unreferenced directory.
+    const stagedCleanup = send.indexOf("cleanupUncommittedProviderStart({");
+    const retiredRootCleanup = send.indexOf(
+      "cleanupRetiredProviderStartRoot({",
+    );
+    expect(retiredRootCleanup).toBeGreaterThan(stagedCleanup);
+    const retiredRoot = functionBody(code, "cleanupRetiredProviderStartRoot");
+    expect(retiredRoot).toContain("currentTempDir === leaseTempDir");
+    expect(retiredRoot).toContain("await rm(leaseTempDir");
+    expect(retiredRoot).toContain("recursive: true");
   });
 
   it("owns every token-bearing provider config in one cleanup funnel", () => {

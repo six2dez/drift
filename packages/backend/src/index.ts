@@ -1625,6 +1625,21 @@ async function cleanupOwnedMcpConfigPaths(
   }
 }
 
+type RetiredProviderStartRoot = {
+  leaseTempDir: string | undefined;
+  currentTempDir: string | undefined;
+};
+
+async function cleanupRetiredProviderStartRoot(
+  input: RetiredProviderStartRoot,
+): Promise<void> {
+  const { leaseTempDir, currentTempDir } = input;
+  if (leaseTempDir === undefined || currentTempDir === leaseTempDir) return;
+  await rm(leaseTempDir, { recursive: true, force: true }).catch(
+    () => undefined,
+  );
+}
+
 // parseRuntimeActivityEvents used to live here. PERF-02 replaced its ONLY caller
 // (the 250 ms flushActivities tick) with readActivityTick, which already splits,
 // trims and drops empty lines, so the function had no remaining reader and
@@ -6261,6 +6276,10 @@ async function sendCliMessage(
         sessionId: input.sessionId,
         runtimeFiles,
         debugLogPath: sessionDebugLogPath,
+      });
+      await cleanupRetiredProviderStartRoot({
+        leaseTempDir: providerStartLease.tempDir,
+        currentTempDir: mcpTempDir,
       });
     }
   }
