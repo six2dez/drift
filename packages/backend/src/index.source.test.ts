@@ -1636,10 +1636,10 @@ describe("index.ts states an explicit mode at every writeFile but the one named 
   // RED INPUT, in both directions and both verified by construction:
   //   - add a `writeFile` into the temp directory without a mode → the
   //     difference becomes two and this fails;
-  //   - remove one of Task 1's five `mode:` options → same failure.
+  //   - remove any one of the seven `mode:` options → same failure.
   it("carries a mode at every writeFile except exactly one", () => {
     const writes = callArgumentTexts(code, "writeFile");
-    expect(writes).toHaveLength(7);
+    expect(writes).toHaveLength(8);
 
     const withMode = writes.filter((args) => args.includes("mode:"));
     expect(withMode).toHaveLength(writes.length - 1);
@@ -1647,7 +1647,7 @@ describe("index.ts states an explicit mode at every writeFile but the one named 
 
   // The positive companion, and it is not ceremony. Without it the case above
   // goes green two ways that both LOOK like a fix: delete the exempt write
-  // outright (7 → 6, 6 → 5, difference still one), or move a temp-directory
+  // outright (8 → 7, 7 → 6, difference still one), or move a temp-directory
   // write into the exempt shape. Naming the exemption positively closes both.
   //
   // RED INPUT: delete the plugin-data write, or give a second `writeFile` a

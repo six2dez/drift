@@ -1,5 +1,14 @@
 import type { DefineAPI, SDK, DefineEvents } from "caido:plugin";
-import { readFile, writeFile, open as openFile, stat, mkdir, rm, readdir } from "fs/promises";
+import {
+  readFile,
+  writeFile,
+  open as openFile,
+  stat,
+  mkdir,
+  rm,
+  rename,
+  readdir,
+} from "fs/promises";
 // A second statement against the SAME specifier the line above already uses, and
 // the only source for the rung-2 presence check in `detectRealpathRung`. A
 // NAMESPACE import is deliberate: it tolerates a missing member as `undefined`,
@@ -80,6 +89,7 @@ import {
   type McpOrphanReapGate,
   type ProviderStartLease,
 } from "./mcp-lifecycle";
+import { cleanupOwnedPaths, writeOwnedTempFile } from "./owned-temp-file";
 import {
   MCP_SELF_TEST_CHECKS,
   MCP_TOOL_NAMES,
@@ -1119,13 +1129,12 @@ async function enforceOwnerOnlyDir(dir: string): Promise<number | undefined> {
 // comment: the phase's call-site gate counts it over the RAW file, and a
 // mention in prose would inflate the count that keeps it honest.)
 //
-// TRUE SCOPE, enumerated rather than assumed. `writeTemp` has exactly two
-// callers, and the ladder covers those two and nothing else:
+// TRUE SCOPE, enumerated rather than assumed. The ladder has exactly two
+// write entry points and covers those two and nothing else:
 //
-//   writeChatMcpConfig  - Claude's `mcp-<chatId>.json` and Copilot's
-//                         `copilot-mcp-<chatId>.json`, both of which embed the
-//                         literal Caido session token
-//   getDiagnostics      - the `test-diag.json` writability probe
+//   writeChatMcpConfig  - its owner-aware atomic staging operation writes
+//                         Claude/Copilot configs carrying the literal token
+//   writeTemp           - the `test-diag.json` writability probe only
 //
 // The context file and the per-session activity/approval files are written
 // through their own `writeFile` calls and do NOT pass through here, so they are
@@ -1240,6 +1249,7 @@ async function writeChatMcpConfig(
   tempDir: string | undefined,
   name: string,
   spec: McpServerSpec,
+  ownedMcpConfigPaths: Set<string>,
   sdk: BackendSDK,
 ): Promise<string | undefined> {
   if (tempDir === undefined) return undefined;
@@ -1267,11 +1277,39 @@ async function writeChatMcpConfig(
     return undefined;
   }
 
-  return writeTemp(
-    tempDir,
-    name,
-    JSON.stringify(toMcpConfigDocument(spec), null, 2),
+  const content = JSON.stringify(toMcpConfigDocument(spec), null, 2);
+  const finalPath = path.join(tempDir, name);
+  const stagingPath = path.join(tempDir, `${name}.${genUUID()}.tmp`);
+  const written = await withFsRetry(
+    async () =>
+      writeOwnedTempFile({
+        // T-08-91: both token-bearing paths become owned synchronously before
+        // mkdir/write/rename can yield, fail, or leave partial bytes behind.
+        owners: ownedMcpConfigPaths,
+        finalPath,
+        stagingPath,
+        writeStaged: async (stagingPath) => {
+          await mkdir(tempDir, { recursive: true, mode: 0o700 });
+          await writeFile(stagingPath, content, { mode: 0o600 });
+        },
+        promote: async (stagingPath, finalPath) => {
+          await rename(stagingPath, finalPath);
+        },
+        remove: async (configPath) => {
+          await rm(configPath, { force: true });
+        },
+      }),
+    {
+      onRetry: (info) => {
+        console.error(
+          `[drift] Transient filesystem error writing ${name} (attempt ${String(info.attempt)}, code ${info.code}); retrying in ${String(info.delayMs)}ms`,
+        );
+      },
+    },
   );
+  lastTempWriteAttempts = written.attempts;
+  if (written.kind === "Error") throw new Error(written.error);
+  return written.value;
 }
 
 function getSessionDebugLogPath(sessionId: string): string | undefined {
@@ -1615,15 +1653,21 @@ async function cleanupOwnedMcpConfigPaths(
   configPaths: Set<string>,
   debugLogPath: string | undefined,
 ): Promise<void> {
-  // Transfer ownership synchronously before the first unlink await. finalize()
-  // and the outer send finally can both call this helper, but only the first
-  // consumer receives paths; the second is a no-op rather than a double unlink.
-  const ownedPaths = [...configPaths];
-  configPaths.clear();
-  for (const configPath of ownedPaths) {
-    appendSessionDebugLog(debugLogPath, `config cleanup: rm ${configPath}`);
-    await rm(configPath, { force: true }).catch(() => undefined);
-  }
+  // T-08-92: finalize() and the outer finally share this exact owner. A failed
+  // unlink stays owned for the other consumer instead of being cleared early.
+  await cleanupOwnedPaths({
+    owners: configPaths,
+    remove: async (configPath) => {
+      appendSessionDebugLog(debugLogPath, `config cleanup: rm ${configPath}`);
+      try {
+        await rm(configPath, { force: true });
+        appendSessionDebugLog(debugLogPath, "config cleanup status: removed");
+      } catch {
+        appendSessionDebugLog(debugLogPath, "config cleanup status: retained");
+        throw new Error("config cleanup failed");
+      }
+    },
+  });
 }
 
 // parseRuntimeActivityEvents used to live here. PERF-02 replaced its ONLY caller
@@ -5130,13 +5174,13 @@ async function sendCliMessage(
             providerStartLease.tempDir,
             `mcp-${input.chatId}.json`,
             spec.value,
+            ownedMcpConfigPaths,
             sdk,
           );
           if (cfgFile === undefined) {
             setSessionState("error", "Drift could not prepare the Claude MCP configuration file.");
             return err("Drift could not prepare the Claude MCP configuration file.");
           }
-          ownedMcpConfigPaths.add(cfgFile);
           claudeMcpConfigForLaunch = cfgFile;
         }
 
@@ -5183,13 +5227,13 @@ async function sendCliMessage(
             providerStartLease.tempDir,
             `copilot-mcp-${input.chatId}.json`,
             spec.value,
+            ownedMcpConfigPaths,
             sdk,
           );
           if (cfgFile === undefined) {
             setSessionState("error", "Drift could not prepare the Copilot MCP configuration file.");
             return err("Drift could not prepare the Copilot MCP configuration file.");
           }
-          ownedMcpConfigPaths.add(cfgFile);
           copilotMcpConfigForLaunch = cfgFile;
         }
         args.push(
