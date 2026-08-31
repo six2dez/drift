@@ -1,458 +1,271 @@
 ---
 phase: 08-process-lifecycle
-reviewed: 2026-08-24T20:55:00Z
+reviewed: 2026-08-31T13:00:41Z
 depth: standard
-files_reviewed: 12
+files_reviewed: 16
 files_reviewed_list:
-  - packages/backend/src/kill-plan.ts
-  - packages/backend/src/kill-plan.test.ts
-  - packages/backend/src/kill-tree.posix.test.ts
-  - packages/backend/src/kill-tree.win32.test.ts
-  - packages/backend/src/kill-tree.win32.gate.test.ts
-  - packages/backend/src/index.ts
-  - packages/backend/src/index.source.test.ts
   - .github/workflows/ci.yml
-  - .planning/ROADMAP.md
   - CLAUDE.md
-  - .planning/codebase/CONVENTIONS.md
-  - .planning/phases/08-process-lifecycle/08-VALIDATION.md
+  - packages/backend/src/index.source.test.ts
+  - packages/backend/src/index.ts
+  - packages/backend/src/kill-plan.test.ts
+  - packages/backend/src/kill-plan.ts
+  - packages/backend/src/kill-tree.posix.test.ts
+  - packages/backend/src/kill-tree.win32.gate.test.ts
+  - packages/backend/src/kill-tree.win32.test.ts
+  - packages/backend/src/mcp-server-spec.spawn.test.ts
+  - packages/backend/src/mcp-server-spec.test.ts
+  - packages/backend/src/mcp-server-spec.ts
+  - packages/backend/src/orphan-reap.posix.test.ts
+  - packages/backend/src/platform.test.ts
+  - packages/backend/src/platform.ts
+  - packages/backend/src/spawn-plan.win32.test.ts
 findings:
-  critical: 2
-  warning: 4
-  info: 4
-  total: 10
+  critical: 3
+  warning: 5
+  info: 0
+  total: 8
 status: issues_found
 ---
 
 # Phase 8: Code Review Report
 
-**Reviewed:** 2026-08-24T20:55:00Z
+**Reviewed:** 2026-08-31T13:00:41Z
 **Depth:** standard
-**Files Reviewed:** 12
+**Files Reviewed:** 16
+**Diff Base:** `c06dabdaf1029b755cef1018524b5ae9488678ec`
 **Status:** issues_found
 
 ## Summary
 
-`kill-plan.ts` is the strongest artifact in the phase: pure, single-import, every arm
-reachable from literal inputs, the refusal branch asserted on all six platform/rung
-combinations, and the POSIX behavioural suite carries a real falsifying control that I
-re-ran and confirmed measures what it claims. `pnpm exec vitest run` is green at 578
-(569 passed / 9 skipped) and `pnpm -r typecheck` is clean. The SC-4 statement ordering
-was verified by reading the actual statements in `cleanupMcpRuntime`, `closeCliSession`
-and `deleteChat` rather than by trusting the gate — it holds at all three. The banned
-`process.kill(-pid, …)` spelling appears only in comments. I found no fourth
-pass-by-accident gate of the kind the phase already caught three of: I re-implemented
-`functionBody` against the real stripped source and measured every body it extracts
-(`cleanupMcpRuntime` 21 lines, `closeCliSession` 27, `deleteChat` 23, `sendCliMessage`
-810), and the `rm(` needle resolves to the intended `rm` call at every site.
+The current Phase 8 source still has three ship-blocking failure classes: an invalid
+Windows `COMSPEC` falls through to the bare `cmd.exe` name on a token-bearing
+spawn; the asynchronous orphan reaper performs its irreversible kill from a gate that
+may have become stale; and start/stop/refresh operations can overwrite a newer MCP
+runtime because their module-global state has neither serialization nor a generation
+identity. Five additional findings affect PID parsing and freshness, the truthfulness
+of the reap diagnostic, Windows-test safety, and the non-vacuity of the Windows CI
+gate.
 
-The defects are all in the **glue**, not the plan builder — precisely the layer that
-`index.ts` being un-importable leaves unverifiable. Two of them are load-bearing:
+The review was performed against the actual current tree at
+`98a5ac3fbca4029075f5cfc2b81fbdca98f6b932`, not the Phase summaries. The explicit
+16-file scope exactly matches the non-planning diff from the supplied base. I also
+traced the relevant current verification/security records so accepted boundaries were
+not recast as defects.
 
-1. `killTree` fires a single-pid signal **before** it spawns the tree killer. On POSIX
-   I measured that this is harmless (the group survives the leader's death). On win32 —
-   the platform the whole milestone exists for — Node/LLRT implement that signal as an
-   unconditional `TerminateProcess`, so `taskkill /t` is handed a pid whose process has
-   already left the process table, and the deferred second rung then self-skips on its
-   own `isPidAlive` guard.
-2. The `isPidAlive` guard recorded in `08-SECURITY.md` as closing threat T-08-04
-   (pid reassignment) checks pid *liveness*, which is exactly what a reassigned pid
-   reports. I measured that `proc.pid` remains a valid number after the child is
-   reaped under Node 20 on darwin, so `killTree`'s re-read of `proc.pid` inside the
-   deferred timer does not save it either.
+### Evidence boundary
 
-Neither is reachable by any test this repository can run, which is why both survived a
-phase that otherwise gated itself unusually hard.
+- Static/data-flow evidence proves the findings below from the current source. The
+  orchestrator in `index.ts` remains unimportable in Vitest, so green helper tests do
+  not execute its lifecycle interleavings.
+- The directed local run was green: 410 tests passed and 9 were skipped across the
+  Phase 8 suites; `pnpm -r typecheck` and `pnpm lint` also passed. On this macOS
+  host, `/usr/bin/pgrep -f -- <pattern>` accepted the planned argv. These are
+  Node/macOS/static results, not Caido-LLRT or native-Windows execution.
+- No native-Windows suite ran in this review, and no new real-Caido turn was executed.
+  The deferred Windows/real-Caido proof recorded by the phase verifier is therefore
+  kept separate and is not itself reported as a code defect.
 
-Out of scope per the brief and **not** re-reported: A1/A6 OPEN, the never-executed win32
-suite and its empty exit-code slot, T-08-14's attestation-only closure, and the untracked
-`.planning/milestone.lock`.
+## Narrative Findings (AI reviewer)
 
-## Critical Issues
+### Critical Issues
 
-### CR-01: On win32, `killTree`'s single-pid rung terminates the target before `taskkill /t` can walk it
+#### CR-01: Rejecting a relative COMSPEC re-enables the bare-name hijack with CAIDO_TOKEN
 
-**File:** `packages/backend/src/index.ts:5039-5043` (the pre-kill), `5046-5052` (the plan), `5063` (the spawn)
+**Classification:** BLOCKER
+**File:** `packages/backend/src/platform.ts:775-821`; `packages/backend/src/index.ts:814-831,4990-4995,5240-5257`; `packages/backend/src/platform.test.ts:1159-1180`
 
-**Issue:**
-`killTree` runs, in this order:
+**Issue:** `selectComspec` describes its relative-value arm as fail-closed, but it
+returns `undefined` immediately when the first populated `COMSPEC` spelling is not
+drive-absolute. Its caller explicitly documents that `undefined` makes
+`buildSpawnPlan` use the bare `cmd.exe` name. The provider spawn then executes that
+plan with the merged environment containing the live `CAIDO_TOKEN`.
 
-```ts
-const pid = proc.pid;                                     // :5029
-try { proc.kill(rung === "kill" ? "SIGKILL" : "SIGTERM"); } catch {}   // :5041
-const plan = buildKillTreePlan({ pid, platform: host?.platform, … });  // :5046
-const killer = spawn(plan.file, plan.args, { … });                     // :5063
-```
+Consequently, an inherited `COMSPEC=cmd.exe`, `.\cmd.exe`,
+`system32\cmd.exe`, or `C:cmd.exe` does not refuse the launch and does not use the
+already-derived absolute system-root fallback. It selects Windows executable search
+order again. A planted `cmd.exe` in an earlier search location executes with the
+user's Caido bearer token. The unit test makes the false boundary explicit: it asserts
+only that `selectComspec` returns `undefined`; it never composes that answer through
+the production spawn plan, where `undefined` means the insecure default.
 
-The comment above the pre-kill justifies it for **POSIX only** — "On POSIX this is the
-behaviour that ships today, kept deliberately as defence against assumption A1". It says
-nothing about win32, and the branch is unconditional.
-
-On POSIX the ordering is safe, and I verified that rather than assuming it: I spawned a
-`detached` parent with a child, `SIGKILL`ed the parent, awaited its `exit`, then ran
-`kill -KILL -- -<pid>` — exit status **0**, because POSIX keeps a process-group ID
-reserved until the last member leaves the group. So the group reference still resolves
-after the leader dies.
-
-Windows has no equivalent. Node's own documentation states that on Windows `'SIGTERM'`
-and `'SIGKILL'` "will cause the unconditional termination of the target process"
-(libuv's `uv__kill` calls `TerminateProcess` for `SIGTERM`/`SIGKILL`/`SIGINT`), and
-`kill-plan.ts:163-168` already relies on exactly this fact when it refuses to build a
-graceful win32 rung. So on Windows line :5041 **kills the tracked process synchronously**,
-and `taskkill.exe /pid <n> /t /f` is then spawned milliseconds later against a pid whose
-process has already been removed from the process table (the pid itself is still
-reserved, because the runtime holds a handle, but a terminated process is not returned by
-process enumeration). `taskkill` reports `ERROR: The process "<n>" not found.` and
-terminates nothing — the `node mcp-server.mjs` grandchild carrying `CAIDO_TOKEN` survives,
-which is LIF-01/LIF-02 unfixed on the one platform this milestone is about.
-
-The second rung does not rescue it, and this is the part that makes the chain closed
-rather than speculative. `requestGracefulShutdown` (`:4658`, `:4678`) and
-`cancelCliMessage` (`:5101`, `:5114`) both guard the deferred forceful rung with
-`isPidAlive(pid)`. After :5041 has already terminated the process, `isPidAlive` returns
-`false` and both deferred rungs `return` without doing anything. So the full win32 cancel
-sequence is: terminate the CLI leaf, no-op the tree kill, skip the escalation.
-
-Concrete trigger: a Windows user clicks Stop on a streaming turn (`cancelCliMessage` →
-`killTree(sdk, proc, "term")`), or a turn hits `processTimeoutSeconds`
-(`killTree(sdk, proc, "kill")` at `:4650`).
-
-Nothing in the suite can catch this. `kill-tree.win32.test.ts` calls
-`buildKillTreePlan` and then `runToCompletion(plan.file, plan.args, …)` directly — it
-never goes through `killTree`, so it exercises the argv against a **live** tree and would
-stay green. `index.source.test.ts` counts `killTree(` and `proc.kill(` occurrences but
-asserts nothing about their order inside `killTree`.
-
-**Fix:** make the pre-kill POSIX-only — it is only ever justified as A1 defence, which is
-a POSIX concern — and on win32 keep `proc.kill` as the *fallback* rather than the
-*preamble*:
-
-```ts
-  const pid = proc.pid;
-  const plan = buildKillTreePlan({ pid, platform: host?.platform, env: readParentEnv(), rung });
-
-  // A1 defence, POSIX only: the group reference in the plan below names a group
-  // that was never created if `detached` silently did nothing. A process group
-  // outlives its dead leader (measured), so this is safe to send first here.
-  // On win32 it is NOT: `proc.kill` is an unconditional TerminateProcess, and a
-  // pid that has left the process table is invisible to `taskkill /t`.
-  if (host?.platform !== "win32") {
-    try { proc.kill(rung === "kill" ? "SIGKILL" : "SIGTERM"); } catch { /* already dead */ }
-  }
-
-  if (plan.kind === "none") { …; return; }
-
-  try {
-    const killer = spawn(plan.file, plan.args, { … });
-    // win32 fallback: only if the tree killer could not run at all.
-    killer.on("error", (error: Error & { code?: string }) => {
-      sdk.console.log(`[drift lifecycle] tree kill spawn error code=${String(error.code ?? "unknown")}`);
-      if (host?.platform === "win32") { try { proc.kill("SIGKILL"); } catch { /* already dead */ } }
-    });
-    …
-  } catch {
-    if (host?.platform === "win32") { try { proc.kill("SIGKILL"); } catch { /* already dead */ } }
-    sdk.console.log(`[drift lifecycle] tree kill threw synchronously platform=…`);
-  }
-```
-
-Add a gate that this ordering cannot silently invert. `killTree`'s body is reachable from
-`functionBody(code, "killTree")`, so the existing positional vehicle already works:
-
-```ts
-it("does not pre-terminate the target on win32 before the tree killer runs", () => {
-  const body = functionBody(code, "killTree");
-  expect(body).not.toBe("");
-  expect(body).toContain('host?.platform !== "win32"');
-  expect(body.indexOf("buildKillTreePlan(")).toBeLessThan(body.indexOf("proc.kill("));
-});
-```
-
-Note that `index.source.test.ts:302` pins `proc.kill(` at exactly 3 occurrences; that
-count changes with this fix and must be updated in the same edit, per the file's own rule.
+**Fix:** Make the invalid-present case distinct from the absent case. Prefer a
+discriminated result such as `{ kind: "Error", reason: "invalid-comspec" }` and abort
+the interpreted provider launch. Alternatively, resolve and require the absolute
+`systemRootFallback` after rejecting the environment value; if no absolute fallback
+exists, refuse the launch rather than return `undefined`. Add a composed test that
+feeds every relative `COMSPEC` shape together with a valid derived root through
+`selectComspec` and the spawn-plan boundary, and asserts that the final `file` is
+absolute (or that no spawn plan is produced), never `cmd.exe`.
 
 ---
 
-### CR-02: `isPidAlive` proves liveness, not identity — the recorded T-08-04 mitigation does not close T-08-04
+#### CR-02: The orphan reaper checks “idle” before an asynchronous scan, then kills without rechecking
 
-**File:** `packages/backend/src/index.ts:4983-4996` (the probe), `4678` and `5114` (the two guarded rungs), `5029`/`5046` (the re-read inside `killTree`)
+**Classification:** BLOCKER
+**File:** `packages/backend/src/index.ts:3888-3977,4041-4053,4081-4120,4320-4355,4414-4456`; `packages/backend/src/kill-plan.ts:608-639,903-910`; `packages/backend/src/index.source.test.ts:916-938,974-982`
 
-**Issue:**
-`08-SECURITY.md:90` records T-08-04 (*"the deferred rungs … acting on a reassigned pid
-would take an unrelated process's entire tree"*) as **closed**, on the strength of two
-controls: the pid captured into a `const` before the timer is scheduled, and an
-`isPidAlive` re-check inside the callback.
+**Issue:** `reapSessionOrphansIfIdle` snapshots
+`activeProcesses.size` and `mcpDirectCallDepth`, checks both once, and starts
+`pgrep` fire-and-forget. The `close` callback later parses whatever processes
+`pgrep` observed and immediately spawns `kill -KILL`; it never re-evaluates either
+idle condition and carries no runtime generation.
 
-Neither control addresses reassignment.
+A concrete reachable interleaving is: a turn finalizes or the user presses Stop; the
+map becomes empty and the scan is issued; the user immediately starts another turn in
+the same shared `mcpTempDir`; `pgrep` samples after that child starts; the old scan
+then SIGKILLs the new turn's MCP process. The start-up class scan has the same defect:
+the `currentSessionDirName` guard is evaluated while `mcpTempDir` is undefined, but
+the scan is not awaited; `startMcpServer` can stage a new runtime before its callback
+settles, and the class-wide pattern matches that new runtime.
 
-`isPidAlive(pid)` sends signal `0`. Signal 0 answers "does *a* process with this pid
-exist and may I signal it" — which is precisely `true` for a pid the OS has handed to an
-unrelated process. The threat is a pid that is alive *and belongs to someone else*; the
-guard's only discriminating power is over pids that are dead *and not yet reused*, which
-is the harmless case. In the dangerous case the guard passes.
+This is the exact T-08-27 “new turn killed” outcome the design says must be prevented.
+The source tests prove call placement and the absence of `await`; they do not prove
+that the gate remains true when the kill decision is consumed.
 
-The capture-before-schedule control is also weaker than the comments claim, and this is
-the part I measured rather than reasoned about. Both call sites comment that the pid is
-"never re-read from `proc` inside it" (`:4656-4658`, `:5099-5101`), but the callback then
-calls `killTree(sdk, proc, …)`, and `killTree:5029` does `const pid = proc.pid` — an
-unconditional re-read. I checked whether Node clears `pid` after reaping, which would
-have made the re-read self-limiting: it does not. On Node 20 / darwin, after `SIGKILL`
-and after the `exit` event has fired, `proc.pid` still returns the original number.
-
-So on win32 the reachable sequence is: cancel at T0 → the tree is gone by T0+ε → Windows
-reassigns that pid to an unrelated process before T0+3s → `isPidAlive` returns `true` →
-`killTree` re-reads the same number from `proc.pid` → `taskkill.exe /pid <n> /t /f`
-terminates that unrelated process **and its whole child tree**. On POSIX the same race
-produces `kill -KILL -- -<n>` against whatever group now owns that id.
-
-This is a lower-probability failure than CR-01 — it needs pid reuse inside the 3-second
-window — but the consequence class (force-terminating an arbitrary user process tree) is
-why the phase rated it `medium` and wrote a mitigation for it in the first place. The
-mitigation is the part that does not work.
-
-**Fix:** guard on process *identity*, which the `ChildProcess` handle already carries,
-and keep `isPidAlive` only as a secondary check:
-
-```ts
-// `exitCode`/`signalCode` are properties of the HANDLE, so they answer
-// "is the process we spawned still running", which is what the rung needs.
-// A pid the OS has reassigned reads as alive to signal 0 but leaves both of
-// these non-null, which is the discrimination T-08-04 actually requires.
-if (proc.exitCode !== null || proc.signalCode !== null) return;
-if (pid === undefined || !isPidAlive(pid)) return;
-killTree(sdk, proc, "kill");
-```
-
-Apply at both `:4678` and `:5114`. Update `08-SECURITY.md:90` to state what the control
-proves (a dead-and-unreused pid is skipped) and what it does not, rather than "closed".
-
-## Warnings
-
-### WR-01: `cleanupMcpRuntime`'s new kill loop reaches ten more call sites than its comment and T-08-12 enumerate
-
-**File:** `packages/backend/src/index.ts:3459-3470`
-
-**Issue:**
-The loop at `:3467-3470` is new in this phase and SIGKILLs every entry in
-`activeProcesses`. Its comment names two entry points — the Stop button and
-"`startMcpServer`'s own failure path" — and `08-SECURITY.md` T-08-12 records the same two.
-`cleanupMcpRuntime` actually has **twelve** call sites (`index.ts:1846, 1872, 1887, 1893,
-1899, 3544, 3638, 3657, 3670, 3681, 3687, 3714`). Two of the unnamed ones fire during
-normal operation, not teardown:
-
-- `updateSettings:1839-1847` — any settings save that carries `caidoApi` while MCP is up,
-  if `refreshActiveMcpRuntime` throws.
-- `syncCaidoSessionToken:1909` → `refreshActiveMcpRuntime:1861` — reached whenever the
-  effective Caido token *changes*, and then `cleanupMcpRuntime` on four separate error
-  branches: empty token (`:1872`), `requireMcpServerSpec` failure (`:1887`),
-  `writeMcpContextFile` failure (`:1893`), and `validateCaidoAuth` failure (`:1899`).
-  `:1876-1878` documents that this path is reached from the frontend's keep-alive.
-
-Concrete trigger: a user is mid-turn; Caido rotates its session token (or the frontend
-momentarily reads an empty `CAIDO_AUTHENTICATION`); `validateCaidoAuth` — a spawned
-network round-trip — returns not-ok once. The in-flight provider turn is now force-killed
-and removed from `activeProcesses`. Before this phase, the same sequence tore down the
-MCP runtime but left the turn running.
-
-Compounding it: this path publishes no session-state event and does not clear
-`sessionWatchdogs` or `sessionRuntimeFiles`. Because `activeProcesses.delete` has already
-run, a subsequent `cancelCliMessage` for that session finds `proc === undefined` and
-returns `ok` **without** publishing a `stopped` state — so the user's Stop button becomes
-a silent no-op for a session it can still see. Recovery depends entirely on the child's
-`close` handler reaching `finalize`.
-
-**Fix:** either narrow the loop to the teardown callers (pass a flag from
-`stopMcpServer` / the `startMcpServer` failure path, keeping T-08-12's coverage), or keep
-the loop and make it honest — publish a `stopped` session-state event per killed session
-and delete the matching `sessionWatchdogs` entry, and correct the comment and
-`08-SECURITY.md` T-08-12 to enumerate the settings-save and token-refresh callers.
+**Fix:** Give every runtime an epoch/generation and make reaping a two-stage decision.
+For a session scan, re-check immediately before signaling that the same generation is
+current, `activeProcesses.size === 0`, and the direct-call guard is empty. For a
+previous-run class scan, require that no runtime has been staged since issuance
+(`mcpTempDir`/generation still matches the “none” snapshot). If the check changed,
+record a `gate-stale` no-op and kill nothing. Add an orchestrator-level test with a
+controllable scanner whose close is delayed until after a replacement session/runtime
+is registered.
 
 ---
 
-### WR-02: the LLRT trap gate cannot see the `kill` indirection this same phase introduced
+#### CR-03: Stale cleanup and direct-call releases can mutate a newer MCP runtime generation
 
-**File:** `packages/backend/src/index.source.test.ts:299`, defeated by `packages/backend/src/index.ts:4988-4990`
+**Classification:** BLOCKER
+**File:** `packages/backend/src/index.ts:365-407,4123-4270,4373-4584,4587-4593`; `packages/backend/src/index.source.test.ts:1001-1057`
 
-**Issue:**
-The gate the phase calls "its single most important control" matches
-`/process\s*\.\s*kill\s*\(\s*-/`. Twenty lines above `killTree`, this phase added
-`isPidAlive`, which reaches the same primitive as:
+**Issue:** MCP lifecycle operations share mutable singletons but have no operation
+queue, mutex, or epoch. `cleanupMcpRuntime` crosses several awaits, reads the mutable
+`mcpTempDir` again for `rm`, and then unconditionally assigns
+`mcpTempDir = undefined`. A concurrent `startMcpServer` can therefore assign and
+stage a new directory while an older cleanup is suspended; the old cleanup can either
+remove the new path (if it observes it after an earlier await) or clear the global
+after its old-path `rm` completes. The new start then fails its spec/auth path or
+publishes state for a runtime the backend no longer knows exists.
 
-```ts
-const killRef = processRef.process?.kill;      // :4988
-if (typeof killRef !== "function") return true;
-killRef.call(processRef.process, pid, 0);      // :4990
-```
+The direct-call counter has the same cross-generation bug. Cleanup resets the scalar
+to zero. If an old self-test/auth/registration child later emits its release after a
+new generation has acquired depth, `Math.max(0, depth - 1)` consumes the new
+generation's slot. The idle reaper can then open while that new direct child is alive.
+The exact-count source tests verify spelling and arithmetic, not this interleaving.
 
-That spelling is invisible to the regex, and it is now the **established local idiom for
-calling the runtime's kill primitive in this file** — sitting immediately adjacent to the
-code the gate exists to protect. A future edit written in the idiom its neighbour uses
-(`killRef.call(processRef.process, -pid, "SIGTERM")`) reintroduces the exact `Underflow`
-defect while the gate stays green on all five CI legs, which is finding L-4 recurring for
-the third time.
+**Fix:** Serialize start, stop, and refresh through one lifecycle operation chain and
+make every state mutation conditional on an epoch captured at operation entry. Capture
+the directory being cleaned and clear the global only when
+`mcpTempDir === capturedDir`. Replace the scalar depth with generation-scoped
+operation tokens (for example a `Set` of token IDs containing the epoch); a release
+may delete only its own token and cleanup may retire an epoch without allowing a late
+release to affect the next one. Add delayed-`rm` and delayed-child-release tests that
+start a replacement runtime before the stale operation settles.
 
-**Fix:** widen the needle to the property access rather than the receiver, and add the
-`.call`/`.apply` form:
+### Warnings
 
-```ts
-// Any `.kill(` whose first argument is negative, plus the reflective forms —
-// `isPidAlive` establishes `killRef.call(receiver, pid, sig)` in this same file,
-// and a needle anchored on the receiver name cannot see it.
-const LLRT_NEGATIVE_PID_SIGNAL = /\.\s*kill\s*\(\s*-|kill\w*\s*\.\s*(?:call|apply)\s*\([^,)]*,\s*-/g;
-```
+#### WR-01: Truncated or malformed pgrep output can manufacture an unrelated PID
 
-Then assert positively that the one reflective site is not negative, so the widened gate
-has a falsifying partner:
+**Classification:** WARNING
+**File:** `packages/backend/src/kill-plan.ts:642-669`; `packages/backend/src/index.ts:3980-3984,4026-4028,4041-4053`; `packages/backend/src/kill-plan.test.ts:684-753`
 
-```ts
-it("passes a positive pid to the reflective kill primitive", () => {
-  expect(functionBody(code, "isPidAlive")).toContain("killRef.call(processRef.process, pid, 0)");
-});
-```
+**Issue:** `parseOrphanScanPids` uses `Number.parseInt` and accepts a numeric
+prefix, so `123junk`, `123 456`, and `123.9` all become PID 123. Separately,
+`reapMcpOrphans` retains only the bounded output head but ignores
+`out.droppedChars`. If the cap cuts a PID line, the surviving digit prefix is parsed
+as a different PID and sent to `kill -KILL`. The tests cover a wholly nonnumeric
+diagnostic line but not numeric suffixes, unsafe integers, or truncated output.
 
----
-
-### WR-03: `isPidAlive` is an untested decision function with an asymmetric failure mode, in the one file no test can import
-
-**File:** `packages/backend/src/index.ts:4983-4996`
-
-**Issue:**
-CLAUDE.md § *Pure Helpers Split for Testability* is explicit that a decision goes into a
-pure module and only orchestration stays in `index.ts` — and `kill-plan.ts`'s own header
-argues the case at length. `isPidAlive` is a decision: it gates whether the forceful rung
-fires at all, at both deferred sites. It lives in `index.ts`, is imported by nothing, and
-`grep -rn isPidAlive packages/` returns **zero** matches outside `index.ts` and the
-gitignored `dist/`. `08-SECURITY.md:90` cites "`isPidAlive(` = 3: declaration + both
-rungs" as T-08-04's evidence, but that count is a one-time grep from the plan — there is
-no assertion for it in `index.source.test.ts`, unlike every other Phase 8 census
-(`killTree(` = 9, `proc.kill(` = 3, `child.kill(` = 1). Deleting either guard leaves the
-suite green.
-
-The failure mode the header does not cover is the realistic one. It reasons about "the
-runtime exposes no kill primitive at all" (→ `true`, strictly subtractive, correct) but
-not about "the primitive exists and rejects this call shape". Under Caido's LLRT,
-`process.kill` may not accept a *numeric* signal `0`; if it throws for that reason,
-`isPidAlive` returns `false` **for every pid, forever**, and the deferred SIGKILL rung —
-which fires unconditionally in the shipped 0.1.0 — is silently disabled on every real
-install. That is a CMP-01 POSIX regression that no CI leg can observe, because Node
-handles signal 0 correctly.
-
-**Fix:** distinguish "the probe is unusable" from "the target is dead", by first probing a
-pid that must be alive:
-
-```ts
-function isPidAlive(pid: number): boolean {
-  const processRef = globalThis as typeof globalThis & {
-    process?: { pid?: number; kill?: (pid: number, signal: number) => boolean };
-  };
-  const killRef = processRef.process?.kill;
-  const selfPid = processRef.process?.pid;
-  if (typeof killRef !== "function" || typeof selfPid !== "number") return true;
-  // Calibration: signalling OURSELVES with 0 must succeed on any runtime whose
-  // kill primitive accepts this call shape. A throw here means the PROBE is
-  // unusable, not that the target is gone — resolve toward "alive" (CMP-01).
-  try { killRef.call(processRef.process, selfPid, 0); } catch { return true; }
-  try { killRef.call(processRef.process, pid, 0); return true; } catch { return false; }
-}
-```
-
-Add the missing census row to `index.source.test.ts`
-(`expect(code.match(/isPidAlive\(/g)).toHaveLength(3)`) so T-08-04's stated evidence has a
-standing control rather than a historical grep.
+**Fix:** Treat any truncated enumerator output as `scan-failed` and kill nothing.
+Accept only complete ASCII-decimal lines, then require
+`Number.isSafeInteger(pid) && pid > 1`. Add cases for numeric suffixes, decimals,
+overflow, and a bounded buffer whose final retained line is partial.
 
 ---
 
-### WR-04: ROADMAP SC-1 still specifies the bare-name `taskkill` spawn that T-08-03 exists to prevent
+#### WR-02: A backward wall-clock step makes the “freshness bound” unbounded
 
-**File:** `.planning/ROADMAP.md:311`
+**Classification:** WARNING
+**File:** `packages/backend/src/kill-plan.ts:785-848`; `packages/backend/src/index.ts:3882-3925`; `packages/backend/src/kill-plan.test.ts:1007-1022`
 
-**Issue:**
-SC-1 reads:
+**Issue:** Scan age is computed with `Date.now()`, but the classifier rejects only
+ages above the budget and deliberately treats every negative age as fresh. If the
+system clock steps backward while a callback is delayed, an arbitrarily old PID list
+has a negative age and remains eligible for SIGKILL. That contradicts the source and
+security record's claim that the wall-clock check removes the unbounded stale-PID
+window. The unit test currently pins the unsafe policy.
 
-> A platform-branched `killTree(proc)` terminates the whole process tree on Windows via
-> `spawn("taskkill", ["/pid", pid, "/T", "/F"])` (guarded against undefined pid).
-
-The shipped mechanism is `<SystemRoot>\System32\taskkill.exe` with `["/pid","<n>","/t","/f"]`,
-and the move away from the bare name is a **security** decision, recorded as T-08-03
-(*Spoofing / EoP*): Windows resolves a bare `taskkill` through a search order that includes
-the working directory the Caido plugin host chose. SC-1 as written is satisfied by the
-insecure form and would not flag its reintroduction.
-
-Plan 08-05 amended SC-2 in place for precisely this class of drift, and T-08-06 argues the
-case explicitly — "the gate stops the code; the amendment stops the intent". SC-1 has the
-same problem and was not amended.
-
-**Fix:** amend SC-1 in place, in the same voice as the SC-2 amendment: name the absolute
-`<SystemRoot>\System32\taskkill.exe` resolution, both env casings, and the bare-name
-fallback as a last resort, with a pointer to T-08-03 and `DEFAULT_TASKKILL`.
-
-## Info
-
-### IN-01: two comments assert a pid is "never re-read from `proc`" on the line before it is
-
-**File:** `packages/backend/src/index.ts:4656-4658` and `5099-5101`
-
-**Issue:** Both read "Captured BEFORE the timer is scheduled, and never re-read from
-`proc` inside it (§ Pitfall 2)". The timer body then calls `killTree`, whose first
-statement (`:5029`) is `const pid = proc.pid`. The claim is false as written, and it is
-the claim CR-02 shows a reader should not rely on.
-
-**Fix:** restate as what is true — the pid is captured for the *guard*; `killTree` derives
-its own from the handle — and cross-reference CR-02's identity check.
+**Fix:** Prefer a monotonic clock if the supported Caido runtime exposes one. Otherwise
+treat `scanAgeMs < 0` as `scan-stale`; leaving an orphan for the next sweep is safer
+than signaling a PID whose sampling time cannot be bounded. Replace the negative-age
+test with the fail-closed expectation.
 
 ---
 
-### IN-02: the SC-4 gate proves "before the first `rm`", `08-VALIDATION.md` claims "before every `rm`"
+#### WR-03: The diagnostic reports “killed=N” before any killer is known to have started or succeeded
 
-**File:** `.planning/phases/08-process-lifecycle/08-VALIDATION.md:81`, gate at `packages/backend/src/index.source.test.ts:365-408`
+**Classification:** WARNING
+**File:** `packages/backend/src/index.ts:3945-3977`; `packages/backend/src/kill-plan.ts:1255-1274,1283-1303`; `packages/backend/src/kill-plan.test.ts:1697-1708`
 
-**Issue:** The gate compares `body.indexOf("killTree(")` against `body.indexOf("rm(")` —
-first occurrence against first occurrence. The claim in the validation row is "the kill
-statement precedes every `rm`". It happens to be true today (I read all three functions),
-but a second `rm` added above the kill in a later edit would leave the gate green.
+**Issue:** The loop increments `signalled` immediately after `spawn` returns,
+swallows the child's asynchronous `error`, never observes its exit code, and records
+the count as `killed`. Node reports ENOENT and many other spawn failures
+asynchronously, and a successfully started `kill` can still exit nonzero because the
+target disappeared or permission was denied. Therefore
+`lastOrphanReap: ... killed=2` proves two spawn attempts returned handles; it does
+not prove that two signals were delivered or two processes died. Treating that field as
+runtime kill evidence is a false positive.
 
-**Fix:** compare against the **last** `rm`: `expect(body.indexOf("killTree(")).toBeLessThan(body.lastIndexOf("rm("))`,
-which makes the assertion match the sentence, or narrow the sentence to "the first `rm`".
-
----
-
-### IN-03: the `detached` census covers only `spawnWithEnv(` and cannot see a bare `spawn(` with an inline env
-
-**File:** `packages/backend/src/index.source.test.ts:325-345`
-
-**Issue:** The block asserts three `spawnWithEnv(` call sites and argues that "a fourth
-site added WITH an answer still fails this count, [because] a new spawn carrying a live
-Caido session token is a decision a human should read". The count is over the *alias*, not
-over spawning. `index.ts` already contains bare `spawn(` calls outside it —
-`spawnAndWait:2664`, `resolveCommand`, and this phase's own `killTree:5063` — so a new
-`spawn(cmd, args, { env: { …CAIDO_TOKEN… } })` written directly against the import passes
-the census silently.
-
-**Fix:** add a companion count over bare `spawn(` occurrences (currently a small, stable
-number) so a new direct spawn also has to be read by a human, and note in the block that
-the alias census is not a spawn census.
+**Fix:** Rename the immediate field to `attempted` and state that boundary in the
+formatter. If confirmed results are required, update a later diagnostic from the
+killer's `close` event only when exit code is zero, while preserving the
+fire-and-forget RPC contract. Do not emit `killed` without an observed outcome.
 
 ---
 
-### IN-04: `createDeadPid()` hands `taskkill /t /f` a pid whose process is gone and may be reused
+#### WR-04: The Windows dead-PID measurement can terminate a recycled, unrelated process tree
 
-**File:** `packages/backend/src/kill-tree.win32.test.ts:149-159`, used at `:382-397`
+**Classification:** WARNING
+**File:** `packages/backend/src/kill-tree.win32.test.ts:146-159,362-411`
 
-**Issue:** The dead-pid measurement case runs `process.exit(0)` to completion, then
-targets the freed pid with the production `/t /f` argv on a shared `windows-latest`
-runner. If that pid is reassigned between the `close` event and the `taskkill` spawn, the
-case terminates an unrelated process tree on the runner and still records `typeof
-result.code === "number"` — a green measurement of the wrong thing. The suite has never
-executed, so this has never had the chance to bite.
+**Issue:** `createDeadPid` waits for a process to exit and returns the now-free
+numeric PID. The test then executes `taskkill /pid <that-number> /t /f`. Observing
+the original process's close proves that process ended; it does not reserve the PID.
+Windows may recycle it before `taskkill` runs, at which point a shared runner's
+unrelated process and its descendants are force-terminated. The test's only assertion
+is that the command returned a numeric exit code, so it would still pass after doing
+that damage.
 
-**Fix:** target a pid that cannot be reassigned — e.g. keep the probe's `ChildProcess`
-handle open (the OS reserves a pid while a handle exists) and kill the *handle* after the
-measurement, or use a pid from the high end of the range that was never allocated. Failing
-that, note the caveat in the reserved block so a surprising recorded value is readable
-rather than misleading.
+**Fix:** Remove this non-functional measurement from the shared CI suite; no product
+branch consumes the dead-PID exit code. If the datum is still required, run it only in
+an isolated disposable Windows environment with an OS-level handle/job that prevents
+PID reuse, and assert the target identity rather than reusing a free number.
 
 ---
 
-_Reviewed: 2026-08-24T20:55:00Z_
-_Reviewer: Claude (gsd-code-reviewer)_
+#### WR-05: The win32 gate test does not bind its anchors to the kill-tree step
+
+**Classification:** WARNING
+**File:** `packages/backend/src/kill-tree.win32.gate.test.ts:47-95`; `.github/workflows/ci.yml:269-296`
+
+**Issue:** Every assertion searches the entire workflow independently. The unique
+step name and report filename prevent wholesale deletion from passing against the
+spawn-plan twin, but they do not prove that the kill-tree step invokes the kill-tree
+suite, writes its unique report, and validates that same report in one `run` block.
+For example, changing only the final Node invocation to read
+`$RUNNER_TEMP/win32-report.json` leaves every asserted anchor present. The kill-tree
+suite could then be fully skipped while the validator reads the already-green
+spawn-plan report, and this guard test would remain green.
+
+**Fix:** Parse the workflow or extract the exact named step, then assert inside that
+single step that the command contains the exact suite path, writes
+`win32-kill-tree-report.json`, passes the same `$report` to the validator, and
+contains all three count checks. Add a mutation-style assertion for cross-reading the
+spawn-plan report.
+
+---
+
+_Reviewed: 2026-08-31T13:00:41Z_
+_Reviewer: the agent (gsd-code-reviewer)_
 _Depth: standard_
