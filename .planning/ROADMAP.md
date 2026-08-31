@@ -323,9 +323,10 @@ Plans:
   4. Session finalize / `stopMcpServer` kills all tracked pids before sweeping the temp dir, so token-bearing processes die before their env-source files are removed.
   5. macOS/Linux cancellation and timeout semantics visible to the user are unchanged and existing tests stay green.
 
-**Plans**: 17/17 plans executed (10/10 executed; 7 gap-closure plans added 2026-08-28 from `08-VERIFICATION.md`)
+**Plans**: 17/19 plans executed (10/10 earlier plans and 7/9 verification-gap plans executed; 2 third-round gap-closure plans added 2026-08-31 from `08-VERIFICATION.md`)
 
 Plans:
+
 **Wave 1**
 
 - [x] 08-01-PLAN.md — Wave-0 spike: close assumptions A1 (does the shipped Caido LLRT honour `detached`?) and A6 (is the CLI's MCP child in the CLI's process group?) on real hardware, then delete the probe (LIF-02)
@@ -396,6 +397,18 @@ Plans:
 **Gap Wave 10** *(blocked on Gap Wave 9; `autonomous: false`, `gate="blocking-human"`)*
 
 - [x] 08-17-PLAN.md — The A1 re-run with the fixed probe and the pre-fix Control on one probe build, then the ownership record: the Windows leg re-deferred to Phase 9 SC-4 and every remaining item named as owned or ownerless (LIF-01, LIF-02)
+
+---
+
+*Third gap-closure round (added 2026-08-31 from `08-VERIFICATION.md`; two record-integrity gaps after re-verification at 9/14). Runtime behavior is deliberately out of scope: this round converges the repaired A1 verdict across its live carriers and brings the Phase 8 threat register up to the code and executable support artifacts it claims to audit.*
+
+**Gap Wave 11** *(blocked on Gap Wave 10; A1 carrier convergence must land before the shared security record is re-audited)*
+
+- [ ] 08-18-PLAN.md — Propagate the repaired 2026-08-31 A1 verdict across all live carriers and pointers while preserving the invalid 2026-08-27 reading as a marked retraction; harden `verdict-gate.sh` and pin the historical record class (LIF-01, LIF-02)
+
+**Gap Wave 12** *(blocked on Gap Wave 11; consumes the corrected `08-SECURITY.md` A1 carrier)*
+
+- [ ] 08-19-PLAN.md — Roll T-08-51…T-08-88 into a current evidence-backed security register and add a non-vacuous citation-integrity gate over live package and Phase 8 support artifacts (LIF-01, LIF-02)
 
 **Research flag**: RESOLVED 2026-08-24 by `08-RESEARCH.md`. The primitives are indeed standard; the **mechanism** was not. `detached: true` is source-verified honoured by Caido's LLRT fork (`command.process_group(0)`), but the canonical group-signalling spelling `process.kill(-pid, sig)` **throws** there — LLRT types `pid` as `u32` and rquickjs range-checks through `f64`, raising `Underflow` before `libc::kill` is reached — while working perfectly under Node, the only vehicle any CI leg in this repository runs. SC-2 is amended in place by plan 08-05 accordingly (see the criterion's own note).
 
@@ -522,7 +535,7 @@ Parallelism opportunities: Phase 2 may run alongside Phase 3 (both depend only o
 | 5. Kill Shell Wrappers | 6/6 | Complete   | 2026-08-20 |
 | 6. Windows Command Resolution | 7/7 | Complete    | 2026-08-21 |
 | 7. Provider Spawn & Registration | 0/3 | Not started | - |
-| 8. Process Lifecycle | 17/17 | In Progress|  |
+| 8. Process Lifecycle | 17/19 | In Progress|  |
 | 9. CI Hardening | 0/1 | Not started | - |
 | 10. Windows Polish | 0/1 | Not started | - |
 | 11. Plugin Capability Discovery | 0/3 | Not started | - |
