@@ -323,7 +323,7 @@ Plans:
   4. Session finalize / `stopMcpServer` kills all tracked pids before sweeping the temp dir, so token-bearing processes die before their env-source files are removed.
   5. macOS/Linux cancellation and timeout semantics visible to the user are unchanged and existing tests stay green.
 
-**Plans**: 23 plans total — 19 executed; 4 fourth-round gap-closure plans ready to execute from the 2026-08-31 final verification/review
+**Plans**: 23 plans total — 20 executed; 3 fourth-round gap-closure plans remain from the 2026-08-31 final verification/review
 
 Plans:
 
@@ -420,7 +420,7 @@ Plans:
 
 **Gap Wave 13** *(blocked on Gap Wave 12; closes final review WR-01 first)*
 
-- [ ] 08-20-PLAN.md — Replace path-equality retirement inference with explicit provider-start identity and execute the invalidated-lease/equal-pointer/root-recreation interleaving (LIF-01, LIF-02)
+- [x] 08-20-PLAN.md — Replace path-equality retirement inference with explicit provider-start identity and execute the invalidated-lease/equal-pointer/root-recreation interleaving (LIF-01, LIF-02)
 
 **Gap Wave 14** *(blocked on Gap Wave 13; shares `index.ts` and its source gate)*
 
@@ -559,7 +559,7 @@ Parallelism opportunities: Phase 2 may run alongside Phase 3 (both depend only o
 | 5. Kill Shell Wrappers | 6/6 | Complete   | 2026-08-20 |
 | 6. Windows Command Resolution | 7/7 | Complete    | 2026-08-21 |
 | 7. Provider Spawn & Registration | 0/3 | Not started | - |
-| 8. Process Lifecycle | 19/23 | In Progress|  |
+| 8. Process Lifecycle | 20/23 | In Progress|  |
 | 9. CI Hardening | 0/1 | Not started | - |
 | 10. Windows Polish | 0/1 | Not started | - |
 | 11. Plugin Capability Discovery | 0/3 | Not started | - |
