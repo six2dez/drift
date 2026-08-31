@@ -23,6 +23,7 @@ export type McpLifecycleState = {
   directCalls: Set<DirectMcpCallToken>;
   nextProviderStartId: number;
   providerStarts: Set<ProviderStartLease>;
+  retiredProviderStarts: Set<ProviderStartLease>;
   nextProviderTeardownId: number;
   activeProviderTeardown: ProviderTeardownToken | undefined;
   operationTail: Promise<void>;
@@ -44,6 +45,7 @@ export function createMcpLifecycleState(): McpLifecycleState {
     directCalls: new Set(),
     nextProviderStartId: 1,
     providerStarts: new Set(),
+    retiredProviderStarts: new Set(),
     nextProviderTeardownId: 1,
     activeProviderTeardown: undefined,
     operationTail: Promise.resolve(),
@@ -178,8 +180,25 @@ export function acquireProviderStartLease(
 export function releaseProviderStartLease(
   state: McpLifecycleState,
   lease: ProviderStartLease,
-): void {
+): boolean {
+  // The teardown tombstone is consumed by exact lease identity. An equal path
+  // or equal-looking lease cannot authorize wrong-generation cleanup
+  // (T-08-90), and a stale sender can act on its own retirement only once.
+  const retired = state.retiredProviderStarts.delete(lease);
   state.providerStarts.delete(lease);
+  return retired;
+}
+
+export async function cleanupRetiredProviderStartRoot(input: {
+  retired: boolean;
+  tempDir: string | undefined;
+  removeRoot: (tempDir: string) => Promise<void>;
+}): Promise<void> {
+  // Retirement is decided by lifecycle identity before this I/O boundary. A
+  // stale sender must remove any token-bearing root it recreated (T-08-89),
+  // even when an installed pointer happens to contain the same pathname.
+  if (!input.retired || input.tempDir === undefined) return;
+  await input.removeRoot(input.tempDir);
 }
 
 export function commitProviderStartLease<T>(input: {
@@ -211,6 +230,9 @@ export async function runMcpProviderTeardown<T>(
   const token: ProviderTeardownToken = { id: state.nextProviderTeardownId };
   state.nextProviderTeardownId += 1;
   state.activeProviderTeardown = token;
+  for (const lease of state.providerStarts) {
+    state.retiredProviderStarts.add(lease);
+  }
   state.providerStarts.clear();
   try {
     return await operation();

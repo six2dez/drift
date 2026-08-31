@@ -307,23 +307,27 @@ describe("provider start lease", () => {
       await teardownCanFinish;
     });
 
-    await rm(runtimeDir, { recursive: true, force: true });
-    await mkdir(runtimeDir, { recursive: true });
-    const installedPointer = runtimeDir;
-    const retired = releaseProviderStartLease(state, lease!);
+    try {
+      await rm(runtimeDir, { recursive: true, force: true });
+      await mkdir(runtimeDir, { recursive: true });
+      const installedPointer = runtimeDir;
+      const retired = releaseProviderStartLease(state, lease!);
 
-    await cleanupRetiredProviderStartRoot({
-      retired,
-      tempDir: runtimeDir,
-      removeRoot: async (root) => {
-        await rm(root, { recursive: true, force: true });
-      },
-    });
+      await cleanupRetiredProviderStartRoot({
+        retired,
+        tempDir: runtimeDir,
+        removeRoot: async (root) => {
+          await rm(root, { recursive: true, force: true });
+        },
+      });
 
-    expect(installedPointer).toBe(runtimeDir);
-    await expect(stat(runtimeDir)).rejects.toMatchObject({ code: "ENOENT" });
-    finishTeardown();
-    await teardown;
+      expect(installedPointer).toBe(runtimeDir);
+      await expect(stat(runtimeDir)).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      await rm(runtimeDir, { recursive: true, force: true });
+      finishTeardown();
+      await teardown;
+    }
   });
 
   it("does not retire a lease that commits while current", () => {
