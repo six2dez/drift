@@ -1275,17 +1275,20 @@ describe("index.ts wires the orphan reap at every counted site and nowhere else 
     expect(send).not.toBe("");
 
     // Claude and Copilot each write one per-turn config. Both paths must enter
-    // the same provider-neutral owner instead of one living in a special local
-    // that the other provider cannot reach from finalize().
-    expect(
-      send.match(/ownedMcpConfigPaths\.add\(cfgFile\)/g) ?? [],
-    ).toHaveLength(2);
+    // the same owner-aware writer before I/O instead of adding ownership only
+    // after a successful write.
+    const configWrites = callArgumentTexts(send, "writeChatMcpConfig");
+    expect(configWrites).toHaveLength(2);
+    for (const call of configWrites) {
+      expect(call).toContain("ownedMcpConfigPaths");
+    }
+    expect(send).not.toContain("ownedMcpConfigPaths.add(cfgFile)");
     expect(send).not.toContain("claudeMcpConfigPath");
 
     // A committed child reaches finalize on success, async spawn error, or
     // timeout. A refused/stale/synchronously throwing start reaches the outer
-    // finally. Both consume the same ownership set; the helper clears it before
-    // awaiting unlink so a second consumer cannot unlink the path twice.
+    // finally. Both consume the same ownership set; a rejected removal remains
+    // in that set so the other consumer can retry it.
     const cleanupCalls = callArgumentTexts(
       send,
       "cleanupOwnedMcpConfigPaths",
@@ -1298,11 +1301,31 @@ describe("index.ts wires the orphan reap at every counted site and nowhere else 
     expect(send).toContain("finalize(err(`Spawn error: ${e.message}`))");
 
     const cleanup = functionBody(code, "cleanupOwnedMcpConfigPaths");
-    const clear = cleanup.indexOf("configPaths.clear()");
-    const unlink = cleanup.indexOf("await rm(");
-    expect(clear).not.toBe(-1);
-    expect(unlink).not.toBe(-1);
-    expect(clear).toBeLessThan(unlink);
+    expect(cleanup).not.toContain("configPaths.clear()");
+    expect(cleanup).toContain("await cleanupOwnedPaths({");
+    expect(cleanup).toContain("owners: configPaths");
+    expect(cleanup).toContain("remove: async (configPath)");
+    expect(cleanup).toContain("await rm(configPath, { force: true })");
+  });
+
+  it("atomically writes owned configs inside the bounded retry ladder", () => {
+    const writer = functionBody(code, "writeChatMcpConfig");
+    expect(writer).not.toBe("");
+
+    const expansionGuard = writer.indexOf("findExpandableEnvKeys(");
+    const ownershipWrite = writer.indexOf("writeOwnedTempFile({");
+    expect(expansionGuard).not.toBe(-1);
+    expect(ownershipWrite).not.toBe(-1);
+    expect(expansionGuard).toBeLessThan(ownershipWrite);
+    expect(writer.match(/withFsRetry\(/g) ?? []).toHaveLength(1);
+    expect(writer).toContain("owners: ownedMcpConfigPaths");
+    expect(writer).toContain("await mkdir(tempDir, {");
+    expect(writer).toContain("mode: 0o700");
+    expect(writer).toContain("await writeFile(stagingPath, content, {");
+    expect(writer).toContain("mode: 0o600");
+    expect(writer).toContain("await rename(stagingPath, finalPath)");
+    expect(writer).toContain("lastTempWriteAttempts = written.attempts");
+    expect(writer).toContain("`${name}.${genUUID()}.tmp`");
   });
 
   it("invalidates provider start leases before teardown's process pass", () => {
