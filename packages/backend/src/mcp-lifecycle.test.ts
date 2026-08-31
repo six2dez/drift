@@ -174,7 +174,11 @@ describe("MCP start disposition", () => {
     const start = (): void => {
       const disposition = getMcpStartDisposition({
         tempDir,
-        runtimeHealthy: tempDir !== undefined,
+        authValid: true,
+        tokenAvailable: true,
+        runtimeDirectoryPresent: tempDir !== undefined,
+        runtimeScriptPresent: tempDir !== undefined,
+        runtimeContextPresent: tempDir !== undefined,
       });
       if (disposition === "reuse") return;
       if (disposition === "replace" && tempDir !== undefined) {
@@ -200,12 +204,42 @@ describe("MCP start disposition", () => {
     expect(
       getMcpStartDisposition({
         tempDir: "/tmp/drift-mcp-unhealthy",
-        runtimeHealthy: false,
+        authValid: false,
+        tokenAvailable: true,
+        runtimeDirectoryPresent: true,
+        runtimeScriptPresent: true,
+        runtimeContextPresent: true,
       }),
     ).toBe("replace");
     expect(
-      getMcpStartDisposition({ tempDir: undefined, runtimeHealthy: false }),
+      getMcpStartDisposition({
+        tempDir: undefined,
+        authValid: false,
+        tokenAvailable: false,
+        runtimeDirectoryPresent: false,
+        runtimeScriptPresent: false,
+        runtimeContextPresent: false,
+      }),
     ).toBe("start");
+  });
+
+  it.each([
+    ["token", { tokenAvailable: false }],
+    ["runtime directory", { runtimeDirectoryPresent: false }],
+    ["runtime script", { runtimeScriptPresent: false }],
+    ["runtime context", { runtimeContextPresent: false }],
+  ])("replaces an auth-valid runtime missing its %s", (_label, missing) => {
+    expect(
+      getMcpStartDisposition({
+        tempDir: "/tmp/drift-mcp-incomplete",
+        authValid: true,
+        tokenAvailable: true,
+        runtimeDirectoryPresent: true,
+        runtimeScriptPresent: true,
+        runtimeContextPresent: true,
+        ...missing,
+      }),
+    ).toBe("replace");
   });
 });
 

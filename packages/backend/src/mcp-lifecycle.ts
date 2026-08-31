@@ -63,10 +63,20 @@ export type McpStartDisposition = "start" | "reuse" | "replace";
 
 export function getMcpStartDisposition(input: {
   tempDir: string | undefined;
-  runtimeHealthy: boolean;
+  authValid: boolean;
+  tokenAvailable: boolean;
+  runtimeDirectoryPresent: boolean;
+  runtimeScriptPresent: boolean;
+  runtimeContextPresent: boolean;
 }): McpStartDisposition {
   if (input.tempDir === undefined) return "start";
-  return input.runtimeHealthy ? "reuse" : "replace";
+  return input.authValid &&
+    input.tokenAvailable &&
+    input.runtimeDirectoryPresent &&
+    input.runtimeScriptPresent &&
+    input.runtimeContextPresent
+    ? "reuse"
+    : "replace";
 }
 
 export function isMcpRuntimeEpochCurrent(

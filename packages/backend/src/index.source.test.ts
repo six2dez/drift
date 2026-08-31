@@ -223,7 +223,8 @@ describe("index.ts makes Start idempotent inside the lifecycle FIFO (WR-01)", ()
     expect(start).not.toBe("");
     const calls = callArgumentTexts(start, "getMcpStartDisposition");
     expect(calls).toHaveLength(1);
-    expect(calls[0]).toContain("tempDir: mcpTempDir");
+    expect(calls[0]).toContain("tempDir: startTempDir");
+    expect(calls[0]).toContain("...runtimeArtifacts");
     expect(calls[0]).toContain('mcpAuthState === "valid"');
     expect(calls[0]).toContain('getEffectiveCaidoToken() !== ""');
     const disposition = start.indexOf("getMcpStartDisposition(");
@@ -248,6 +249,27 @@ describe("index.ts makes Start idempotent inside the lifecycle FIFO (WR-01)", ()
     expect(replace).toBeGreaterThan(reuse);
     expect(cleanup).toBeGreaterThan(replace);
     expect(cleanup).toBeLessThan(nextEpoch);
+  });
+
+  it("measures the active runtime directory, script and context before reuse", () => {
+    const inspect = start.indexOf(
+      "await inspectMcpRuntimeArtifacts(startTempDir)",
+    );
+    const disposition = start.indexOf("getMcpStartDisposition(");
+    const reuse = start.indexOf('startDisposition === "reuse"');
+    expect(start).toContain("const startTempDir = mcpTempDir");
+    expect(inspect).not.toBe(-1);
+    expect(disposition).not.toBe(-1);
+    expect(reuse).not.toBe(-1);
+    expect(inspect).toBeLessThan(disposition);
+    expect(disposition).toBeLessThan(reuse);
+
+    const health = functionBody(code, "inspectMcpRuntimeArtifacts");
+    expect(health).toContain("await stat(tempDir)");
+    expect(health).toContain("directoryInfo.isDirectory()");
+    expect(health).toContain("getMcpScriptPath(tempDir)");
+    expect(health).toContain("getMcpContextPath(tempDir)");
+    expect(health.match(/await fileExists\(/g) ?? []).toHaveLength(2);
   });
 });
 

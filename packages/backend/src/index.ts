@@ -1193,6 +1193,42 @@ function getMcpContextFilePath(): string | undefined {
   return getMcpContextPath(mcpTempDir);
 }
 
+type McpRuntimeArtifactPresence = {
+  runtimeDirectoryPresent: boolean;
+  runtimeScriptPresent: boolean;
+  runtimeContextPresent: boolean;
+};
+
+async function inspectMcpRuntimeArtifacts(
+  tempDir: string | undefined,
+): Promise<McpRuntimeArtifactPresence> {
+  if (tempDir === undefined) {
+    return {
+      runtimeDirectoryPresent: false,
+      runtimeScriptPresent: false,
+      runtimeContextPresent: false,
+    };
+  }
+
+  let runtimeDirectoryPresent = false;
+  try {
+    const directoryInfo = await stat(tempDir);
+    runtimeDirectoryPresent = directoryInfo.isDirectory();
+  } catch {
+    // Missing or unreadable is unhealthy. Start must replace, never reuse on
+    // an optimistic inference from the previous auth result.
+  }
+  const scriptPath = getMcpScriptPath(tempDir);
+  const contextPath = getMcpContextPath(tempDir);
+  return {
+    runtimeDirectoryPresent,
+    runtimeScriptPresent:
+      scriptPath !== undefined && (await fileExists(scriptPath)),
+    runtimeContextPresent:
+      contextPath !== undefined && (await fileExists(contextPath)),
+  };
+}
+
 // RUN-02 / D-10. The SINGLE projection point: Claude's `mcp-<chatId>.json` and
 // Copilot's `copilot-mcp-<chatId>.json` are now the same document built by the
 // same pure function from the same spec, rather than two writers that happened
@@ -4597,10 +4633,13 @@ async function startMcpServerOperation(
   // first committed. A healthy runtime is returned as-is. An inconsistent or
   // unhealthy active directory is fully retired before any replacement epoch
   // begins, so no staging root can be abandoned by overwriting mcpTempDir.
+  const startTempDir = mcpTempDir;
+  const runtimeArtifacts = await inspectMcpRuntimeArtifacts(startTempDir);
   const startDisposition = getMcpStartDisposition({
-    tempDir: mcpTempDir,
-    runtimeHealthy:
-      mcpAuthState === "valid" && getEffectiveCaidoToken() !== "",
+    tempDir: startTempDir,
+    authValid: mcpAuthState === "valid",
+    tokenAvailable: getEffectiveCaidoToken() !== "",
+    ...runtimeArtifacts,
   });
   if (startDisposition === "reuse") {
     return ok(await buildCurrentMcpStatus());
