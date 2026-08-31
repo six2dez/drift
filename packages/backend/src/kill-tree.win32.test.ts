@@ -143,21 +143,6 @@ async function runToCompletion(
   });
 }
 
-// A pid that is guaranteed to be gone by the time it is returned: the process is
-// run to completion through the wrapper above, so its exit is OBSERVED rather
-// than assumed after a sleep.
-async function createDeadPid(): Promise<number> {
-  const result = await runToCompletion(
-    process.execPath,
-    ["-e", "process.exit(0)"],
-    false,
-  );
-  if (result.pid === undefined) {
-    throw new Error("the dead-pid probe did not spawn");
-  }
-  return result.pid;
-}
-
 type FixtureTree = {
   parentPid: number;
   grandchildPid: number;
@@ -359,58 +344,5 @@ describe.skipIf(process.platform !== "win32")(
       SPAWN_TIMEOUT_MS,
     );
 
-    it(
-      "[measurement] records taskkill's exit code and stderr for an already-dead pid",
-      async () => {
-        // ── RESERVED: the measured dead-pid result ────────────────────────
-        //
-        // Microsoft Learn documents no exit or return codes for taskkill; the
-        // commonly-repeated 0/128/1 mapping is community knowledge. This block
-        // is the slot where the MEASURED value and the run that produced it are
-        // written after the first real windows-latest run, in the shape
-        // `spawn-plan.ts:47-62` uses for its RED and GREEN URLs. It is empty on
-        // purpose - an empty slot is visibly unfilled, a guessed number is not.
-        //
-        //   RUN   <windows-latest run URL — to be filled in a follow-up commit>
-        //   CODE  <measured exit code — to be filled in a follow-up commit>
-        //   TEXT  <measured first stderr line — to be filled in a follow-up commit>
-        //
-        // 08-RESEARCH.md assumption A2 is rated LOW **because** nothing in this
-        // codebase branches on this value. It becomes HIGH the moment something
-        // does. A non-zero exit during a cancel is the expected case as often as
-        // not, because the pid frequently exits on its own between the decision
-        // and the spawn - so the value below is a datum for a later phase, never
-        // a control-flow input for this one.
-        const deadPid = await createDeadPid();
-
-        const plan = buildKillTreePlan({
-          pid: deadPid,
-          platform: "win32",
-          env: process.env,
-          rung: "kill",
-          systemRootFallback: "",
-        });
-        expect(plan.kind).toBe("spawn");
-        if (plan.kind !== "spawn") throw new Error("unreachable");
-
-        const result = await runToCompletion(
-          plan.file,
-          plan.args,
-          plan.windowsVerbatimArguments,
-        );
-        const firstStderrLine = result.stderr.split(/\r?\n/)[0] ?? "";
-
-        console.log(
-          `[measurement] taskkill against an already-dead pid: code=${String(result.code)} stderr=${JSON.stringify(firstStderrLine)}`,
-        );
-
-        // The ONLY assertion, and it is about the binary having resolved and run
-        // at all - not about the value. Falsifiable because `code` is
-        // `number | null`: a process ended by a signal, or one that never ran,
-        // does not answer with a number.
-        expect(typeof result.code).toBe("number");
-      },
-      SPAWN_TIMEOUT_MS,
-    );
   },
 );
