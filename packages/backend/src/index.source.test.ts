@@ -1241,11 +1241,30 @@ describe("index.ts wires the orphan reap at every counted site and nowhere else 
     const retiredRootCleanup = send.indexOf(
       "cleanupRetiredProviderStartRoot({",
     );
+    const retiredResult = send.indexOf(
+      "const providerStartRetired = releaseProviderStartLease(",
+    );
+    const configCleanup = send.indexOf("cleanupOwnedMcpConfigPaths(");
+    expect(retiredResult).not.toBe(-1);
+    expect(configCleanup).not.toBe(-1);
+    expect(retiredResult).toBeLessThan(configCleanup);
     expect(retiredRootCleanup).toBeGreaterThan(stagedCleanup);
-    const retiredRoot = functionBody(code, "cleanupRetiredProviderStartRoot");
-    expect(retiredRoot).toContain("currentTempDir === leaseTempDir");
-    expect(retiredRoot).toContain("await rm(leaseTempDir");
-    expect(retiredRoot).toContain("recursive: true");
+    expect(send.match(/releaseProviderStartLease\(/g) ?? []).toHaveLength(1);
+    const retiredCleanupCalls = callArgumentTexts(
+      send,
+      "cleanupRetiredProviderStartRoot",
+    );
+    expect(retiredCleanupCalls).toHaveLength(1);
+    expect(retiredCleanupCalls[0]).toContain(
+      "retired: providerStartRetired",
+    );
+    expect(retiredCleanupCalls[0]).toContain(
+      "tempDir: providerStartLease.tempDir",
+    );
+    expect(retiredCleanupCalls[0]).toContain("removeRoot:");
+    expect(retiredCleanupCalls[0]).toContain("recursive: true");
+    expect(code).not.toContain("currentTempDir === leaseTempDir");
+    expect(functionBody(code, "cleanupRetiredProviderStartRoot")).toBe("");
   });
 
   it("owns every token-bearing provider config in one cleanup funnel", () => {
