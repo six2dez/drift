@@ -52,6 +52,10 @@ import { buildKillTreePlan, shouldDetachProviderSpawn } from "./kill-plan";
 // group was created. **A1 is OPEN — not measured.** The fixed, three-valued
 // determination is `classifyLivenessObservation` in `kill-plan.ts`.
 //
+// DRIFT:A1-CORRECTION:BEGIN
+// A1 correction: The repaired three-valued probe CONFIRMED the favourable A1 outcome on 2026-08-31. The invalid 2026-08-27 reading remains RETRACTED as of 2026-08-28 and is preserved only as history.
+// DRIFT:A1-CORRECTION:END
+//
 // > **A1 is CLOSED FAVOURABLY** —
 // > `spikeDetachedGroupKill` read `grandchild-died (detached honoured)`, so the
 // > shipped LLRT does create the group this file's argv aims at.

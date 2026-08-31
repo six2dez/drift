@@ -332,6 +332,11 @@ last_updated: 2026-08-31T09:10:21.909Z
   }
 ]
 ````
+
+<!-- DRIFT:A1-CORRECTION:BEGIN -->
+**A1 correction:** The repaired three-valued probe CONFIRMED the favourable A1 outcome on 2026-08-31. The invalid 2026-08-27 reading remains RETRACTED as of 2026-08-28 and is preserved only as history.
+<!-- DRIFT:A1-CORRECTION:END -->
+
 ## Resolution notes
 
 ### Entry 7 — closed by plan 06-03 (commit `9effeec`)

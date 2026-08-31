@@ -123,6 +123,10 @@
 // equal the child pid — and that analysis is unchanged, because none of it ever
 // depended on the probe. What is gone is the CORROBORATION.
 //
+// DRIFT:A1-CORRECTION:BEGIN
+// A1 correction: The repaired three-valued probe CONFIRMED the favourable A1 outcome on 2026-08-31. The invalid 2026-08-27 reading remains RETRACTED as of 2026-08-28 and is preserved only as history.
+// DRIFT:A1-CORRECTION:END
+//
 // The failure mode the 2026-08-24 text warned about — a shipped fork that
 // ignores `detached`, so the group reference names a group that was never
 // created while every CI leg stays green — is NEITHER CONFIRMED NOR REFUTED. The

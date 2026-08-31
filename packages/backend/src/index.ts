@@ -6124,6 +6124,10 @@ function killTree(
   // corrected three-valued determination is `classifyLivenessObservation` in
   // `kill-plan.ts`.
   //
+// DRIFT:A1-CORRECTION:BEGIN
+  // A1 correction: The repaired three-valued probe CONFIRMED the favourable A1 outcome on 2026-08-31. The invalid 2026-08-27 reading remains RETRACTED as of 2026-08-28 and is preserved only as history.
+// DRIFT:A1-CORRECTION:END
+  //
   // > CORRECTION (2026-08-27, probe build installed in a real macOS Caido, darwin
   // > 25.6.0): **A1 IS CLOSED FAVOURABLY.** `spikeDetachedGroupKill` read
   // > `grandchild-died (detached honoured)` — the shipped LLRT does honour the

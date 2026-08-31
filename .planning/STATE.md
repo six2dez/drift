@@ -5,10 +5,10 @@ current_phase: 08
 current_phase_name: Process Lifecycle
 status: executing
 stopped_at: Planned 08-18-PLAN.md and 08-19-PLAN.md
-last_updated: "2026-08-31T11:12:47.248Z"
+last_updated: "2026-08-31T11:17:58.635Z"
 last_activity: 2026-08-31
-last_activity_desc: "Phase 08 third gap-closure round planned — A1 carrier convergence and security-register audit (08-VERIFICATION.md: gaps_found, 9/14)"
-state_head: 3ff6a77b1cc2149f986f092439399c8d6600d97f
+last_activity_desc: Phase 08 execution started
+state_head: e44c29720f4ecd2ff60f0d75a93e81351c750dbc
 progress:
   total_phases: 13
   completed_phases: 5
@@ -30,10 +30,10 @@ See: .planning/PROJECT.md (updated 2026-06-26)
 
 ## Current Position
 
-Phase: 08 (Process Lifecycle) — READY TO EXECUTE
-Plan: 17 of 19 complete; next 08-18
-Status: Ready to execute
-Last activity: 2026-08-31 — Phase 08 third gap-closure round planned: 08-18 converges the repaired A1 verdict; 08-19 re-audits the security register
+Phase: 08 (Process Lifecycle) — EXECUTING
+Plan: 1 of 19
+Status: Executing Phase 08
+Last activity: 2026-08-31 — Phase 08 execution started
 Verification: `08-VERIFICATION.md` rules **`gaps_found`, score 9/14 must-haves verified** (2026-08-31T09:35Z). The truth frame grew from 9 to 14, so this is not directly comparable to the superseded 2026-08-27 `gaps_found` / 4/9 or 2026-08-24 `human_needed` / 2/8 verdicts; the report preserves both transitions.
 
 Progress: [███░░░░░░░] 30% (3 of 10 milestone phases)
@@ -249,6 +249,10 @@ Recent decisions affecting current work:
 - [Phase 08]: [08-16]: A6 is a PER-PROVIDER SPLIT, not a reversal — TRUE for Claude Code (mcp-server pgid 29578 == provider pid 29578, reproduced at 30372), FALSE for codex (2026-08-27, unchanged in wording and direction). gemini and copilot stay unmeasured.
 - [Phase 08]: [08-16]: The CLI-cleanup confounder stays OPEN. Both provider-liveness cells are dated abstentions, so the 1 -> 0 pairs show the token-bearing child is gone, not that Drift removed it. Excluding it needs the PRE-FIX Control at 68199fa, owned by plan 08-17. A favourable before/after pair is not a causal attribution.
 - [Phase 08]: [08-16]: A1's TOPOLOGY half is measured (pgid == pid on both Drift-spawned providers, while caido-cli sits in pgid 41171) by direct ps from outside the sandbox, with no process.kill on its path. The CAUSAL half is not, so A1's verdict stays OPEN, its 2026-08-27 reading stays RETRACTED, and plans 08-11..08-14's corrections are untouched.
+
+<!-- DRIFT:A1-CORRECTION:BEGIN -->
+**A1 correction:** The repaired three-valued probe CONFIRMED the favourable A1 outcome on 2026-08-31. The invalid 2026-08-27 reading remains RETRACTED as of 2026-08-28 and is preserved only as history.
+<!-- DRIFT:A1-CORRECTION:END -->
 
 ### Pending Todos
 
