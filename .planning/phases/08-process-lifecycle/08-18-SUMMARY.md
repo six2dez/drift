@@ -48,27 +48,30 @@ key-decisions:
 requirements-completed: []
 
 coverage:
-  - deliverable: "Exact two-epoch A1 gate with red-input self-tests"
+  - id: D1
+    description: "Exact two-epoch A1 gate with red-input self-tests"
     verification:
-      - kind: command
+      - kind: other
         ref: "bash .planning/phases/08-process-lifecycle/verdict-gate.sh --self-test (25/25 cases)"
         status: pass
     human_judgment: false
-  - deliverable: "Eight converged A1 carriers and two open-state pointers"
+  - id: D2
+    description: "Eight converged A1 carriers and two open-state pointers"
     verification:
-      - kind: command
+      - kind: other
         ref: "bash .planning/phases/08-process-lifecycle/verdict-gate.sh (ARM A/B/C)"
         status: pass
-      - kind: command
+      - kind: integration
         ref: "vitest kill-plan, POSIX tree, and source suites (182/182)"
         status: pass
     human_judgment: false
-  - deliverable: "Historical Spike and SUMMARY integrity"
+  - id: D3
+    description: "Historical Spike and SUMMARY integrity"
     verification:
-      - kind: command
+      - kind: other
         ref: "ARM C: canonical Spike digest, 17 pinned blobs, 17 summaries accounted for"
         status: pass
-      - kind: command
+      - kind: other
         ref: "20-file pre/post protected-hash manifest"
         status: pass
     human_judgment: false
