@@ -4,11 +4,11 @@ import {
   buildSpawnPlan,
   CMD_INTERPRETED_EXTENSIONS,
   CMD_META_CHARACTERS,
-  DEFAULT_COMSPEC,
   escapeCmdArgument,
   escapeCmdCommand,
   needsDoubleEscape,
 } from "./spawn-plan";
+import { selectComspec } from "./platform";
 
 // Every input below is passed as a literal, which is the entire point of
 // `spawn-plan.ts` being pure: the module reads no `process.env`, no `os` and no
@@ -27,6 +27,7 @@ import {
 // `node_modules\.bin\`. That distinction is the whole of the A1 question.
 const GLOBAL_SHIM = "C:\\Users\\jo\\AppData\\Roaming\\npm\\claude.cmd";
 const NATIVE_EXE = "C:\\Users\\jo\\AppData\\Local\\Programs\\claude\\claude.exe";
+const ABSOLUTE_COMSPEC = "C:\\Windows\\System32\\cmd.exe";
 
 // The number of ARGUMENT SEPARATORS in an assembled command line: a space that
 // is not itself an escaped metacharacter. Every space INSIDE an argument or a
@@ -104,9 +105,10 @@ describe("buildSpawnPlan — win32 cmd.exe branch (SC-2)", () => {
       command: GLOBAL_SHIM,
       args: ["-p", "hi"],
       platform: "win32",
+      comspec: ABSOLUTE_COMSPEC,
     });
 
-    expect(plan.file).toEqual(DEFAULT_COMSPEC);
+    expect(plan.file).toEqual(ABSOLUTE_COMSPEC);
     expect(plan.args).toHaveLength(4);
     expect(plan.args.slice(0, 3)).toEqual(["/d", "/s", "/c"]);
     const commandLine = plan.args[3] ?? "";
@@ -117,9 +119,14 @@ describe("buildSpawnPlan — win32 cmd.exe branch (SC-2)", () => {
 
   it("matches the interpreted extensions case-insensitively so .CMD and .BAT take the cmd.exe branch", () => {
     for (const command of ["C:\\npm\\claude.CMD", "C:\\npm\\claude.BAT"]) {
-      const plan = buildSpawnPlan({ command, args: [], platform: "win32" });
+      const plan = buildSpawnPlan({
+        command,
+        args: [],
+        platform: "win32",
+        comspec: ABSOLUTE_COMSPEC,
+      });
 
-      expect(plan.file).toEqual(DEFAULT_COMSPEC);
+      expect(plan.file).toEqual(ABSOLUTE_COMSPEC);
       expect(plan.windowsVerbatimArguments).toBe(true);
     }
   });
@@ -133,6 +140,7 @@ describe("buildSpawnPlan — win32 cmd.exe branch (SC-2)", () => {
       command: "C:\\npm\\claude.cmd",
       args: [],
       platform: "win32",
+      comspec: ABSOLUTE_COMSPEC,
     });
 
     expect(plan.args[3]).toEqual('"C:\\npm\\claude.cmd"');
@@ -144,6 +152,7 @@ describe("buildSpawnPlan — win32 cmd.exe branch (SC-2)", () => {
       command: "C:\\npm\\claude.cmd",
       args: ["a", "b", "a", "c", "d"],
       platform: "win32",
+      comspec: ABSOLUTE_COMSPEC,
     });
 
     expect(plan.args[3]).toEqual(
@@ -156,6 +165,7 @@ describe("buildSpawnPlan — win32 cmd.exe branch (SC-2)", () => {
       command: "C:\\npm\\claude.cmd",
       args: ["", " ", "after"],
       platform: "win32",
+      comspec: ABSOLUTE_COMSPEC,
     });
 
     // Three arguments after the command means exactly three separators; a
@@ -166,29 +176,49 @@ describe("buildSpawnPlan — win32 cmd.exe branch (SC-2)", () => {
     );
   });
 
-  it("uses the injected comspec when one is supplied and falls back to cmd.exe otherwise", () => {
+  it("uses an injected absolute comspec and refuses absent, empty, or relative values", () => {
     const explicit = buildSpawnPlan({
       command: GLOBAL_SHIM,
       args: [],
       platform: "win32",
-      comspec: "C:\\Windows\\System32\\cmd.exe",
+      comspec: ABSOLUTE_COMSPEC,
     });
-    expect(explicit.file).toEqual("C:\\Windows\\System32\\cmd.exe");
+    expect(explicit.file).toEqual(ABSOLUTE_COMSPEC);
 
-    const empty = buildSpawnPlan({
-      command: GLOBAL_SHIM,
-      args: [],
-      platform: "win32",
-      comspec: "",
-    });
-    expect(empty.file).toEqual("cmd.exe");
+    for (const comspec of [undefined, "", "cmd.exe", ".\\cmd.exe"]) {
+      expect(() =>
+        buildSpawnPlan({
+          command: GLOBAL_SHIM,
+          args: [],
+          platform: "win32",
+          comspec,
+        }),
+      ).toThrow("without an absolute command interpreter");
+    }
+  });
 
-    const absent = buildSpawnPlan({
-      command: GLOBAL_SHIM,
-      args: [],
-      platform: "win32",
-    });
-    expect(absent.file).toEqual("cmd.exe");
+  it("composes every relative COMSPEC shape through the selector without producing a bare interpreter", () => {
+    for (const relative of [
+      "cmd.exe",
+      ".\\cmd.exe",
+      "system32\\cmd.exe",
+      "C:cmd.exe",
+    ]) {
+      const comspec = selectComspec({
+        env: { COMSPEC: relative },
+        platform: "win32",
+        systemRootFallback: "D:\\Windows",
+      });
+      const plan = buildSpawnPlan({
+        command: GLOBAL_SHIM,
+        args: [],
+        platform: "win32",
+        comspec,
+      });
+
+      expect(plan.file).toBe("D:\\Windows\\System32\\cmd.exe");
+      expect(plan.file).not.toBe("cmd.exe");
+    }
   });
 });
 

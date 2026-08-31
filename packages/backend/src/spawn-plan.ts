@@ -78,12 +78,11 @@
 // 3. SINGLE-SPACE EDGE PROBE: a single-space argument SURVIVES the round trip as
 //    its own distinct argv element with its space intact (PRV-02 adjacency).
 
-import { WINDOWS_EXECUTABLE_EXTENSIONS, type Platform } from "./platform";
-
-// The interpreter cmd.exe is invoked as when no COMSPEC is injected. Upstream
-// spells this `process.env.comspec || 'cmd.exe'`; the environment read is the
-// caller's job here, so only the fallback literal lives in this module.
-export const DEFAULT_COMSPEC = "cmd.exe";
+import {
+  isAbsolutePath,
+  WINDOWS_EXECUTABLE_EXTENSIONS,
+  type Platform,
+} from "./platform";
 
 // Extensions that are NOT programs — Windows can locate them on PATH but
 // `CreateProcess` cannot execute them, which is why Node >= 18.20.2 refuses a
@@ -306,9 +305,20 @@ export function buildSpawnPlan(input: {
   // on a security tester's machine is more likely than average to hold something
   // (T-07-02). With an empty argument list `parts` is the command alone, so the
   // join contributes no trailing separator.
-  const comspec = input.comspec ?? "";
+  const comspec = input.comspec?.trim() ?? "";
+  // T-08-33. This branch receives the live CAIDO_TOKEN in its environment, so
+  // an absent or relative interpreter is not a recoverable convenience case.
+  // Windows resolves a bare/relative executable through locations Drift does
+  // not control, including the host working directory. Refuse the launch here
+  // even if a caller forgets to compose `selectComspec`; the security property
+  // belongs at the last pure boundary before `spawn` as well as at selection.
+  if (!isAbsolutePath({ value: comspec, platform: "win32" })) {
+    throw new Error(
+      "Refusing to launch a Windows command shim without an absolute command interpreter.",
+    );
+  }
   return {
-    file: comspec === "" ? DEFAULT_COMSPEC : comspec,
+    file: comspec,
     args: ["/d", "/s", "/c", `"${parts.join(" ")}"`],
     windowsVerbatimArguments: true,
   };

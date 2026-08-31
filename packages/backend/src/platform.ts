@@ -779,17 +779,18 @@ export function selectComspec(input: {
     if (value === undefined || value === "") continue;
     // FAIL CLOSED on the first spelling that carries a value: a RELATIVE
     // %COMSPEC% re-opens the exact search-order hole this function exists to
-    // close, so it is refused here rather than passed on to the spawn. Falling
-    // through to the next spelling instead would let a relative value be
-    // "corrected" by another casing of the same variable, which is a rule nobody
-    // could predict from the outside.
-    return isAbsolutePath({ value, platform: input.platform })
-      ? value
-      : undefined;
+    // close, so it is never passed on to the spawn. Do not consult another
+    // spelling either: two casings of the same variable must not silently
+    // "correct" one another. The derived system-root rung below is different —
+    // it is trusted platform data supplied by the caller, and is the only safe
+    // recovery from a malformed environment value (T-08-33).
+    if (isAbsolutePath({ value, platform: input.platform })) return value;
+    break;
   }
 
-  // No spelling carried a value — the case a real install always takes. Before
-  // giving up, try the DERIVED root.
+  // No spelling carried a usable value — either the case a real install always
+  // takes, or a malformed present value that was rejected above. Before giving
+  // up, try the DERIVED root.
   //
   // `env` is passed DELIBERATELY EMPTIED here. This function's variable is
   // COMSPEC, not a system root: the environment has already been consulted

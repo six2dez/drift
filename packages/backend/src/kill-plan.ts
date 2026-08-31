@@ -246,10 +246,10 @@ export type KillTreePlan =
       windowsVerbatimArguments: boolean;
     };
 
-// The fallback killer name, spelled once. Mirrors `spawn-plan.ts`'s
-// DEFAULT_COMSPEC exactly, including its note: reading the environment is the
-// CALLER's job, so only the fallback literal lives in this module. A bare name
-// is resolved by Windows through a search order that includes the working
+// The fallback killer name, spelled once. Unlike the token-bearing provider
+// interpreter in `spawn-plan.ts` — which now refuses any non-absolute COMSPEC —
+// this best-effort termination helper keeps a bare last resort. A bare name is
+// resolved by Windows through a search order that includes the working
 // directory the plugin host chose, so it is the LAST resort and never the
 // preference (T-08-03).
 //

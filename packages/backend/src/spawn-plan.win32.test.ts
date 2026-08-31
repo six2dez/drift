@@ -171,6 +171,11 @@ describe.skipIf(process.platform !== "win32")("buildSpawnPlan on a real cmd.exe"
         command: fixture.shimPath,
         args: HAZARD_ARGS,
         platform: "win32",
+        comspec: selectComspec({
+          env: process.env,
+          platform: "win32",
+          systemRootFallback: "",
+        }),
       });
 
       expect(plan.windowsVerbatimArguments).toBe(true);

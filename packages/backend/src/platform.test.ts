@@ -1156,14 +1156,18 @@ describe("selectComspec", () => {
     expect(selectComspec({ env: { COMSPEC: "   " }, platform: "win32", systemRootFallback: "" })).toBeUndefined();
   });
 
-  it("REFUSES a relative COMSPEC rather than passing it to a spawn", () => {
+  it("uses the derived absolute interpreter after rejecting a relative COMSPEC", () => {
     // The whole point. A relative interpreter is resolved through the same
     // search order the absolute path exists to bypass, so accepting one would
     // close nothing. "C:cmd.exe" is drive-RELATIVE and belongs in this list.
     for (const relative of ["cmd.exe", ".\\cmd.exe", "system32\\cmd.exe", "C:cmd.exe"]) {
       expect(
-        selectComspec({ env: { COMSPEC: relative }, platform: "win32", systemRootFallback: "" }),
-      ).toBeUndefined();
+        selectComspec({
+          env: { COMSPEC: relative },
+          platform: "win32",
+          systemRootFallback: "D:\\Windows",
+        }),
+      ).toBe("D:\\Windows\\System32\\cmd.exe");
     }
   });
 
@@ -1175,9 +1179,9 @@ describe("selectComspec", () => {
       selectComspec({
         env: { COMSPEC: "cmd.exe", ComSpec: windowsComspec },
         platform: "win32",
-        systemRootFallback: "",
+        systemRootFallback: "D:\\Windows",
       }),
-    ).toBeUndefined();
+    ).toBe("D:\\Windows\\System32\\cmd.exe");
   });
 
   it("uses the DERIVED root when no COMSPEC spelling carries a value (G-01)", () => {
