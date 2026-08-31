@@ -1,100 +1,90 @@
 ---
 phase: 08-process-lifecycle
-fixed_at: 2026-08-31T13:28:24Z
+fixed_at: 2026-08-31T14:15:19Z
 review_path: .planning/phases/08-process-lifecycle/08-REVIEW.md
-iteration: 1
-findings_in_scope: 8
-fixed: 8
+iteration: 2
+findings_in_scope: 5
+fixed: 5
 skipped: 0
 status: all_fixed
 ---
 
 # Phase 8: Code Review Fix Report
 
-**Fixed at:** 2026-08-31T13:28:24Z
+**Fixed at:** 2026-08-31T14:15:19Z
 **Source review:** `.planning/phases/08-process-lifecycle/08-REVIEW.md`
-**Iteration:** 1
+**Iteration:** 2
 
 **Summary:**
 
-- Findings in scope: 8
-- Fixed: 8
+- Findings in scope: 5
+- Fixed: 5
 - Skipped: 0
-- Atomic fix commits: 8
+- Atomic fix commits: 5
 
 ## Fixed Issues
 
-### CR-01: Rejecting a relative COMSPEC re-enables the bare-name hijack with CAIDO_TOKEN
-
-**Files modified:** `packages/backend/src/platform.ts`, `packages/backend/src/platform.test.ts`, `packages/backend/src/spawn-plan.ts`, `packages/backend/src/spawn-plan.test.ts`, `packages/backend/src/spawn-plan.win32.test.ts`, `packages/backend/src/kill-plan.ts`
-**Commit:** `8ff2bef`
-**Applied fix:** A relative environment `COMSPEC` is rejected and can recover only through an absolute system-root-derived interpreter. The spawn-plan boundary now independently refuses absent, empty, or relative interpreters for Windows command shims, eliminating the bare `cmd.exe` fallback. Composed tests cover all four relative shapes from selection through the final spawn file.
-
-### CR-02: The orphan reaper checks idle before an asynchronous scan, then kills without rechecking
+### CR-01: A provider start can escape MCP teardown after its one-shot process pass
 
 **Status:** Fixed — requires human/runtime verification of the lifecycle interleaving.
-**Files modified:** `packages/backend/src/mcp-lifecycle.ts`, `packages/backend/src/mcp-lifecycle.test.ts`, `packages/backend/src/index.ts`, `packages/backend/src/index.source.test.ts`, `packages/backend/src/kill-plan.ts`, `packages/backend/src/kill-plan.test.ts`
-**Commit:** `50f7967`
-**Applied fix:** Every asynchronous reap carries an epoch-bound gate for its issuance context (`session-idle`, `runtime-absent`, or `runtime-cleanup`). Immediately before the synchronous signal loop, the orchestrator rechecks the epoch, temp-directory identity, live session count, and generation-scoped direct-call count. A changed or uncertain gate records `gate-stale` and attempts no signal. Delayed-callback tests cover a replacement session, a staged startup runtime, and cleanup followed by replacement.
+**Files modified:** `packages/backend/src/index.ts`, `packages/backend/src/index.source.test.ts`, `packages/backend/src/mcp-lifecycle.ts`, `packages/backend/src/mcp-lifecycle.test.ts`
+**Commit:** `4e170a7`
+**Applied fix:** Added short provider-start leases bound to the captured MCP epoch and temp directory. Teardown invalidates pending leases before its process pass; immediately before launch, a send revalidates its lease and commits `spawnWithEnv` plus `activeProcesses.set` synchronously. Session files and provider configuration are built against the captured directory and are removed when preparation fails or the lease becomes stale. The provider lifetime is not placed on the lifecycle FIFO.
 
-### CR-03: Stale cleanup and direct-call releases can mutate a newer MCP runtime generation
+### CR-02: The COMSPEC fail-closed throw bypasses orchestrator cleanup
 
-**Status:** Fixed — requires human/runtime verification of the lifecycle interleaving.
+**Status:** Fixed — requires human/runtime verification of every orchestration boundary.
+**Files modified:** `packages/backend/src/spawn-plan.ts`, `packages/backend/src/spawn-plan.test.ts`, `packages/backend/src/mcp-server-spec.ts`, `packages/backend/src/mcp-server-spec.test.ts`, `packages/backend/src/index.ts`, `packages/backend/src/index.source.test.ts`
+**Commit:** `8b6b00a`
+**Applied fix:** Added a typed spawn-planning result while retaining the pure planner's fail-closed throw. Start and refresh propagate registration refusals into full runtime cleanup; send removes every staged session/config/debug file; unregister and sweep record `MCP_REMOVE_PLAN_REFUSED` but continue through termination, reap, and directory cleanup. Refusals are diagnosed as `plan=refused` without inventing an exit code.
+
+### WR-01: A second Start abandons the current runtime directory and generation
+
+**Status:** Fixed — requires human/runtime verification of lifecycle reuse/replacement behavior.
 **Files modified:** `packages/backend/src/mcp-lifecycle.ts`, `packages/backend/src/mcp-lifecycle.test.ts`, `packages/backend/src/index.ts`, `packages/backend/src/index.source.test.ts`
-**Commit:** `b83ba62`
-**Applied fix:** Start, stop, and refresh now share a FIFO lifecycle operation chain. Cleanup captures its epoch and directory and may clear only that same generation. The scalar direct-call depth was replaced with exact object-identity tokens scoped to an epoch, so retirement and late release from an old generation cannot consume a new generation's call. Tests exercise delayed cleanup and delayed old-child release before replacement.
+**Commit:** `a77a42c`
+**Applied fix:** Added an explicit `start`, `reuse`, or `replace` disposition inside the lifecycle FIFO. A healthy active runtime returns its current status without advancing the epoch; an unhealthy active runtime receives complete cleanup before replacement. The two-Start model asserts a single live epoch and staging root.
 
-### WR-01: Truncated or malformed pgrep output can manufacture an unrelated PID
+### WR-02: Windows test cleanup can signal a recycled PID after proving the fixture dead
 
-**Files modified:** `packages/backend/src/kill-plan.ts`, `packages/backend/src/kill-plan.test.ts`, `packages/backend/src/index.ts`
-**Commit:** `e905f32`
-**Applied fix:** PID parsing now accepts only complete ASCII-decimal lines and safe integers greater than one. Any bounded-buffer truncation fails the scan closed before parsing. Tests cover suffixes, embedded whitespace, decimals, overflow, and a partial final line caused by truncation.
+**Status:** Fixed.
+**Files modified:** `packages/backend/src/kill-tree.win32.test.ts`, `packages/backend/src/kill-tree.win32.gate.test.ts`
+**Commit:** `917a3f8`
+**Applied fix:** Cleanup now retains owned parent process handles, removes them as soon as their exit event is observed, and never force-signals a numeric PID already established dead. The unowned grandchild relies on its bounded self-exit instead of a raw PID signal. The portable gate prohibits reintroducing raw `process.kill(..., "SIGKILL")` cleanup.
 
-### WR-02: A backward wall-clock step makes the freshness bound unbounded
+### WR-03: The Windows kill-tree gate can stay green after deletion of the behavioral test
 
-**Files modified:** `packages/backend/src/kill-plan.ts`, `packages/backend/src/kill-plan.test.ts`
-**Commit:** `19bd66d`
-**Applied fix:** Negative wall-clock age now classifies the scan as `scan-stale`, preserving the fail-closed behavior when elapsed time cannot be bounded. The previous negative-age acceptance test was replaced with the refusal expectation.
+**Status:** Fixed.
+**Files modified:** `.github/workflows/ci.yml`, `packages/backend/src/kill-tree.win32.gate.test.ts`
+**Commit:** `72dad7c`
+**Applied fix:** The Windows CI predicate now requires exactly two passed assertions, zero pending assertions, and the exact passed behavioral assertion named `the plan's argv brings down a real process tree`. Portable mutation tests prove that a one-test report and a report lacking that behavioral identity are rejected, while the exact two-test report is accepted.
 
-### WR-03: The diagnostic reports killed before any killer is known to have started or succeeded
+## Skipped Issues
 
-**Files modified:** `packages/backend/src/index.ts`, `packages/backend/src/kill-plan.ts`, `packages/backend/src/kill-plan.test.ts`
-**Commit:** `0c20117`
-**Applied fix:** The fire-and-forget result and diagnostic field are now named `attempted`, matching the evidence actually observed when `spawn` returns a handle. No `killed` claim is emitted without an asynchronous outcome.
-
-### WR-04: The Windows dead-PID measurement can terminate a recycled, unrelated process tree
-
-**Files modified:** `packages/backend/src/kill-tree.win32.test.ts`
-**Commit:** `e1ac837`
-**Applied fix:** Removed the shared-runner test that intentionally freed a PID and then passed the recyclable number to forceful `taskkill /t /f`. The functional live-tree Windows measurements remain; no unrelated recycled PID is targeted.
-
-### WR-05: The Windows gate test can pass by reading steps other than the build-and-test step
-
-**Files modified:** `packages/backend/src/kill-tree.win32.gate.test.ts`
-**Commit:** `e5e7dd6`
-**Applied fix:** The gate extracts exactly one named Windows build-and-test step and evaluates its runner, command, report generation, and artifact upload within that step only. A mutation test proves that moving the report command to another step turns the gate red.
+None.
 
 ## Verification
 
 All verification ran in the **main checkout** because `.planning/config.json` sets `workflow.use_worktrees` to `false`.
 
-- `pnpm exec vitest run`: 40 files passed, 2 Windows-only files skipped; 753 tests passed, 8 skipped.
-- `pnpm -r typecheck`: exit 0 across shared, backend, and frontend.
+- Red/green regression checks were captured before each fix: CR-01 reproduced four failures then passed its 82-test directed set; CR-02 reproduced eight failures then passed 165 directed tests; WR-01 reproduced four failures then passed 90 directed tests; WR-02 and WR-03 each reproduced their unsafe/weak gate condition before their focused portable gates passed.
+- `pnpm exec vitest run`: exit 0; 40 files passed and 2 Windows-only files skipped; 772 tests passed and 8 skipped out of 780.
+- `pnpm typecheck`: exit 0 across shared, backend, and frontend.
 - `pnpm lint`: exit 0 with `--max-warnings 0`.
-- `pnpm build`: exit 0; backend, frontend, package, and ZIP built successfully.
-- CR-02 directed set: 193/193 passed (`mcp-lifecycle`, `index.source`, `kill-plan`).
-- `threat-register-gate.sh`: pass (`packages=94`, `support=5`, `register=88+SC`).
-- `threat-register-gate.test.sh`: 26/26 cases passed.
-- `verdict-gate.sh`: Arms A, B, and C passed.
-- `verify-a1-patch.sh`: exit 0; the patch applied at `68199fa`, typechecked, and built 5 files / 2,548,188 bytes plus a 2,549,148-byte ZIP.
+- `pnpm build`: exit 0; backend, frontend, package directory, and ZIP built successfully on macOS.
+- `threat-register-gate.test.sh`: exit 0; 26 cases passed.
+- `threat-register-gate.sh --self-scan`: exit 0; `packages=94`, `support=5`, `register=88+SC`.
+- `threat-register-gate.sh`: exit 0 with the same census.
+- `verdict-gate.sh`: exit 0; Arms A, B, and C passed.
+- `verify-a1-patch.sh`: exit 0; the patch applied at `68199fa`, typechecked, and built 5 files / 2,548,188 bytes plus a 2,549,148-byte ZIP. Registered worktrees remained 1 before and after, and `packages/` remained clean.
 - `git diff --check`: exit 0.
 
-These results are Node/macOS, build, and static-source evidence. No native-Windows test or real-Caido/LLRT lifecycle interleaving was executed in this fix pass; the Windows-only Vitest files remained skipped on this host.
+The full suite's eight skips are six `spawn-plan.win32.test.ts` cases and two `kill-tree.win32.test.ts` cases. No native-Windows behavior or real-Caido QuickJS/LLRT lifecycle interleaving was executed in this fix pass. The strengthened Windows gate is portable/static and synthetic-report evidence; native behavior remains owned by `windows-latest` CI or real hardware.
 
-Pre-existing user changes in `.planning/PROJECT.md`, `.planning/phases/08-process-lifecycle/08-VERIFICATION.md`, and unrelated untracked planning files were preserved and excluded from every fix commit.
+Pre-existing user changes in `.planning/PROJECT.md`, `.planning/phases/08-process-lifecycle/08-VERIFICATION.md`, and unrelated untracked planning files were preserved and excluded from every fix commit. This report is deliberately not committed; the review orchestrator owns it.
 
 ---
 
-_Fixed: 2026-08-31T13:28:24Z_
+_Fixed: 2026-08-31T14:15:19Z_
 _Fixer: the agent (gsd-code-fixer)_
-_Iteration: 1_
+_Iteration: 2_
