@@ -35,6 +35,9 @@ MARKDOWN_BEGIN='<!-- DRIFT:A1-CORRECTION:BEGIN -->'
 MARKDOWN_END='<!-- DRIFT:A1-CORRECTION:END -->'
 SOURCE_BEGIN='// DRIFT:A1-CORRECTION:BEGIN'
 SOURCE_END='// DRIFT:A1-CORRECTION:END'
+TRACEABILITY_BEGIN='<!-- DRIFT:LIF-02-TRACEABILITY:BEGIN -->'
+TRACEABILITY_END='<!-- DRIFT:LIF-02-TRACEABILITY:END -->'
+TRACEABILITY_CURRENT_LINE='**CURRENT LIF-02 traceability correction (2026-08-31, Plan 08-23):** Plan 08-18 CLOSED deferred item 10 by propagating the repaired A1 result to exactly eight mutable A1 carriers and two live pointers. LIF-01 and LIF-02 remain unchecked. LIF-02 remains open because the argv-marker reap lacks an executed shipping-runtime assertion, no Control exists for a non-Claude provider, and the redundancy question is unresolved.'
 
 SPIKE_PATH='.planning/phases/08-process-lifecycle/08-SPIKE.md'
 SPIKE_SHA256='7c482d7fd539f84c8e44fcfe9036b454a868767b719bd8a91d35ac70d8a9745f'
@@ -172,6 +175,38 @@ audit_discovered_records() {
   return 0
 }
 
+# The correction-marker census cannot prove that REQUIREMENTS' separate
+# traceability roll-up carries the post-08-18 meaning. Keep that meaning in one
+# bounded, exact record: stale prose outside it may survive only as explicitly
+# superseded history. Diagnostics report the record class, never its content.
+TRACEABILITY_REASON=''
+validate_lif02_traceability() {
+  local file=$1 begin_count end_count begin_line end_line body flattened
+  TRACEABILITY_REASON=''
+  if [ ! -f "$file" ]; then TRACEABILITY_REASON='traceability file missing'; return 1; fi
+  begin_count=$(grep -Fxc "$TRACEABILITY_BEGIN" "$file" 2>/dev/null || true)
+  end_count=$(grep -Fxc "$TRACEABILITY_END" "$file" 2>/dev/null || true)
+  if [ "$begin_count" != '1' ] || [ "$end_count" != '1' ]; then
+    TRACEABILITY_REASON='expected exactly one bounded traceability record'; return 1
+  fi
+  begin_line=$(grep -nFx "$TRACEABILITY_BEGIN" "$file" | cut -d: -f1)
+  end_line=$(grep -nFx "$TRACEABILITY_END" "$file" | cut -d: -f1)
+  if [ "$begin_line" -ge "$end_line" ]; then TRACEABILITY_REASON='traceability marker order is reversed'; return 1; fi
+  if [ $((end_line - begin_line)) -le 1 ]; then TRACEABILITY_REASON='traceability record is empty'; return 1; fi
+  body=$(sed -n "$((begin_line + 1)),$((end_line - 1))p" "$file")
+  if printf '%s\n' "$body" | grep -Fq 'DRIFT:LIF-02-TRACEABILITY:'; then
+    TRACEABILITY_REASON='nested traceability marker'; return 1
+  fi
+  if printf '%s\n' "$body" | grep -Eq '^[[:space:]]*$'; then
+    TRACEABILITY_REASON='traceability record is separated'; return 1
+  fi
+  flattened=$(printf '%s\n' "$body" | tr '\n' ' ' | sed -E 's/[[:space:]]+$//')
+  if [ "$flattened" != "$TRACEABILITY_CURRENT_LINE" ]; then
+    TRACEABILITY_REASON='current Plan 08-18/eight-carrier/two-pointer/open contract missing or contradictory'; return 1
+  fi
+  return 0
+}
+
 # ROADMAP/REQUIREMENTS are pointers outside CARRIERS_A1. Open checkboxes prevent
 # this evidence-only plan from closing Phase 8 or either lifecycle requirement.
 POINTER_REASON=''
@@ -188,6 +223,9 @@ validate_pointer_records() {
     pointer_failures=$((pointer_failures + 1))
   fi
   if [ "$(grep -F -c -- '- [ ] **LIF-02**' "$requirements" 2>/dev/null || true)" != '1' ]; then
+    pointer_failures=$((pointer_failures + 1))
+  fi
+  if ! validate_lif02_traceability "$requirements"; then
     pointer_failures=$((pointer_failures + 1))
   fi
   if [ "$pointer_failures" != '0' ]; then POINTER_REASON='one or more marker/open-state checks failed'; return 1; fi
@@ -267,6 +305,14 @@ write_self_spike() {
     printf '%s\n' "$SPIKE_A1_LINE"
     printf '%s\n' '---'
   } >"$path"
+}
+write_self_traceability_record() {
+  local path=$1 line=${2:-$TRACEABILITY_CURRENT_LINE}
+  {
+    printf '%s\n' "$TRACEABILITY_BEGIN"
+    printf '%s\n' "$line"
+    printf '%s\n' "$TRACEABILITY_END"
+  } >>"$path"
 }
 init_self_git_fixture() {
   local repo=$1 content=$2
@@ -363,8 +409,25 @@ run_self_test() {
   write_self_markdown_record "$tmp/pointers/ROADMAP.md"
   printf '%s\n' '- [ ] **Phase 8: Process Lifecycle**' >>"$tmp/pointers/ROADMAP.md"
   write_self_markdown_record "$tmp/pointers/REQUIREMENTS.md"
+  write_self_traceability_record "$tmp/pointers/REQUIREMENTS.md"
   printf '%s\n' '- [ ] **LIF-01**: open' '- [ ] **LIF-02**: open' >>"$tmp/pointers/REQUIREMENTS.md"
   self_expect_pass 'open-live-pointers' validate_pointer_records "$tmp/pointers/ROADMAP.md" "$tmp/pointers/REQUIREMENTS.md"
+  : >"$tmp/pointers/stale-traceability.md"
+  write_self_traceability_record "$tmp/pointers/stale-traceability.md" 'Plan 08-18 is pending; deferred item 10 must land before 08-SPIKE.md stops being the single carrier.'
+  self_expect_fail 'stale-lif02-traceability' validate_lif02_traceability "$tmp/pointers/stale-traceability.md"
+  cp "$tmp/pointers/REQUIREMENTS.md" "$tmp/pointers/empty-traceability.md"
+  sed -i.bak "/CURRENT LIF-02 traceability correction/d" "$tmp/pointers/empty-traceability.md"; rm -f "$tmp/pointers/empty-traceability.md.bak"
+  self_expect_fail 'empty-lif02-traceability' validate_lif02_traceability "$tmp/pointers/empty-traceability.md"
+  cp "$tmp/pointers/REQUIREMENTS.md" "$tmp/pointers/duplicate-traceability.md"
+  write_self_traceability_record "$tmp/pointers/duplicate-traceability.md"
+  self_expect_fail 'duplicate-lif02-traceability' validate_lif02_traceability "$tmp/pointers/duplicate-traceability.md"
+  cp "$tmp/pointers/REQUIREMENTS.md" "$tmp/pointers/separated-traceability.md"
+  sed -i.bak "/CURRENT LIF-02 traceability correction/i\\
+" "$tmp/pointers/separated-traceability.md"; rm -f "$tmp/pointers/separated-traceability.md.bak"
+  self_expect_fail 'separated-lif02-traceability' validate_lif02_traceability "$tmp/pointers/separated-traceability.md"
+  : >"$tmp/pointers/contradictory-traceability.md"
+  write_self_traceability_record "$tmp/pointers/contradictory-traceability.md" "$TRACEABILITY_CURRENT_LINE 08-SPIKE.md is the single carrier."
+  self_expect_fail 'contradictory-lif02-traceability' validate_lif02_traceability "$tmp/pointers/contradictory-traceability.md"
   sed -i.bak 's/- \[ \] \*\*LIF-02\*\*/- [x] **LIF-02**/' "$tmp/pointers/REQUIREMENTS.md"; rm -f "$tmp/pointers/REQUIREMENTS.md.bak"
   self_expect_fail 'closed-lif-checkbox' validate_pointer_records "$tmp/pointers/ROADMAP.md" "$tmp/pointers/REQUIREMENTS.md"
 
@@ -428,10 +491,14 @@ SUMMARY_PINS='
 08-15-SUMMARY.md 1f42ea26f2808838c9f790fa02d06cafb272e837
 08-16-SUMMARY.md d5a9740cd61418d977578ff38be0d4b6951d0cab
 08-17-SUMMARY.md a0959cbec16e8d12156777f63ad799dc1476e115
+08-18-SUMMARY.md 1151e0b51601f4aff82ccc663e8e24157df41eb5
+08-19-SUMMARY.md 65018285c37e85ef960f2c40421107550dcae878
+08-20-SUMMARY.md ba61f5818386e62eb32e1f706ac7e71f770cab50
+08-21-SUMMARY.md 5a2b92c6bba9557be651147547bf432b7449c8de
+08-22-SUMMARY.md 210f5f27114710565894a61c627c61296be574c7
 '
 SUMMARY_EXPECTED_OUTPUTS='
-08-18-SUMMARY.md
-08-19-SUMMARY.md
+08-23-SUMMARY.md
 '
 SUMMARY_DIR='.planning/phases/08-process-lifecycle'
 
