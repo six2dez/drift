@@ -8,11 +8,10 @@ threats_open: 0
 # ATTESTATION, not a recorded measurement — see § "T-08-01 — closed by attestation" before
 # treating this zero as equivalent to Phase 7's.
 #
-# RECOMPUTED 2026-08-27 after the gap-closure set. Register: 21 rows → 51 rows (+30 from plans
-# 08-06…08-10). Of the 30 added, 14 are `high`. Thirteen of those 14 are disposition `mitigate`
-# and closed by a shipped mechanism (T-08-21, T-08-22, T-08-27, T-08-29, T-08-30, T-08-33,
-# T-08-36, T-08-38, T-08-39, T-08-44, T-08-46, T-08-49, plus T-08-03 RE-RATED medium → high and
-# mitigated by plan 08-08's derived system root).
+# RE-AUDITED 2026-08-31 after plans 08-11…08-19. The main register now has 88 numeric rows plus
+# T-08-SC (89 rows total), including all 38 T-08-51…T-08-88 allocations. Closure comes from the
+# current source/tests and the executable verdict, patch, and citation gates; PLAN/SUMMARY prose is
+# used only to locate the allocated mechanism. Thirteen accepted residuals remain explicit.
 #
 # The fourteenth is T-08-47, an ACCEPTED `high` under `block_on: high`. It does not count toward
 # threats_open — an accepted residual is closed-with-a-decision, not open — but it is called out
@@ -23,7 +22,14 @@ threats_open_note: "0 open; 1 accepted high (T-08-47 / AR-06, decider six2dez pe
 asvs_level: 1
 block_on: high
 created: 2026-08-24
-audited_at_head: d2d502b
+audited_at_head: 318fe24a78061db283272d88357185b0fb1e384a
+package_tree_at_audit: 1250a4c430874212eafad531cc610bbaa27341b5
+package_tree_sha256_at_audit: 5116876fd8c85fb0398517c62e0a2b9b8396b9bf134d21f55af5c52f3eea3958
+former_baseline_package_commits: 31
+package_commits_after_audit: 0
+register_numeric_rows: 88
+register_sentinel_rows: 1
+accepted_residuals: 13
 register_authored_at_plan_time: true
 ---
 
@@ -92,14 +98,18 @@ Rolled up from the five plan blocks.
 
 ## Threat Register
 
-**51 distinct rows** (`(NN)` names the plan(s) the row was authored in). Severity and disposition as
-authored at plan time, except where a row records an explicit re-rating with its reason.
+**89 distinct rows: 88 numeric rows plus T-08-SC.** (`(NN)` names the plan(s) the row was authored
+in.) Severity and disposition remain as authored at plan time, except where a row records an
+explicit re-rating with its reason.
 
-**Updated 2026-08-27.** 21 rows from the original five plans (08-01…08-05); **30 rows added** from
-the five gap-closure plans — 6 from 08-06, 7 from 08-07, 5 from 08-08, 6 from 08-09 and 6 from
-08-10. Identifiers and severities are taken from each plan's own `<threat_model>` block rather than
-invented here. **T-08-03 is RE-RATED** in place, from medium to high, and the re-rating carries its
-reason in the mitigation cell.
+**Re-audited 2026-08-31 at `318fe24a78061db283272d88357185b0fb1e384a`.** The 51-row
+2026-08-27 register is preserved and extended with the complete 38-row allocation from plans
+08-11…08-19. The package tree at the audit boundary is Git tree `1250a4c430874212eafad531cc610bbaa27341b5`
+(SHA-256 census `5116876fd8c85fb0398517c62e0a2b9b8396b9bf134d21f55af5c52f3eea3958`),
+31 package-changing commits after former baseline `d2d502b`, and zero after the new audit boundary.
+Identifiers, categories, severities, and dispositions are transcribed from the allocating plan;
+current source/tests/gates determine closure. **T-08-03 remains RE-RATED** in place, from medium to
+high, with its original reason intact.
 
 | Threat ID | Category | Component | Sev | Disposition | Mitigation (verified) | Status |
 |---|---|---|---|---|---|---|
@@ -133,7 +143,6 @@ reason in the mitigation cell.
 | **T-08-28** (07) | DoS | the idle reap terminating Drift's own MCP self-test | medium | mitigate | A depth **counter**, not a pid exclusion list — a stale pid in a list would shield a genuine orphan that reused the number, while a counter that fails to release SUPPRESSES the reap instead. Released from `close` and `error`, above the settled guard | closed (08-07) |
 | **T-08-29** (07) | EoP | the class-wide previous-run scan firing while a session is live | **high** | mitigate | `buildPreviousRunOrphanScanPlan` refuses with `session-active` whenever a session directory name is supplied, so moving the call below the `mcpTempDir` assignment stops the scan rather than pointing it at the live session's child | closed (08-07) |
 | **T-08-30** (07) | InfoDisc | a previous-run orphan holding a live `CAIDO_TOKEN` indefinitely | **high** | mitigate | The start-up reap terminates it, and terminates it **above every `rm`**, so the env-source documents naming it are not destroyed before the process that read them dies. This is **AR-02's** measured case, closed | closed (08-07) |
-| **T-08-50** (07) | DoS (a security control that does not reach) | multi-session cancel: the idle gate suppresses the reap while another session is live | medium | **accept** | The uncovered case, stated as the gap it is. See **AR-07** — bounded by the fact that the reap DOES fire at the last close, so the window is the multi-session period rather than indefinite. Inverse of T-08-27; both directions are now on the register | closed (accepted) |
 | **T-08-31** (07) | Repudiation | `cancelCliMessage` becoming async to accommodate the reap | medium | mitigate | `reapSessionOrphansIfIdle` returns `void` and awaits nothing; the exact declaration string is asserted and `await reapSessionOrphansIfIdle` is gated at `0`. OQ-4 holds by construction | closed (08-07) |
 | **T-08-32** (07) | DoS | one enumerator spawn per completed turn | low | **accept** | Bounded by `ORPHAN_SCAN_TIMEOUT_MS`, fire-and-forget, refused entirely on win32 so UX-04's console-window count is unaffected. The price of covering the normal-exit orphan, which is as real as the cancel orphan | closed (accepted) |
 | **T-08-33** (08) | Spoofing / EoP | resolution of `cmd.exe` via `selectComspec` | **high** | mitigate | The same derived-root rung as T-08-03. **Highest severity of the three** because this is the spawn that carries a live `CAIDO_TOKEN`; Phase 7's CR-01 absolute-interpreter mitigation was **inert on every real install** for exactly the empty-environment reason, and now runs. `selectComspec` passes an EMPTIED env to the ladder: its variable is `COMSPEC`, not a system root | closed (08-08) |
@@ -153,10 +162,98 @@ reason in the mitigation cell.
 | **T-08-47** (10) | InfoDisc | a token-bearing MCP registration Drift cannot withdraw | **high** | **accept** | **AR-06.** Explicitly out of scope per **recorded decision GD-02**; recorded with the Gemini exit-127 `mcp remove` failures as its live instance and pointed at a registration-focused phase entered through a discussion. The user-facing remediation is recorded alongside it. **An accepted `high` under `block_on: high` — see AR-06's `Accepted By` cell, which names the decider, not merely an owner** | closed (accepted) |
 | **T-08-48** (10) | Repudiation | the two `WINDOWS.md` representations diverging | medium | mitigate | Both edited together, the JSON block re-parsed, and the two descriptions **diffed and the comparison reported** rather than assumed | closed (10) |
 | **T-08-49** (10) | Repudiation | fabricating the Control reading to complete a table | **high** | mitigate | Prohibited in plan frontmatter and asserted in acceptance criteria: `08-SPIKE.md` § *Control* still records that no reading was taken, because `08-UAT.md` test 3 is still `[pending]`. A fabricated confirmation is the precise failure the spike existed to prevent | closed (10) |
+| **T-08-50** (07) | DoS (a security control that does not reach) | multi-session cancel: the idle gate suppresses the reap while another session is live | medium | **accept** | The uncovered case, stated as the gap it is. See **AR-07** — bounded by the fact that the reap DOES fire at the last close, so the window is the multi-session period rather than indefinite. Inverse of T-08-27; both directions are now on the register | closed (accepted) |
+| **T-08-51** (11) | Tampering | `verdict-gate.sh` ARM A pattern | **high** | mitigate | Current `verdict-gate.sh` retains the measured spelling set, fail-closed exclusions, and positive retraction requirement; its self-test keeps stale, missing, and excluded-carrier controls red | closed (gate self-test + ARM A) |
+| **T-08-52** (11) | Repudiation | `08-SPIKE.md` A1 correction | medium | mitigate | The exact `DRIFT:A1-CORRECTION` record preserves the retraction and current repaired-probe result as one marked correction; ARM B validates the live pointer while the pinned Spike digest prevents historical rewriting | closed (current marker + ARM B) |
+| **T-08-53** (11) | Tampering | dated `*-SUMMARY.md` class | medium | mitigate | ARM C pins committed summary blobs, rejects working-tree mutation, and requires every dated Phase 08 summary to be either pinned or explicitly not yet generated | closed (ARM C) |
+| **T-08-54** (11) | Information disclosure | gate output | low | **accept** | Gate diagnostics are intentionally bounded to record labels, relative repository paths, and counts. The remaining disclosure of repository-relative names is explicit in **AR-10** | closed (accepted; AR-10) |
+| **T-08-55** (12) | Spoofing | `buildLivenessProbePlan` bare-name enumerator | medium | mitigate | Current `kill-plan.ts` keeps the diagnostic-only scope and `classifyLivenessObservation` requires the requested pid row; `kill-plan.test.ts` covers absent, unrelated, and malformed output as inconclusive | closed (source + kill-plan suite) |
+| **T-08-56** (16) | Tampering | the recording of a hardware measurement | **high** | mitigate | The blocking-human measurement record preserves verbatim readings and abstentions; the current A1 marker records only the repaired three-valued result while retaining the invalid reading as retracted history | closed (record-integrity control; no causal upgrade) |
+| **T-08-57** (12) | Tampering | `classifyLivenessObservation` | **high** | mitigate | The production classifier has an explicit closed result union and the executed totality/red-input cases reject defaults, missing adjacency, and ordering shortcuts | closed (kill-plan suite) |
+| **T-08-58** (12) | Repudiation | source-comment marked corrections | medium | mitigate | Current source comments retain the dated superseded wording beside the corrected classifier contract; structural tests pin the correction markers and reason vocabulary | closed (source + source-structure suite) |
+| **T-08-59** (12) | Information disclosure | `formatSpikeVerdict` output | low | **accept** | `formatSpikeVerdict` renders only a state and closed-union reason token. The bounded diagnostic disclosure is explicit in **AR-11** | closed (accepted; AR-11) |
+| **T-08-60** (13) | Tampering | ROADMAP SC-2 amendment | **high** | mitigate | ROADMAP SC-2 keeps the group mechanism and adds the stricter argv-adjacency, bounded-enumerator, and idle-gate boundaries; the amendment remains a harder current criterion rather than a relaxed retrofit | closed (current ROADMAP criterion) |
+| **T-08-61** (13) | Repudiation | superseded amendment text | medium | mitigate | The dated amendment and its earlier independent note remain preserved as explicit supersessions rather than overwritten prose | closed (current ROADMAP history) |
+| **T-08-62** (13) | Denial of service | requirement ownership | medium | mitigate | REQUIREMENTS and the authoritative verification record still state that no later phase owns the remaining A1/LIF evidence; both LIF boxes remain unticked | closed (current requirement/verification records) |
+| **T-08-63** (14) | Tampering | `.planning/WINDOWS.md` dual representation | **high** | mitigate | The table and JSON representations retain the same entry-11 correction history and are parsed together by the GSD windows tooling | closed (dual-representation parse) |
+| **T-08-64** (14) | Tampering | `08-SECURITY.md` register and residuals | **high** | mitigate | The canonical seven-column table is now mechanically parsed by `threat-register-gate.sh`; range, uniqueness, sentinel, and live-citation joins all fail closed | closed (citation gate) |
+| **T-08-65** (14) | Repudiation | ledger entry 11's two supersessions | medium | mitigate | Both the 2026-08-24 and 2026-08-27 superseded entry-11 descriptions remain in the current ledger history and the current description carries the repaired result | closed (current ledger history) |
+| **T-08-66** (14) | Denial of service | `.planning/STATE.md` | medium | mitigate | `state.load` parses the current planning state and the plan close-out uses the same SDK handlers rather than hand-editing its structure | closed (SDK parse) |
+| **T-08-67** (15) | Tampering | `a1-probe-fix.patch` | medium | mitigate | `verify-a1-patch.sh` applies the committed patch at `68199fa`, carries the current helpers, type-checks, builds, and removes its detached scratch worktree | closed (current patch verifier) |
+| **T-08-68** (15) | Elevation of privilege | patched build installed in a live Caido | medium | **accept** | The maintainer-only unsigned diagnostic build was bounded to one local run, never released, and restored to HEAD. The explicit privilege trade-off is **AR-12** | closed (accepted; AR-12) |
+| **T-08-69** (16) | Information disclosure | pasted `ps` output | medium | mitigate | The protected Spike records only load-bearing pid/pgid/count evidence and uses the established redacted argv form; the current digest is pinned by ARM B | closed (redacted evidence + ARM B) |
+| **T-08-70** (16) | Denial of service | orphaned survivors after the measurement | medium | mitigate | The hardware procedure required survivor cleanup and the later patch verifier proves fixture cleanup plus restoration without changing the main package tree | closed (recorded cleanup + patch verifier) |
+| **T-08-71** (16) | Repudiation | the interpretation paragraph | medium | mitigate | Measured cells and inference remain in separately labelled sections; the repaired A1 result does not erase the zero-control causality caveat | closed (separated evidence record) |
+| **T-08-72** (17) | Tampering | `verdict-gate.sh`, under a favourable re-run | **high** | mitigate | The favourable repaired result was propagated through carriers without weakening `verdict-gate.sh`; the unchanged gate now passes all three arms | closed (verdict gate) |
+| **T-08-73** (17) | Elevation of privilege | unsigned build installed into Caido | medium | **accept** | The one-off build came from a committed patch and base, was locally installed then removed, never published, and did not enter the signed pipeline. The decision is **AR-13** | closed (accepted; AR-13) |
+| **T-08-74** (17) | Repudiation | the ownerless list | medium | mitigate | The authoritative verification record names the phases checked and explicitly retains the items with no later owner instead of assigning a fictional owner | closed (current verification ownership record) |
+| **T-08-75** (15) | Information disclosure | `lastOrphanReap` diagnostics value | **high** | mitigate | Current formatters consume only closed reason unions and scalar counts; the executed unit case supplies pid-shaped unread data and proves it is absent from output | closed (source + kill-plan suite) |
+| **T-08-76** (15) | Denial of service | the A1 probe, if reintroduced to HEAD | **high** | mitigate | The probe remains outside HEAD in `a1-probe-fix.patch`; its spawned-killer cleanup is verified in a detached worktree and the main package status remains unchanged | closed (patch-only + current verifier) |
+| **T-08-77** (17) | Denial of service | the probe build left installed | **high** | mitigate | The recorded procedure restored the HEAD build and the current patch verifier again builds only in a removed scratch worktree; no package or release artifact changed in the main tree | closed (restore record + current verifier) |
+| **T-08-78** (17) | Tampering | the recording of the A1 re-run | **high** | mitigate | The canonical marker records the repaired three-valued result, keeps the 2026-08-27 reading retracted, and is parsed as one inseparable record by ARM A/B | closed (current marker + verdict gate) |
+| **T-08-79** (18) | Tampering | `verdict-gate.sh` current-truth logic | **high** | mitigate | The production parser is shared by live and fixture modes; stale, missing, duplicate, separated, and empty records remain demonstrated red | closed (verdict gate self-test) |
+| **T-08-80** (18) | Repudiation | Eight A1 carriers and live pointers | **high** | mitigate | ARM B measures exactly eight mutable A1 carriers, two live pointers, and eight unchanged A6 carriers while preserving the immutable Spike digest | closed (ARM B census) |
+| **T-08-81** (18) | Tampering | Carrier/pointer census | **high** | mitigate | The exact carrier array, ROADMAP/REQUIREMENTS pointers, root discovery, and non-empty census remain executable in the standing gate | closed (ARM B) |
+| **T-08-82** (18) | Information disclosure | gate diagnostics and execution records | medium | mitigate | Verdict-gate diagnostics remain labels, counts, IDs, and relative paths only; no matched source line or environment value is emitted | closed (value-free gate output) |
+| **T-08-83** (18) | Tampering | ARM C historical-summary integrity | **high** | mitigate | ARM C pins the canonical Spike digest and every committed Phase 08 summary blob while rejecting committed, working-tree, and unexpected-discovery mutations | closed (ARM C) |
+| **T-08-84** (19) | Tampering | live citation and allocation census | **high** | mitigate | `threat-register-gate.sh` requires the contiguous T-08-01…T-08-88 range plus T-08-SC, dynamically discovers both live families, and pins package/support liveness sentinels | closed (citation gate + self-test) |
+| **T-08-85** (19) | Repudiation | `audited_at_head` and package-history comparison | **high** | mitigate | Audit baseline `318fe24a78061db283272d88357185b0fb1e384a`, package tree/digest, 31-commit former-baseline delta, and zero package-changing commits after the audit boundary are recorded and rechecked | closed (Git audit measurements) |
+| **T-08-86** (19) | Repudiation | threat disposition and mitigation closure | **high** | mitigate | Every rolled row points to current source, a current record, or an executable suite/gate; plans and summaries supply allocation only and cannot satisfy the live citation join | closed (current evidence audit) |
+| **T-08-87** (19) | Tampering | `status`, `threats_open`, totals, and accepted residuals | **high** | mitigate | Parsed aggregates require 88 numeric rows plus T-08-SC, 13 explicit residuals, zero open high mitigations, and a separately visible accepted-high T-08-47 exception | closed (mechanical totals + residual census) |
+| **T-08-88** (19) | Tampering | `threat-register-gate.sh` discovery/parser/output | **high** | mitigate | One implementation serves live and fixture roots with NUL-delimited discovery, newline refusal, runtime-fragment red tokens, path-safe diagnostics, and canary checks; the independent matrix is the final lock | closed (production self-test; independent matrix in Task 3) |
 | **T-08-SC** (×5) | Tampering | npm/pip/cargo installs | n/a | accept | **This phase installs zero packages.** `08-RESEARCH.md` § *Package Legitimacy Audit* is present and empty ("audited, empty", not "skipped"). `git diff` over `package.json` / `pnpm-lock.yaml` across the phase is empty. If a later plan proposes a dependency (e.g. `tree-kill`), the gate must be run at that point. **Re-checked 2026-08-27 across plans 08-06…08-10: still zero.** `pgrep` is a base-system utility on macOS and every supported Linux; no `package.json` / `pnpm-lock.yaml` change in any of the five gap plans | closed |
 
 *Status: open · closed · closed (accepted) — an accepted residual is recorded in the Accepted Risks
 Log below, never silently closed.*
+
+## T-08-51..T-08-88 Roll-up Evidence Ledger
+
+This compact ledger assigns current evidence and one accountable responsibility owner without
+changing the canonical main register's seven-column contract. Hardware/runtime coordination remains
+distinct from implementation and from the person accepting a residual.
+
+| Threat ID | Severity | Disposition | Owner | Evidence | Outcome |
+|-----------|----------|-------------|-------|----------|---------|
+| T-08-51 | high | mitigate | six2dez:implementation | `verdict-gate.sh` self-test and ARM A | closed |
+| T-08-52 | medium | mitigate | six2dez:implementation | canonical A1 marker and ARM B | closed |
+| T-08-53 | medium | mitigate | six2dez:implementation | ARM C summary-blob pins | closed |
+| T-08-54 | low | accept | six2dez:risk-acceptance | bounded gate-output contract | accepted; AR-10 |
+| T-08-55 | medium | mitigate | six2dez:implementation | `kill-plan.ts` and kill-plan suite | closed |
+| T-08-56 | high | mitigate | six2dez:evidence-coordination | blocking hardware record plus repaired A1 marker | closed as record control |
+| T-08-57 | high | mitigate | six2dez:implementation | classifier totality and red-input tests | closed |
+| T-08-58 | medium | mitigate | six2dez:implementation | marked source correction and structure tests | closed |
+| T-08-59 | low | accept | six2dez:risk-acceptance | closed verdict reason union | accepted; AR-11 |
+| T-08-60 | high | mitigate | six2dez:implementation | current ROADMAP SC-2 boundaries | closed |
+| T-08-61 | medium | mitigate | six2dez:implementation | preserved dated ROADMAP supersessions | closed |
+| T-08-62 | medium | mitigate | six2dez:implementation | unticked requirements and explicit ownerlessness | closed |
+| T-08-63 | high | mitigate | six2dez:implementation | current WINDOWS table/JSON parse | closed |
+| T-08-64 | high | mitigate | six2dez:implementation | main-register parser and live join | closed |
+| T-08-65 | medium | mitigate | six2dez:implementation | entry-11 supersession history | closed |
+| T-08-66 | medium | mitigate | six2dez:implementation | GSD `state.load` parse | closed |
+| T-08-67 | medium | mitigate | six2dez:implementation | current `verify-a1-patch.sh` pass | closed |
+| T-08-68 | medium | accept | six2dez:risk-acceptance | bounded local probe-build decision | accepted; AR-12 |
+| T-08-69 | medium | mitigate | six2dez:evidence-coordination | redacted protected Spike evidence | closed |
+| T-08-70 | medium | mitigate | six2dez:evidence-coordination | survivor cleanup record and patch verifier | closed |
+| T-08-71 | medium | mitigate | six2dez:evidence-coordination | measured cells separated from interpretation | closed |
+| T-08-72 | high | mitigate | six2dez:implementation | unchanged verdict gate passes | closed |
+| T-08-73 | medium | accept | six2dez:risk-acceptance | one-off unsigned-build decision | accepted; AR-13 |
+| T-08-74 | medium | mitigate | six2dez:implementation | authoritative ownerless-item record | closed |
+| T-08-75 | high | mitigate | six2dez:implementation | scalar formatter and confidentiality unit case | closed |
+| T-08-76 | high | mitigate | six2dez:implementation | patch-only probe and current patch verifier | closed |
+| T-08-77 | high | mitigate | six2dez:implementation | restored HEAD build and clean main package tree | closed |
+| T-08-78 | high | mitigate | six2dez:evidence-coordination | repaired three-valued A1 recording plus ARM A/B | closed |
+| T-08-79 | high | mitigate | six2dez:implementation | verdict-gate shared parser red matrix | closed |
+| T-08-80 | high | mitigate | six2dez:implementation | eight-carrier/two-pointer ARM B census | closed |
+| T-08-81 | high | mitigate | six2dez:implementation | exact carrier array and non-empty discovery | closed |
+| T-08-82 | medium | mitigate | six2dez:implementation | value-free verdict-gate diagnostics | closed |
+| T-08-83 | high | mitigate | six2dez:implementation | ARM C Spike/summary immutability | closed |
+| T-08-84 | high | mitigate | six2dez:implementation | 88+SC citation-gate census and liveness sentinels | closed |
+| T-08-85 | high | mitigate | six2dez:implementation | audit SHA, two package digests, and Git delta | closed |
+| T-08-86 | high | mitigate | six2dez:implementation | current source/suites/gates evidence audit | closed |
+| T-08-87 | high | mitigate | six2dez:implementation | parsed totals, residual census, accepted-high note | closed |
+| T-08-88 | high | mitigate | six2dez:implementation | production fixture self-test; independent matrix in Task 3 | closed at tracer gate |
+
+## Register Corrections and Evidence Notes
 
 ### T-08-12 — the caller enumeration was wrong
 
@@ -540,6 +637,10 @@ to be re-derived, since both look like strict improvements until the second-orde
 | **AR-07** | T-08-50 | **The multi-session cancel window.** Plan 08-07's reap is **idle-gated**: `shouldReapSessionOrphans` opens only when `activeProcesses.size` and `mcpDirectCallDepth` are both exactly zero. So **while a second session is live, cancelling one leaves its token-bearing MCP child to the group path — the path UAT measured FALSE (A6)** — and the orphan survives, holding a valid `CAIDO_TOKEN`, until the last session closes and the idle reap fires. **The bound, stated so this is not read as indefinite:** the reap DOES fire at the last close, so the window is the multi-session period, not forever. This residual previously existed **only in plan 08-07's prose**, where no verifier or executor would find it; it is recorded here for that reason | **This is a SCOPE decision, not a constraint, and the distinction is load-bearing.** A session-precise reap needs a **per-chat argv marker**. Drift **CAN** author one for `claude-cli` and `copilot-cli` — it writes their `args` array itself, via `buildMcpServerSpec` → `toMcpConfigDocument` → the per-chat config at `index.ts:3960`/`:4009`. It **CANNOT** for `gemini-cli`/`codex-cli`, which share one `mcp add drift` registration with no per-chat argv to mark. Closing this therefore means shipping **two mechanisms, not one**, which is a plan of its own rather than a half-built arm here. **Do not record this as "argv cannot distinguish sessions" — that claim is false for two of the four providers, and one of them is the maintainer's active provider** | **A future phase**, alongside AR-06's registration work, since the `gemini`/`codex` half of the problem *is* the shared-registration problem | **six2dez** (recorded decision GD-02 scope boundary; threat T-08-50 disposition `accept`, plan 08-07) | 2026-08-27 |
 | **AR-08** | T-08-43 | **POSIX file modes are ignored on Windows.** Plan 08-09 put an explicit `0o600` on all five MCP temp-directory writes, unconditionally and with no platform guard (the standing T-04-30 house rule: LLRT's `set_mode` is a total no-op off unix and Node ignores `mode` on Windows, so a guard would double the branch count for zero behaviour change while risking a POSIX regression). **On Windows those modes therefore contribute nothing.** Mirrored here from the source, where plan 08-09 recorded it, so the register is the single place a reader can enumerate this phase's residuals | The Windows-appropriate equivalent is a per-user ACL, which Drift cannot set without Win32 API calls neither Caido's LLRT nor Node exposes without a native addon — the same QuickJS constraint that blocks AR-01's Job Object. **The accepted trade-off, stated:** `os.tmpdir()` on Windows resolves beneath the user's profile, a directory Windows already ACLs to that user, so the protection exists — it is provided by the OS rather than by Drift, and Drift cannot verify it | **ROADMAP Phase 10** — alongside the Windows real-machine confirmation, which is the only place the effective ACL could be observed | **six2dez** (accepted at plan 08-09 and recorded at the source; mirrored here 2026-08-27) | 2026-08-27 |
 | **AR-09** | T-08-23 (amended) | **A pid reused inside the freshness budget is still signalled.** The orphan reap enumerates with `pgrep` and signals with a separate `kill` spawn, so there is an interval in which the OS can reassign a matched pid to an unrelated process — which then receives `SIGKILL` with no recourse. Review WR-03 bounded that interval on the wall clock (`scan-stale`, and see § *T-08-23 / T-08-24 — the window between enumeration and signal*), which removes the **unbounded** case: a scan settled after a starved event loop no longer kills on stale numbers. **Inside** the bound — the caller's scan timeout — the hazard is unchanged and is accepted | **Both available closures cost more than they buy, and both were priced rather than dismissed.** `pkill -f` closes the window but signals at kill time rather than from the frozen list, so it would kill the MCP child of a turn started during the gap (**T-08-27**, a likelier harm than the reuse it removes). A `ps` identity re-check adds a second child-process `close` delivery per orphan on a runtime whose delivery of the *first* one is an unrun-verify residual, raising the chance the orphan is never signalled — **LIF-02**, the reported bug itself. Closing this properly needs a primitive that matches and signals atomically **against a frozen candidate list**, which neither base utility provides | **A future phase**, alongside AR-04's Windows enumerator question — both are "what primitive enumerates and signals" problems | **six2dez** (accepted at the WR-03 fix, 2026-08-27) | 2026-08-27 |
+| **AR-10** | T-08-54 | **The verdict gate can disclose repository-relative paths and match counts in a failure diagnostic.** It never prints a matched line, token, pid, environment value, or absolute path, but a pasted failure still reveals the relative document name | Removing paths would make a cross-carrier failure unactionable and would weaken the fail-closed correction control; the bounded names are already part of the repository | Re-review if gate output ever includes source content or absolute paths | **six2dez** (risk acceptance for T-08-54) | 2026-08-31 |
+| **AR-11** | T-08-59 | **`formatSpikeVerdict` exposes a state word and one closed-union reason token.** Those scalars reveal whether the local diagnostic classified a process as alive, dead, or inconclusive, but carry no pid, path, token, or free prose | The two scalars are the evidence product the diagnostic exists to record; removing them would make the result unusable, while widening them would violate the confidentiality test | Re-review if the reason type stops being a closed union | **six2dez** (risk acceptance for T-08-59) | 2026-08-31 |
+| **AR-12** | T-08-68 | **A locally installed patched probe build ran with Drift/Caido privileges and spawned diagnostic child processes.** The run was maintainer-driven, based on committed inputs, restored to HEAD, never signed, and never released | Obtaining the repaired LLRT reading required executing the probe in the actual Caido runtime; CI cannot substitute for that runtime boundary | No continuing owner: the probe remains patch-only and `verify-a1-patch.sh` must keep it out of HEAD | **six2dez** (risk acceptance for T-08-68) | 2026-08-31 |
+| **AR-13** | T-08-73 | **The one-off diagnostic build bypassed the signed release pipeline when installed locally.** Its provenance was bounded by committed base `68199fa`, committed patch, current verifier, and explicit teardown; it was not distributed | The Caido runtime measurement cannot be obtained from a signed store build without shipping diagnostic code to users, a larger and less reversible exposure | Re-open only if an unsigned diagnostic artifact is published or left installed | **six2dez** (risk acceptance for T-08-73) | 2026-08-31 |
 
 ---
 
@@ -589,6 +690,7 @@ restated — a restatement is where a caveat gets softened. Its five items, **by
 | 2026-08-24 (register roll-up at `1f3b486`) | 21 | 20 | 1 (T-08-01, high — pending the T-08-14 real-hardware confirmation) | plan 08-05 T-08-13 |
 | 2026-08-24 (T-08-14 close at `d2d502b`) | 21 | **21** | **0** — T-08-01 closed by maintainer **attestation** (counts not captured; confounder unexcluded — see § *T-08-01 — closed by attestation*) | plan 08-05 T-08-14 |
 | 2026-08-27 (gap-closure roll-up) | **51** (+30 from plans 08-06…08-10) | **51** | **0 open**, and **1 accepted `high`** — T-08-47 / AR-06, decider **six2dez** per recorded decision **GD-02**. Called out rather than inferred from the zero, because `block_on: high`. T-08-03 **re-rated** medium → high on a measured empty environment and mitigated by 08-08's derived system root | plan 08-10 |
+| 2026-08-31 (current-head re-audit at `318fe24a`) | **89** (88 numeric + T-08-SC) | **89** | **0 open; 13 accepted residuals**, including accepted `high` T-08-47 / AR-06 with decider **six2dez**. Current package tree `1250a4c4`, SHA-256 census `5116876f…`, 31 package commits since `d2d502b`, zero after the audit boundary | plan 08-19 |
 
 **Note on this phase's dominant defect class**, recorded because it recurred across three plans: a
 **control that is green for the wrong reason**. The LLRT trap itself (green on every CI vehicle,
@@ -617,9 +719,10 @@ if the mechanism were absent* — never by the gate itself.
       largely closed by plan 08-07's start-up reap; what remains is AR-04 (POSIX-only) and AR-07
       (idle-gated, not continuous)
 - [x] **Every accepted residual is enumerable from this one file, with a decider and not merely an
-      owner.** AR-01…AR-08, each carrying all seven columns including a non-empty `Accepted By`
-      distinct from `Owner next`. AR-08 mirrors the Windows-ACL trade-off plan 08-09 recorded at
-      the source, so a reader does not have to read `index.ts` to enumerate the phase's residuals
+      owner.** AR-01…AR-13, each carrying all seven columns including a non-empty `Accepted By`
+      distinct from `Owner next`. AR-10/AR-11 make the two bounded diagnostic-output accepts
+      explicit; AR-12/AR-13 preserve the two local probe-build accepts. T-08-47 / AR-06 remains the
+      separately visible accepted-high exception
 - [x] **The three questions the verifier and the UAT left open are DECIDED in writing, not
       implied:** SC-4's completion order (AR-05 — the await option rejected, with the runtime
       reason), the win32 orphan class (AR-04 — three enumerator candidates rejected with reasons),
@@ -631,14 +734,18 @@ if the mechanism were absent* — never by the gate itself.
       measurement — no counts captured, no pre-fix control on the same machine, timeout path not
       exercised. Read § *T-08-01 — closed by attestation* before treating this zero as equivalent to
       Phase 7's
-- [~] A1 and A6 closed as mechanism claims — **STILL PARTIALLY REACHED, and less far than the
-      2026-08-27 line claimed. CORRECTED 2026-08-28.** **A1 is RETRACTED and unmeasured** — its
-      2026-08-27 reading was emitted unconditionally by a probe whose liveness primitive the same
-      run measured absent. **A6 is measured and FALSIFIED** for one provider (codex) — a real
-      reading by a different instrument, not withdrawn — with Claude Code still unmeasured and the
-      Control still not taken. Ledger entry **11** is rewritten to this state rather than closed,
-      and it narrows nothing on the A1 side. `08-SPIKE.md` holds the A6 reading and the remaining
-      procedure; the A1 re-run is owned by plan 08-17.
+- [~] A1 and A6 closed as mechanism claims — **PARTIALLY REACHED, CORRECTED 2026-08-31.** The
+      repaired three-valued A1 probe produced the favourable outcome; the invalid 2026-08-27
+      reading remains explicitly RETRACTED and is not rehabilitated. The pre-fix Control also
+      produced zero survivors, so the favourable A1 outcome does **not** establish that Drift's
+      group kill, rather than provider cleanup, caused it. A6 remains provider-split (Claude true,
+      codex false), and native-Windows plus real-turn causality limits remain visible. The exact
+      current-plus-retraction record is bounded by `DRIFT:A1-CORRECTION`; the gate treats it as one
+      inseparable record.
+
+      > *Superseded 2026-08-28 sign-off (preserved, not deleted):* "A1 is RETRACTED and unmeasured;
+      > A6 is measured and falsified for one provider (codex), with Claude Code unmeasured and the
+      > Control not taken."
 
       > *Superseded 2026-08-27 line:* "- [~] A1 and A6 closed as mechanism claims — **PARTIALLY
       > REACHED, 2026-08-27.** A1 is **closed favourably by measurement**; A6 is **measured and
