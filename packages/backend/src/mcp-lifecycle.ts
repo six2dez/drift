@@ -59,6 +59,16 @@ export function getMcpRuntimeEpoch(state: McpLifecycleState): number {
   return state.currentEpoch;
 }
 
+export type McpStartDisposition = "start" | "reuse" | "replace";
+
+export function getMcpStartDisposition(input: {
+  tempDir: string | undefined;
+  runtimeHealthy: boolean;
+}): McpStartDisposition {
+  if (input.tempDir === undefined) return "start";
+  return input.runtimeHealthy ? "reuse" : "replace";
+}
+
 export function isMcpRuntimeEpochCurrent(
   state: McpLifecycleState,
   epoch: number,

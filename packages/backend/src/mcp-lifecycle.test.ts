@@ -8,6 +8,7 @@ import {
   countMcpDirectCalls,
   createMcpLifecycleState,
   getMcpRuntimeEpoch,
+  getMcpStartDisposition,
   isMcpOrphanReapGateCurrent,
   isMcpRuntimeEpochCurrent,
   releaseMcpDirectCall,
@@ -160,6 +161,51 @@ describe("MCP lifecycle operation queue", () => {
 
     await expect(failed).rejects.toThrow("expected failure");
     await expect(afterFailure).resolves.toBe("ran");
+  });
+});
+
+describe("MCP start disposition", () => {
+  it("makes two sequential healthy Start calls reuse one epoch and staging root", () => {
+    const state = createMcpLifecycleState();
+    const stagingRoots = new Set<string>();
+    let tempDir: string | undefined;
+    let starts = 0;
+
+    const start = (): void => {
+      const disposition = getMcpStartDisposition({
+        tempDir,
+        runtimeHealthy: tempDir !== undefined,
+      });
+      if (disposition === "reuse") return;
+      if (disposition === "replace" && tempDir !== undefined) {
+        stagingRoots.delete(tempDir);
+        tempDir = undefined;
+      }
+
+      starts += 1;
+      beginMcpRuntimeGeneration(state);
+      tempDir = `/tmp/drift-mcp-${String(starts)}`;
+      stagingRoots.add(tempDir);
+    };
+
+    start();
+    start();
+
+    expect(getMcpRuntimeEpoch(state)).toBe(1);
+    expect(tempDir).toBe("/tmp/drift-mcp-1");
+    expect([...stagingRoots]).toEqual(["/tmp/drift-mcp-1"]);
+  });
+
+  it("replaces an active unhealthy runtime instead of abandoning it", () => {
+    expect(
+      getMcpStartDisposition({
+        tempDir: "/tmp/drift-mcp-unhealthy",
+        runtimeHealthy: false,
+      }),
+    ).toBe("replace");
+    expect(
+      getMcpStartDisposition({ tempDir: undefined, runtimeHealthy: false }),
+    ).toBe("start");
   });
 });
 

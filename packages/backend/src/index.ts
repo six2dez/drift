@@ -67,6 +67,7 @@ import {
   countMcpDirectCalls,
   createMcpLifecycleState,
   getMcpRuntimeEpoch,
+  getMcpStartDisposition,
   isMcpOrphanReapGateCurrent,
   isMcpRuntimeEpochCurrent,
   releaseMcpDirectCall,
@@ -4580,6 +4581,23 @@ async function startMcpServer(
 async function startMcpServerOperation(
   sdk: BackendSDK,
 ): Promise<Result<McpServerInfo>> {
+  // This check is INSIDE the lifecycle FIFO: two concurrent Start RPCs become
+  // two sequential operations, and the second observes the generation the
+  // first committed. A healthy runtime is returned as-is. An inconsistent or
+  // unhealthy active directory is fully retired before any replacement epoch
+  // begins, so no staging root can be abandoned by overwriting mcpTempDir.
+  const startDisposition = getMcpStartDisposition({
+    tempDir: mcpTempDir,
+    runtimeHealthy:
+      mcpAuthState === "valid" && getEffectiveCaidoToken() !== "",
+  });
+  if (startDisposition === "reuse") {
+    return ok(await buildCurrentMcpStatus());
+  }
+  if (startDisposition === "replace") {
+    await cleanupMcpRuntime(sdk);
+  }
+
   // Check prerequisites
   const caidoToken = getEffectiveCaidoToken();
   if (caidoToken === "") {

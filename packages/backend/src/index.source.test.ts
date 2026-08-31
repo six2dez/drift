@@ -216,6 +216,41 @@ describe("index.ts contains every spawn-plan refusal at its orchestration bounda
   });
 });
 
+describe("index.ts makes Start idempotent inside the lifecycle FIFO (WR-01)", () => {
+  const start = functionBody(code, "startMcpServerOperation");
+
+  it("decides reuse or replacement before prerequisites, epoch advance and staging", () => {
+    expect(start).not.toBe("");
+    const calls = callArgumentTexts(start, "getMcpStartDisposition");
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toContain("tempDir: mcpTempDir");
+    expect(calls[0]).toContain('mcpAuthState === "valid"');
+    expect(calls[0]).toContain('getEffectiveCaidoToken() !== ""');
+    const disposition = start.indexOf("getMcpStartDisposition(");
+    const prerequisites = start.indexOf(
+      "const caidoToken = getEffectiveCaidoToken();",
+    );
+    const nextEpoch = start.indexOf("beginMcpRuntimeGeneration(");
+    const sweep = start.indexOf("sweepOrphanedMcpTempDirs(");
+    expect(disposition).not.toBe(-1);
+    expect(disposition).toBeLessThan(prerequisites);
+    expect(disposition).toBeLessThan(nextEpoch);
+    expect(disposition).toBeLessThan(sweep);
+  });
+
+  it("returns the current status on reuse and fully cleans before replacement", () => {
+    const reuse = start.indexOf('startDisposition === "reuse"');
+    const replace = start.indexOf('startDisposition === "replace"');
+    const cleanup = start.indexOf("cleanupMcpRuntime(", replace);
+    const nextEpoch = start.indexOf("beginMcpRuntimeGeneration(");
+    expect(reuse).not.toBe(-1);
+    expect(start.slice(reuse, replace)).toContain("buildCurrentMcpStatus(");
+    expect(replace).toBeGreaterThan(reuse);
+    expect(cleanup).toBeGreaterThan(replace);
+    expect(cleanup).toBeLessThan(nextEpoch);
+  });
+});
+
 // WR-01 / WR-02. The registration's `spawnEnvToken` must be the environment the
 // CLI child is given, composed with the production builder — not `spec.env`,
 // which belongs to the MCP server's own node process. The comment that claimed
