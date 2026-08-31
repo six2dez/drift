@@ -8,12 +8,13 @@ threats_open: 0
 # ATTESTATION, not a recorded measurement — see § "T-08-01 — closed by attestation" before
 # treating this zero as equivalent to Phase 7's.
 #
-# RE-AUDITED 2026-08-31 after plans 08-11…08-19. The main register now has 88 numeric rows plus
-# T-08-SC (89 rows total), including all 38 T-08-51…T-08-88 allocations. Closure comes from the
-# current source/tests and the executable verdict, patch, and citation gates; PLAN/SUMMARY prose is
-# used only to locate the allocated mechanism. Thirteen accepted residuals remain explicit.
+# RE-AUDITED 2026-08-31 after plans 08-20…08-22 at their final package-changing commit. The main
+# register now has 94 numeric rows plus T-08-SC (95 rows total), including the complete
+# T-08-51…T-08-94 roll-up. Closure comes from current source/tests and executable gates;
+# PLAN/SUMMARY prose is used only to locate an allocated mechanism. Thirteen accepted residuals
+# remain explicit, and LIF-01/LIF-02 remain open requirements for their separate runtime evidence.
 #
-# The fourteenth is T-08-47, an ACCEPTED `high` under `block_on: high`. It does not count toward
+# Among those thirteen, T-08-47 is an ACCEPTED `high` under `block_on: high`. It does not count toward
 # threats_open — an accepted residual is closed-with-a-decision, not open — but it is called out
 # HERE rather than left to be inferred from a zero, because a `high` accepted silently past the
 # phase's own blocking gate is exactly the failure this comment exists to prevent. It carries a
@@ -22,12 +23,12 @@ threats_open_note: "0 open; 1 accepted high (T-08-47 / AR-06, decider six2dez pe
 asvs_level: 1
 block_on: high
 created: 2026-08-24
-audited_at_head: 318fe24a78061db283272d88357185b0fb1e384a
-package_tree_at_audit: 1250a4c430874212eafad531cc610bbaa27341b5
-package_tree_sha256_at_audit: 5116876fd8c85fb0398517c62e0a2b9b8396b9bf134d21f55af5c52f3eea3958
-former_baseline_package_commits: 31
+audited_at_head: 12a7136d358786b15d377c43ed3ba234cc0004b8
+package_tree_at_audit: 67ece25ac108534be7dc8cd11059b99ce04d2554
+package_tree_sha256_at_audit: df578b959f6019e62259ab2dbbfe99c956fc7e489bf835195e26a40438b5343e
+former_baseline_package_commits: 60
 package_commits_after_audit: 0
-register_numeric_rows: 88
+register_numeric_rows: 94
 register_sentinel_rows: 1
 accepted_residuals: 13
 register_authored_at_plan_time: true
@@ -98,15 +99,17 @@ Rolled up from the five plan blocks.
 
 ## Threat Register
 
-**89 distinct rows: 88 numeric rows plus T-08-SC.** (`(NN)` names the plan(s) the row was authored
+**95 distinct rows: 94 numeric rows plus T-08-SC.** (`(NN)` names the plan(s) the row was authored
 in.) Severity and disposition remain as authored at plan time, except where a row records an
 explicit re-rating with its reason.
 
-**Re-audited 2026-08-31 at `318fe24a78061db283272d88357185b0fb1e384a`.** The 51-row
-2026-08-27 register is preserved and extended with the complete 38-row allocation from plans
-08-11…08-19. The package tree at the audit boundary is Git tree `1250a4c430874212eafad531cc610bbaa27341b5`
-(SHA-256 census `5116876fd8c85fb0398517c62e0a2b9b8396b9bf134d21f55af5c52f3eea3958`),
-31 package-changing commits after former baseline `d2d502b`, and zero after the new audit boundary.
+**Re-audited 2026-08-31 at `12a7136d358786b15d377c43ed3ba234cc0004b8`.** The prior
+through-88 register is preserved and extended with T-08-89…T-08-94 for WR-01/02/03. The package
+tree at the audit boundary is Git tree `67ece25ac108534be7dc8cd11059b99ce04d2554` (SHA-256 census
+`df578b959f6019e62259ab2dbbfe99c956fc7e489bf835195e26a40438b5343e`), 60 package-changing
+commits after former baseline `d2d502b`, 29 of them after the prior `318fe24a` audit, and zero after
+the final package boundary. The standing gate recomputes the latest package-changing commit, tree,
+digest, and post-audit commit count rather than trusting these fields.
 Identifiers, categories, severities, and dispositions are transcribed from the allocating plan;
 current source/tests/gates determine closure. **T-08-03 remains RE-RATED** in place, from medium to
 high, with its original reason intact.
@@ -128,7 +131,7 @@ high, with its original reason intact.
 | **T-08-13** (03) | DoS | an awaited kill inside teardown | medium | mitigate | `spawnAndWait` has no timer, so a stuck killer would hold the promise forever and cleanup would never complete. `killTree` returns `void`; `grep -c 'await killTree'` = **0** | closed |
 | **T-08-14** (03) | Repudiation | a silently-deleted `LIF-01` marker — either of the two Phase 7 left | low | mitigate | Both seams resolved, neither deleted. Measured: `LIF-01 SEAM` = **0** (baseline 2), `NOT acted on` = **0** (baseline 2), `LIF-01` = **8** (floor 5), `ParentProcessId` = **1**, `AR-01` = **1** (both baseline 0). A deletion without a resolution fails the floor; a resolution without the mechanism named fails the two literals | closed |
 | **T-08-15** (04) | Repudiation (false-green evidence) | the `windows-latest` leg | **high** | mitigate | The `--reporter=json` gate step with three independent arms (`pending > 0`, `total === 0`, `passed !== total`), an every-platform gate test that the step still exists and points at a real, still-gated file, and the D-P2 distinct anchors. Measured bidirectionally by deleting each step in turn: with Phase 8's step deleted, the three-arm case stayed **GREEN** on Phase 7's step alone — which is the measurement proving the collision was real and the distinct anchors are what close it | closed (control shipped and proven falsifiable; **never fired on a runner** — see § *Evidence gaps*) |
-| **T-08-16** (04) | DoS | branching on an undocumented vendor exit code | medium | mitigate | D-P4b: record, never assert, never branch. The only assertion is `typeof code === "number"`, made genuinely falsifiable by typing `RunResult.code` as `number \| null`. `grep -cE 'expect\([^)]*code[^)]*\)\.toBe\([0-9]'` = **0** — this half is proven statically on every platform, which is what assumption A2's low rating actually depends on | closed |
+| **T-08-16** (04/23) | DoS | branching on an undocumented vendor exit code or signalling a recycled pid to measure it | medium | mitigate | D-P4b remains record-never-branch. The safe current suite has exactly two native cases: real-tree teardown and absolute `taskkill.exe` resolution; CI pins total 2 and the behavioral full name. Commit `e1ac837` removed the former already-exited/dead-pid exit-code and stderr probe because its numeric pid could be recycled to an unrelated process. No assertion or branch consumes the behavioral call's result. The missing exit-code/stderr datum is explicitly deferred until an owned-live-process design can measure it safely | closed (safe two-case contract; native execution still unrun) |
 | **T-08-17** (04) | DoS | leaked fixture processes on a shared runner | low | mitigate | Every fixture idles for a bounded 20 s and self-exits; `tempDirs` removed in `afterEach`; stray pids force-killed there too; every case carries the shared 15 s `SPAWN_TIMEOUT_MS` | closed |
 | **T-08-18** (05) | Repudiation | a documentation row added only to `CLAUDE.md` | low | mitigate | T-08-12 edited **both** `CLAUDE.md` and its generation source `.planning/codebase/CONVENTIONS.md`; `grep -c 'kill-plan.ts'` = 1 in each is an acceptance criterion. A row added only to the rendered copy is silently reverted on the next regeneration | closed |
 | **T-08-19** (05) | Repudiation | a `{pending}` validation row silently overwritten with a wrong seed | medium | mitigate | Four seed corrections recorded as **corrections** in a named section (`08-VALIDATION.md` § *Corrections to the seed*), per the `07-VALIDATION.md` convention. `nyquist_compliant` is set from the actual row statuses, so a `validated` document with unmet rows is distinguishable from a compliant one | closed |
@@ -196,17 +199,23 @@ high, with its original reason intact.
 | **T-08-81** (18) | Tampering | Carrier/pointer census | **high** | mitigate | The exact carrier array, ROADMAP/REQUIREMENTS pointers, root discovery, and non-empty census remain executable in the standing gate | closed (ARM B) |
 | **T-08-82** (18) | Information disclosure | gate diagnostics and execution records | medium | mitigate | Verdict-gate diagnostics remain labels, counts, IDs, and relative paths only; no matched source line or environment value is emitted | closed (value-free gate output) |
 | **T-08-83** (18) | Tampering | ARM C historical-summary integrity | **high** | mitigate | ARM C pins the canonical Spike digest and every committed Phase 08 summary blob while rejecting committed, working-tree, and unexpected-discovery mutations | closed (ARM C) |
-| **T-08-84** (19) | Tampering | live citation and allocation census | **high** | mitigate | `threat-register-gate.sh` requires the contiguous T-08-01…T-08-88 range plus T-08-SC, dynamically discovers both live families, and pins package/support liveness sentinels | closed (citation gate + self-test) |
-| **T-08-85** (19) | Repudiation | `audited_at_head` and package-history comparison | **high** | mitigate | Audit baseline `318fe24a78061db283272d88357185b0fb1e384a`, package tree/digest, 31-commit former-baseline delta, and zero package-changing commits after the audit boundary are recorded and rechecked | closed (Git audit measurements) |
-| **T-08-86** (19) | Repudiation | threat disposition and mitigation closure | **high** | mitigate | Every rolled row points to current source, a current record, or an executable suite/gate; plans and summaries supply allocation only and cannot satisfy the live citation join | closed (current evidence audit) |
-| **T-08-87** (19) | Tampering | `status`, `threats_open`, totals, and accepted residuals | **high** | mitigate | Parsed aggregates require 88 numeric rows plus T-08-SC, 13 explicit residuals, zero open high mitigations, and a separately visible accepted-high T-08-47 exception | closed (mechanical totals + residual census) |
-| **T-08-88** (19) | Tampering | `threat-register-gate.sh` discovery/parser/output | **high** | mitigate | One implementation serves live and fixture roots with a repository-wide pathname preflight, NUL-delimited discovery, newline refusal before citation parsing, runtime-fragment red tokens, path-safe diagnostics, and canary checks; the independent script executes the full red matrix | closed (production self-test + independent 26-case matrix) |
-| **T-08-SC** (×5) | Tampering | npm/pip/cargo installs | n/a | accept | **This phase installs zero packages.** `08-RESEARCH.md` § *Package Legitimacy Audit* is present and empty ("audited, empty", not "skipped"). `git diff` over `package.json` / `pnpm-lock.yaml` across the phase is empty. If a later plan proposes a dependency (e.g. `tree-kill`), the gate must be run at that point. **Re-checked 2026-08-27 across plans 08-06…08-10: still zero.** `pgrep` is a base-system utility on macOS and every supported Linux; no `package.json` / `pnpm-lock.yaml` change in any of the five gap plans | closed |
+| **T-08-84** (19/23) | Tampering | live citation and allocation census | **high** | mitigate | `threat-register-gate.sh` requires contiguous T-08-01…T-08-94 plus T-08-SC, dynamically discovers both live families, and pins the original sentinels plus exact source citations for T-08-89…T-08-94 | closed (citation gate + self-test) |
+| **T-08-85** (19/23) | Repudiation | `audited_at_head` and package-history comparison | **high** | mitigate | Final audit baseline `12a7136d358786b15d377c43ed3ba234cc0004b8`, package tree `67ece25a…`, SHA-256 census `df578b95…`, 60 package commits since `d2d502b`, all 29 after the prior audit inspected, and zero package-changing commits after this boundary. The gate recomputes the latest package commit, tree, digest, and delta; a fixture commit after the audit is red | closed (standing Git audit gate) |
+| **T-08-86** (19/23) | Repudiation | threat disposition and mitigation closure | **high** | mitigate | Every rolled row points to current source, a current record, or an executable suite/gate. The 44-row T-08-51…T-08-94 ledger must match register severity/disposition, carry an accountable owner, and map T-08-89…T-08-94 to their helper plus executable test; plans and summaries cannot satisfy the live join | closed (current evidence audit + ledger gate) |
+| **T-08-87** (19/23) | Tampering | `status`, `threats_open`, totals, and accepted residuals | **high** | mitigate | Parsed aggregates require 94 numeric rows plus T-08-SC, 13 numeric accepts, exactly AR-01…AR-13, and zero open high mitigations, with accepted-high T-08-47 separately visible. An empty mitigation or non-closed high mitigation makes `secured` and `threats_open: 0` red | closed (derived totals + false-closure fixture) |
+| **T-08-88** (19/23) | Tampering | `threat-register-gate.sh` discovery/parser/output | **high** | mitigate | One implementation serves live and fixture roots with pathname preflight, NUL-delimited discovery, newline refusal, bounded diagnostics, through-94 citation/ledger checks, and Git audit integrity. Both production self-test and the independent 32-case matrix exercise missing new citations/mappings, empty high mitigation, stale digest, false aggregate closure, and a package commit after audit | closed (production self-test + independent matrix) |
+| **T-08-89** (20) | Information Disclosure | retired provider-start root after teardown | **high** | mitigate | `runMcpProviderTeardown` tombstones every exact `ProviderStartLease` before its awaited operation; `releaseProviderStartLease` consumes that exact identity once; `cleanupRetiredProviderStartRoot` recursively removes the captured root even when the installed pointer is textually equal. `mcp-lifecycle.test.ts` holds teardown, recreates the real directory, and proves it disappears | closed (WR-01 helper + executable interleaving) |
+| **T-08-90** (20) | Denial of Service / Tampering | wrong-generation provider-start cleanup | **high** | mitigate | Retirement and cleanup authorization use exact object identity and epoch, never path equality. Equal-looking, double-consume, nested teardown, and current-generation negative controls execute in `mcp-lifecycle.test.ts`; `index.source.test.ts` forbids the former `currentTempDir === leaseTempDir` guard and pins one release/cleanup path | closed (WR-01 identity controls) |
+| **T-08-91** (21) | Information Disclosure | partial or staging per-turn MCP config | **high** | mitigate | `writeOwnedTempFile` owns final and unique same-directory staging paths synchronously before the first I/O, writes at `0o600`, promotes atomically, and retains any path whose cleanup is unconfirmed. Real-file tests cover partial write and failed rename/removal; source structure pins both providers to the one helper | closed (WR-02 helper + executable failures) |
+| **T-08-92** (21) | Repudiation / Information Disclosure | config cleanup owner set | **high** | mitigate | `cleanupOwnedPaths` snapshots without eager clear and deletes ownership only after `rm` resolves. EACCES and overlapping-cleanup tests prove ownership survives a failed unlink and a later retry removes it; finalize and outer finally share the same set | closed (WR-02 ownership retry controls) |
+| **T-08-93** (22) | Tampering / Denial of Service | MCP runtime artifact reuse | **high** | mitigate | `inspectRequiredMcpRuntimeArtifacts` requires a directory root plus regular, openable script before reuse; missing, directory-at-file-path, non-regular, stat/open EACCES, and real unreadable cases fail closed. `index.source.test.ts` pins inspection before disposition/reuse and bans the old `fileExists` shortcut | closed (WR-03 helper + executable artifact matrix) |
+| **T-08-94** (22) | Tampering / Information Disclosure | MCP context reuse | **high** | mitigate | Context must be a readable regular file whose bytes parse as a non-null, non-array JSON object. Malformed JSON, null, array, scalar, read failure, and non-regular inputs force replacement without logging bytes; production wiring passes only `readFile` into the import-free helper | closed (WR-03 parse matrix + source wiring) |
+| **T-08-SC** (×5) | Tampering | npm/pip/cargo installs | n/a | accept | **This phase installs zero packages.** `08-RESEARCH.md` § *Package Legitimacy Audit* is present and empty ("audited, empty", not "skipped"). `git diff` over dependency manifests remains empty through final package commit `12a7136`; the 29-commit re-audit changed 19 backend source/test files and no dependency manifest. If a later plan proposes a dependency, the gate must be run then. `pgrep` remains a base-system utility on macOS and supported Linux | closed |
 
 *Status: open · closed · closed (accepted) — an accepted residual is recorded in the Accepted Risks
 Log below, never silently closed.*
 
-## T-08-51..T-08-88 Roll-up Evidence Ledger
+## T-08-51..T-08-94 Roll-up Evidence Ledger
 
 This compact ledger assigns current evidence and one accountable responsibility owner without
 changing the canonical main register's seven-column contract. Hardware/runtime coordination remains
@@ -247,11 +256,17 @@ distinct from implementation and from the person accepting a residual.
 | T-08-81 | high | mitigate | six2dez:implementation | exact carrier array and non-empty discovery | closed |
 | T-08-82 | medium | mitigate | six2dez:implementation | value-free verdict-gate diagnostics | closed |
 | T-08-83 | high | mitigate | six2dez:implementation | ARM C Spike/summary immutability | closed |
-| T-08-84 | high | mitigate | six2dez:implementation | 88+SC citation-gate census and liveness sentinels | closed |
-| T-08-85 | high | mitigate | six2dez:implementation | audit SHA, two package digests, and Git delta | closed |
-| T-08-86 | high | mitigate | six2dez:implementation | current source/suites/gates evidence audit | closed |
-| T-08-87 | high | mitigate | six2dez:implementation | parsed totals, residual census, accepted-high note | closed |
-| T-08-88 | high | mitigate | six2dez:implementation | production self-test plus independent 26-case red/green matrix | closed |
+| T-08-84 | high | mitigate | six2dez:implementation | 94+SC citation census and original plus T-08-89…94 sentinels | closed |
+| T-08-85 | high | mitigate | six2dez:implementation | final package SHA/tree/digest/latest-commit/delta Git gate | closed |
+| T-08-86 | high | mitigate | six2dez:implementation | current source/suites/gates and 44-row ledger join | closed |
+| T-08-87 | high | mitigate | six2dez:implementation | derived high-open, numeric accept, AR-01…13, and status totals | closed |
+| T-08-88 | high | mitigate | six2dez:implementation | production self-test plus independent 32-case through-94 audit red matrix | closed |
+| T-08-89 | high | mitigate | six2dez:implementation | WR-01 `mcp-lifecycle.ts` and `mcp-lifecycle.test.ts` retired-root interleaving | closed |
+| T-08-90 | high | mitigate | six2dez:implementation | WR-01 `mcp-lifecycle.ts` and `mcp-lifecycle.test.ts` exact-identity controls | closed |
+| T-08-91 | high | mitigate | six2dez:implementation | WR-02 `owned-temp-file.ts` and `owned-temp-file.test.ts` failure matrix | closed |
+| T-08-92 | high | mitigate | six2dez:implementation | WR-02 `owned-temp-file.ts` and `owned-temp-file.test.ts` unlink retry | closed |
+| T-08-93 | high | mitigate | six2dez:implementation | WR-03 `mcp-runtime-artifacts.ts` and `mcp-runtime-artifacts.test.ts` type/readability matrix | closed |
+| T-08-94 | high | mitigate | six2dez:implementation | WR-03 `mcp-runtime-artifacts.ts` and `mcp-runtime-artifacts.test.ts` context parse matrix | closed |
 
 ## Register Corrections and Evidence Notes
 
@@ -666,20 +681,45 @@ restated — a restatement is where a caveat gets softened. Its five items, **by
 
 ### Evidence gaps a security reader must see alongside the residuals
 
-- **The Windows suite has never executed.** Plan 08-04 built the vehicle and took no reading; nothing
-  was pushed. The reserved dead-pid exit-code block in `kill-tree.win32.test.ts` is deliberately
-  empty, and the `windows-latest` run URL, exit code and stderr line are all unmeasured. Ledger entry
-  **12** (`unrun-verify`). This is why T-08-15 reads *closed (control shipped, never fired)* rather
-  than simply closed: a false-green gate that has never run has not yet demonstrated it is not itself
-  false-green.
+- **The Windows suite has never executed.** Its current safe contract is exactly two native cases,
+  both unexecuted: real process-tree termination and absolute `taskkill.exe` resolution. CI pins
+  `expectedTotal = 2` plus the behavioral full name. Commit `e1ac837` removed the former
+  already-exited/dead-pid exit-code and stderr measurement because that pid could be recycled to an
+  unrelated process; **no reserved block exists**. The datum is deferred and accepted until a safe
+  owned-live-process measurement is designed. Ledger entry **12** remains `unrun-verify`. This is why
+  T-08-15 reads *closed (control shipped, never fired)* rather than simply closed: a false-green gate
+  that has never run has not yet demonstrated it is not itself false-green.
 - **The FLAGGED LIF-01 edge-probe assumption** (`08-05-PLAN.md` § *Flagged assumptions*). The
   deterministic edge probe could **not classify** LIF-01 — *"On Windows, cancelling or timing out a
   turn terminates the whole process tree, leaving no orphaned token-bearing process"* — into any of
   its shape categories, and an unclassified row is never auto-resolved with a backstop. Concretely:
-  which pids `/T` reaches when the tree is three levels deep, what happens when the intermediate
-  `cmd.exe` has already exited, and what the vendor's exit codes mean are covered in this phase only
-  by what plan 08-04 could **write** for a runner — and no runner has run it. The residual is AR-01.
+  which pids `/T` reaches when the tree is three levels deep and what happens when the intermediate
+  `cmd.exe` has already exited are covered in this phase only by what plan 08-04 could **write** for a
+  runner — and no runner has run it. The vendor exit-code/stderr datum is now explicitly deferred,
+  not falsely covered: its former dead-pid vehicle was removed for recycled-pid safety. The residual
+  is AR-01.
   **A verifier must not read the three resolved LIF-02 edges as though they also covered LIF-01.**
+
+---
+
+## Final package-head delta audit (2026-08-31)
+
+The prior audit boundary was `318fe24a`; the final package boundary is `12a7136`. The Git census is
+29 package-changing commits, 19 changed backend source/test paths, 2,861 insertions, 515 deletions,
+and zero dependency-manifest changes. Every commit in that range was inspected in these three
+complete batches; no package commit is omitted between the endpoints:
+
+| Batch | Package commits inspected | Security conclusion |
+|-------|---------------------------|---------------------|
+| Review corrections before the lifecycle serialization work | `8ff2bef`, `e905f32`, `19bd66d`, `0c20117`, `e1ac837` | Tightened existing executable-resolution, orphan-classification, truthful-diagnostic, and safe Windows evidence controls. T-08-16 is corrected above; no new accepted risk was introduced. |
+| Runtime-generation, start, spawn, config, and reuse hardening before Plans 08-20…08-22 | `e5e7dd6`, `b83ba62`, `50f7967`, `4e170a7`, `8b6b00a`, `a77a42c`, `917a3f8`, `72dad7c`, `8f09a58`, `51155ac`, `b765e3b`, `7f73829` | All changes are fail-closed or cleanup-tightening. Their remaining verifier defects become WR-01/02/03, not hidden closure claims. |
+| Final WR-01/02/03 TDD fixes | `0a8c052`, `2b84b69`, `3a92f31`, `1b0746d`; `8391792`, `4349fe4`, `46da66a`, `6e46ebe`; `9753b1c`, `de4bc3c`, `2aa931f`, `12a7136` | Allocated completely as T-08-89…T-08-94. Current helper, real-filesystem/interleaving tests, and production source-structure wiring are green; the six high mitigations are closed without upgrading LIF-01/LIF-02 runtime evidence. |
+
+The final targeted audit run executed 119 tests across `mcp-lifecycle`, `owned-temp-file`,
+`mcp-runtime-artifacts`, and `index.source`; all passed. The standing gate separately proves that
+`audited_at_head` is the latest package-changing commit and that tree, SHA-256 census, and post-audit
+package-commit count agree. Planning-only commits after it do not invalidate the package boundary;
+any package commit does.
 
 ---
 
@@ -691,6 +731,7 @@ restated — a restatement is where a caveat gets softened. Its five items, **by
 | 2026-08-24 (T-08-14 close at `d2d502b`) | 21 | **21** | **0** — T-08-01 closed by maintainer **attestation** (counts not captured; confounder unexcluded — see § *T-08-01 — closed by attestation*) | plan 08-05 T-08-14 |
 | 2026-08-27 (gap-closure roll-up) | **51** (+30 from plans 08-06…08-10) | **51** | **0 open**, and **1 accepted `high`** — T-08-47 / AR-06, decider **six2dez** per recorded decision **GD-02**. Called out rather than inferred from the zero, because `block_on: high`. T-08-03 **re-rated** medium → high on a measured empty environment and mitigated by 08-08's derived system root | plan 08-10 |
 | 2026-08-31 (current-head re-audit at `318fe24a`) | **89** (88 numeric + T-08-SC) | **89** | **0 open; 13 accepted residuals**, including accepted `high` T-08-47 / AR-06 with decider **six2dez**. Current package tree `1250a4c4`, SHA-256 census `5116876f…`, 31 package commits since `d2d502b`, zero after the audit boundary | plan 08-19 |
+| 2026-08-31 (final package-head re-audit at `12a7136`) | **95** (94 numeric + T-08-SC) | **95** | **0 open; 13 accepted residuals**, including accepted `high` T-08-47 / AR-06 with decider **six2dez**. Package tree `67ece25a`, SHA-256 census `df578b95…`, 60 package commits since `d2d502b`, 29 inspected after the prior audit, zero after the final boundary | plan 08-23 |
 
 **Note on this phase's dominant defect class**, recorded because it recurred across three plans: a
 **control that is green for the wrong reason**. The LLRT trap itself (green on every CI vehicle,
@@ -706,8 +747,9 @@ if the mechanism were absent* — never by the gate itself.
 
 - [x] All threats have a disposition (mitigate / accept)
 - [x] Accepted risks documented in the Accepted Risks Log with a reason, a blocker and an owner
-- [x] Every threat rated `high` carries disposition `mitigate` and a non-empty mitigation
-      (T-08-01, T-08-06, T-08-12, T-08-15) — **with ONE deliberate exception recorded 2026-08-27:
+- [x] Every threat rated `high` carries disposition `mitigate`, a non-empty mitigation, and a closed
+      current status; the gate now derives that condition across all 94 numeric rows — **with ONE
+      deliberate exception recorded 2026-08-27:**
       T-08-47 is a `high` with disposition `accept` (AR-06), carrying a named decider
       (`six2dez (recorded decision GD-02)`) rather than an owner alone. Stated as an exception
       instead of being absorbed into the checkbox, because `block_on: high` makes a silent

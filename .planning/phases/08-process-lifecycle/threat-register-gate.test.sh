@@ -16,6 +16,7 @@ LIVE_SECURITY="$TEST_DIR/08-SECURITY.md"
 REGISTER_HEADER='| Threat ID | Category | Component | Sev | Disposition | Mitigation (verified) | Status |'
 REGISTER_DELIMITER='|---|---|---|---|---|---|---|'
 NEWLINE_PATH_LABEL='newline-path-rejected'
+REGISTER_MAX=94
 
 FIXTURE_ROOT=''
 TEST_COUNT=0
@@ -72,7 +73,7 @@ expect_fixture_pass() {
     fail_test "$label-status"
     return 1
   fi
-  assert_contains "$output" 'register_numeric=88 register_sentinel=1' "$label-register" || return 1
+  assert_contains "$output" 'register_numeric=94 register_sentinel=1' "$label-register" || return 1
   assert_contains "$output" 'threat-register-gate.sh: PASS' "$label-pass" || return 1
   return 0
 }
@@ -117,16 +118,47 @@ register_maximum() {
 
 reset_fixture() {
   local support_dir
-  local package_file
+  local package_dir
+  local audit_head
+  local package_tree
+  local package_digest
+  local security
+  local temporary
 
-  rm -rf -- "$FIXTURE_ROOT/packages" "$FIXTURE_ROOT/.planning"
+  rm -rf -- "$FIXTURE_ROOT/.git" "$FIXTURE_ROOT/packages" "$FIXTURE_ROOT/.planning"
   support_dir="$FIXTURE_ROOT/.planning/phases/08-process-lifecycle"
-  package_file="$FIXTURE_ROOT/packages/backend/src/kill-plan.ts"
-  mkdir -p "$(dirname "$package_file")" "$support_dir"
-  cp "$LIVE_SECURITY" "$support_dir/08-SECURITY.md"
-  printf '%s\n' 'T-08-55 T-08-59 T-08-75' > "$package_file"
+  package_dir="$FIXTURE_ROOT/packages/backend/src"
+  mkdir -p "$package_dir" "$support_dir"
+  printf '%s\n' 'T-08-55 T-08-59 T-08-75' > "$package_dir/kill-plan.ts"
+  printf '%s\n' 'T-08-89 T-08-90' > "$package_dir/mcp-lifecycle.ts"
+  printf '%s\n' 'T-08-91 T-08-92' > "$package_dir/owned-temp-file.ts"
+  printf '%s\n' 'T-08-93 T-08-94' > "$package_dir/mcp-runtime-artifacts.ts"
   printf '%s\n' 'T-08-67' > "$support_dir/verify-a1-patch.sh"
   printf '%s\n' 'T-08-76' > "$support_dir/a1-probe-fix.patch"
+
+  git -C "$FIXTURE_ROOT" init -q >/dev/null 2>&1 || return 1
+  git -C "$FIXTURE_ROOT" config user.name 'Drift Gate Fixture' || return 1
+  git -C "$FIXTURE_ROOT" config user.email 'fixture@invalid.example' || return 1
+  git -C "$FIXTURE_ROOT" add packages .planning || return 1
+  git -C "$FIXTURE_ROOT" commit -qm 'fixture baseline' || return 1
+  audit_head="$(git -C "$FIXTURE_ROOT" rev-parse HEAD)" || return 1
+  package_tree="$(git -C "$FIXTURE_ROOT" rev-parse "${audit_head}:packages")" || return 1
+  if command -v shasum >/dev/null 2>&1; then
+    package_digest="$(git -C "$FIXTURE_ROOT" ls-tree -r "$audit_head" -- packages | shasum -a 256 | awk '{print $1}')" || return 1
+  else
+    package_digest="$(git -C "$FIXTURE_ROOT" ls-tree -r "$audit_head" -- packages | sha256sum | awk '{print $1}')" || return 1
+  fi
+
+  security="$support_dir/08-SECURITY.md"
+  temporary="$security.tmp"
+  cp "$LIVE_SECURITY" "$security"
+  awk -v audit_head="$audit_head" -v package_tree="$package_tree" -v package_digest="$package_digest" '
+    /^audited_at_head:/ { print "audited_at_head: " audit_head; next }
+    /^package_tree_at_audit:/ { print "package_tree_at_audit: " package_tree; next }
+    /^package_tree_sha256_at_audit:/ { print "package_tree_sha256_at_audit: " package_digest; next }
+    /^package_commits_after_audit:/ { print "package_commits_after_audit: 0"; next }
+    { print }
+  ' "$security" > "$temporary" && mv "$temporary" "$security"
 }
 
 remove_register_row() {
@@ -147,6 +179,53 @@ duplicate_register_row() {
   awk -v target="$id" '
     { print }
     index($0, "**" target "**") != 0 { print }
+  ' "$security" > "$temporary" && mv "$temporary" "$security"
+}
+
+remove_ledger_row() {
+  local id="$1"
+  local security="$FIXTURE_ROOT/.planning/phases/08-process-lifecycle/08-SECURITY.md"
+  local temporary="$security.tmp"
+
+  awk -v target="$id" '
+    index($0, "| " target " |") == 0 { print }
+  ' "$security" > "$temporary" && mv "$temporary" "$security"
+}
+
+mark_register_row_open() {
+  local id="$1"
+  local security="$FIXTURE_ROOT/.planning/phases/08-process-lifecycle/08-SECURITY.md"
+  local temporary="$security.tmp"
+
+  awk -v target="$id" '
+    index($0, "**" target "**") != 0 { sub(/\| closed[^|]*\|$/, "| open |") }
+    { print }
+  ' "$security" > "$temporary" && mv "$temporary" "$security"
+}
+
+blank_register_mitigation() {
+  local id="$1"
+  local security="$FIXTURE_ROOT/.planning/phases/08-process-lifecycle/08-SECURITY.md"
+  local temporary="$security.tmp"
+
+  awk -v target="$id" '
+    index($0, "**" target "**") != 0 {
+      sub(/\| [^|]* \| closed[^|]*\|$/, "|  | closed |")
+    }
+    { print }
+  ' "$security" > "$temporary" && mv "$temporary" "$security"
+}
+
+corrupt_audit_digest() {
+  local security="$FIXTURE_ROOT/.planning/phases/08-process-lifecycle/08-SECURITY.md"
+  local temporary="$security.tmp"
+
+  awk '
+    /^package_tree_sha256_at_audit:/ {
+      print "package_tree_sha256_at_audit: 0000000000000000000000000000000000000000000000000000000000000000"
+      next
+    }
+    { print }
   ' "$security" > "$temporary" && mv "$temporary" "$security"
 }
 
@@ -183,7 +262,7 @@ run_independent_matrix() {
   local -a adversarial_names
 
   maximum="$(register_maximum)"
-  if [ "$maximum" -ne 88 ]; then
+  if [ "$maximum" -ne "$REGISTER_MAX" ]; then
     fail_test live-register-maximum
     return 1
   fi
@@ -200,7 +279,7 @@ run_independent_matrix() {
     fail_test live-repository-status
     return 1
   fi
-  assert_contains "$output" 'register_numeric=88 register_sentinel=1' live-register-count || return 1
+  assert_contains "$output" 'register_numeric=94 register_sentinel=1' live-register-count || return 1
   assert_contains "$output" 'packages=' live-package-family || return 1
   assert_contains "$output" 'support=' live-support-family || return 1
 
@@ -224,6 +303,39 @@ run_independent_matrix() {
   reset_fixture
   duplicate_register_row 'T-08-57'
   expect_fixture_failure duplicate-main-row 'duplicate-register-id id=T-08-57' "$canary" || return 1
+
+  reset_fixture
+  printf '%s\n' 'T-08-90' > "$FIXTURE_ROOT/packages/backend/src/mcp-lifecycle.ts"
+  expect_fixture_failure missing-new-live-citation \
+    'liveness-sentinel-missing family=package id=T-08-89' "$canary" || return 1
+
+  reset_fixture
+  remove_ledger_row 'T-08-89'
+  expect_fixture_failure missing-new-ledger-row \
+    'ledger-row-missing id=T-08-89' "$canary" || return 1
+
+  reset_fixture
+  mark_register_row_open 'T-08-89'
+  expect_fixture_failure false-aggregate-closure \
+    'aggregate-open-high-count=1' "$canary" || return 1
+
+  reset_fixture
+  blank_register_mitigation 'T-08-89'
+  expect_fixture_failure missing-high-mitigation \
+    'open-high-mitigation id=T-08-89' "$canary" || return 1
+
+  reset_fixture
+  corrupt_audit_digest
+  expect_fixture_failure stale-audit-digest \
+    'audit-package-digest-mismatch' "$canary" || return 1
+
+  reset_fixture
+  printf '%s\n' 'T-08-55 T-08-59 T-08-75 committed-drift' \
+    > "$FIXTURE_ROOT/packages/backend/src/kill-plan.ts"
+  git -C "$FIXTURE_ROOT" add packages/backend/src/kill-plan.ts || return 1
+  git -C "$FIXTURE_ROOT" commit -qm 'package commit after audit' || return 1
+  expect_fixture_failure package-commit-after-audit \
+    'audit-package-commits-after=1' "$canary" || return 1
 
   reset_fixture
   support_dir="$FIXTURE_ROOT/.planning/phases/08-process-lifecycle"
@@ -312,7 +424,7 @@ run_independent_matrix() {
     fail_test production-self-scan-status
     return 1
   fi
-  assert_contains "$output" 'register_numeric=88 register_sentinel=1' production-self-scan-register || return 1
+  assert_contains "$output" 'register_numeric=94 register_sentinel=1' production-self-scan-register || return 1
   assert_contains "$output" 'threat-register-gate.sh: PASS' production-self-scan-pass || return 1
 
   return 0
