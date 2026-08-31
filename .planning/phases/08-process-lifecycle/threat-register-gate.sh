@@ -23,6 +23,8 @@ declare -a PACKAGE_PATH
 declare -a SUPPORT_PATH
 declare -a PACKAGE_FILE_ID_SEEN
 declare -a SUPPORT_FILE_ID_SEEN
+declare -a PACKAGE_FILES
+declare -a SUPPORT_FILES
 
 REGISTER_NUMERIC_COUNT=0
 REGISTER_SENTINEL_COUNT=0
@@ -46,6 +48,8 @@ reset_state() {
   SUPPORT_PATH=()
   PACKAGE_FILE_ID_SEEN=()
   SUPPORT_FILE_ID_SEEN=()
+  PACKAGE_FILES=()
+  SUPPORT_FILES=()
   REGISTER_NUMERIC_COUNT=0
   REGISTER_SENTINEL_COUNT=0
   PACKAGE_TEXT_COUNT=0
@@ -120,12 +124,12 @@ record_citation() {
   fi
 }
 
-scan_text_file() {
+discover_text_file() {
   local family="$1"
   local root="$2"
   local absolute="$3"
   local relative
-  local token
+  local next_index
 
   relative="$(safe_relative_path "$root" "$absolute")" || {
     printf 'ERROR path-outside-root\n'
@@ -140,14 +144,24 @@ scan_text_file() {
       ;;
   esac
 
+  if [ ! -r "$absolute" ]; then
+    printf 'ERROR unreadable-file family=%s path=%s\n' "$family" "$relative"
+    SCAN_ERROR_COUNT=$((SCAN_ERROR_COUNT + 1))
+    return
+  fi
+
   # Empty and binary files cannot carry a citation and are not text-bearing.
-  if ! LC_ALL=C grep -Iq . -- "$absolute"; then
+  if ! LC_ALL=C grep -Iq . -- "$absolute" 2>/dev/null; then
     return
   fi
 
   if [ "$family" = package ]; then
+    next_index="${#PACKAGE_FILES[@]}"
+    PACKAGE_FILES[$next_index]="$absolute"
     PACKAGE_TEXT_COUNT=$((PACKAGE_TEXT_COUNT + 1))
   else
+    next_index="${#SUPPORT_FILES[@]}"
+    SUPPORT_FILES[$next_index]="$absolute"
     SUPPORT_TEXT_COUNT=$((SUPPORT_TEXT_COUNT + 1))
     case "$relative" in
       .planning/phases/08-process-lifecycle/threat-register-gate.sh)
@@ -159,10 +173,37 @@ scan_text_file() {
     esac
   fi
 
+}
+
+scan_citations_in_file() {
+  local family="$1"
+  local root="$2"
+  local absolute="$3"
+  local relative
+  local token
+
+  relative="$(safe_relative_path "$root" "$absolute")" || {
+    printf 'ERROR path-outside-root\n'
+    SCAN_ERROR_COUNT=$((SCAN_ERROR_COUNT + 1))
+    return
+  }
+
   while IFS= read -r token; do
     [ -n "$token" ] || continue
     record_citation "$family" "$relative" "$token"
-  done < <(LC_ALL=C grep -Eo 'T-08-[0-9]+' -- "$absolute" || true)
+  done < <(LC_ALL=C grep -Eo 'T-08-[0-9]+' -- "$absolute" 2>/dev/null || true)
+}
+
+scan_collected_citations() {
+  local root="$1"
+  local index
+
+  for ((index = 0; index < ${#PACKAGE_FILES[@]}; index++)); do
+    scan_citations_in_file package "$root" "${PACKAGE_FILES[$index]}"
+  done
+  for ((index = 0; index < ${#SUPPORT_FILES[@]}; index++)); do
+    scan_citations_in_file support "$root" "${SUPPORT_FILES[$index]}"
+  done
 }
 
 discover_package_files() {
@@ -177,7 +218,7 @@ discover_package_files() {
   fi
 
   while IFS= read -r -d '' file; do
-    scan_text_file package "$root" "$file"
+    discover_text_file package "$root" "$file"
   done < <(
     find "$package_root" \
       \( -type d \( -name node_modules -o -name dist -o -name coverage \) -prune \) \
@@ -198,7 +239,7 @@ discover_support_files() {
 
   while IFS= read -r -d '' file; do
     if [ -x "$file" ] || [[ "$file" == *.sh ]] || [[ "$file" == *.patch ]]; then
-      scan_text_file support "$root" "$file"
+      discover_text_file support "$root" "$file"
     fi
   done < <(find "$support_root" -mindepth 1 -maxdepth 1 -type f -print0)
 }
@@ -374,6 +415,10 @@ run_gate() {
     printf 'ERROR %s count=%d\n' "$NEWLINE_PATH_LABEL" "$NEWLINE_PATH_COUNT"
     return 1
   fi
+
+  # Citation parsing begins only after every pathname in both families passed
+  # the repository-wide preflight. This makes newline refusal truly fail closed.
+  scan_collected_citations "$root"
 
   if ! parse_register "$security_file"; then
     return 1

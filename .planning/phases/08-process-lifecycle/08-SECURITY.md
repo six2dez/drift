@@ -200,7 +200,7 @@ high, with its original reason intact.
 | **T-08-85** (19) | Repudiation | `audited_at_head` and package-history comparison | **high** | mitigate | Audit baseline `318fe24a78061db283272d88357185b0fb1e384a`, package tree/digest, 31-commit former-baseline delta, and zero package-changing commits after the audit boundary are recorded and rechecked | closed (Git audit measurements) |
 | **T-08-86** (19) | Repudiation | threat disposition and mitigation closure | **high** | mitigate | Every rolled row points to current source, a current record, or an executable suite/gate; plans and summaries supply allocation only and cannot satisfy the live citation join | closed (current evidence audit) |
 | **T-08-87** (19) | Tampering | `status`, `threats_open`, totals, and accepted residuals | **high** | mitigate | Parsed aggregates require 88 numeric rows plus T-08-SC, 13 explicit residuals, zero open high mitigations, and a separately visible accepted-high T-08-47 exception | closed (mechanical totals + residual census) |
-| **T-08-88** (19) | Tampering | `threat-register-gate.sh` discovery/parser/output | **high** | mitigate | One implementation serves live and fixture roots with NUL-delimited discovery, newline refusal, runtime-fragment red tokens, path-safe diagnostics, and canary checks; the independent matrix is the final lock | closed (production self-test; independent matrix in Task 3) |
+| **T-08-88** (19) | Tampering | `threat-register-gate.sh` discovery/parser/output | **high** | mitigate | One implementation serves live and fixture roots with a repository-wide pathname preflight, NUL-delimited discovery, newline refusal before citation parsing, runtime-fragment red tokens, path-safe diagnostics, and canary checks; the independent script executes the full red matrix | closed (production self-test + independent 26-case matrix) |
 | **T-08-SC** (×5) | Tampering | npm/pip/cargo installs | n/a | accept | **This phase installs zero packages.** `08-RESEARCH.md` § *Package Legitimacy Audit* is present and empty ("audited, empty", not "skipped"). `git diff` over `package.json` / `pnpm-lock.yaml` across the phase is empty. If a later plan proposes a dependency (e.g. `tree-kill`), the gate must be run at that point. **Re-checked 2026-08-27 across plans 08-06…08-10: still zero.** `pgrep` is a base-system utility on macOS and every supported Linux; no `package.json` / `pnpm-lock.yaml` change in any of the five gap plans | closed |
 
 *Status: open · closed · closed (accepted) — an accepted residual is recorded in the Accepted Risks
@@ -251,7 +251,7 @@ distinct from implementation and from the person accepting a residual.
 | T-08-85 | high | mitigate | six2dez:implementation | audit SHA, two package digests, and Git delta | closed |
 | T-08-86 | high | mitigate | six2dez:implementation | current source/suites/gates evidence audit | closed |
 | T-08-87 | high | mitigate | six2dez:implementation | parsed totals, residual census, accepted-high note | closed |
-| T-08-88 | high | mitigate | six2dez:implementation | production fixture self-test; independent matrix in Task 3 | closed at tracer gate |
+| T-08-88 | high | mitigate | six2dez:implementation | production self-test plus independent 26-case red/green matrix | closed |
 
 ## Register Corrections and Evidence Notes
 
