@@ -44,23 +44,53 @@ const KILL_TREE_REPORT = "win32-kill-tree-report.json";
 const SPAWN_PLAN_GATE_STEP = "Gate: the win32 spawn-plan suite actually ran";
 const SPAWN_PLAN_REPORT = "win32-report.json";
 
+function extractNamedStep(workflow: string, name: string): string {
+  const marker = `      - name: '${name}'`;
+  const start = workflow.indexOf(marker);
+  if (start === -1) return "";
+  const next = workflow.indexOf("\n      - name:", start + marker.length);
+  return workflow.slice(start, next === -1 ? workflow.length : next);
+}
+
+function validateKillTreeGateStep(step: string): string[] {
+  const failures: string[] = [];
+  const required = [
+    WIN32_SUITE_PATH,
+    "--reporter=json",
+    `report="$RUNNER_TEMP/${KILL_TREE_REPORT}"`,
+    '--outputFile="$report"',
+    "pending > 0",
+    "total === 0",
+    "passed !== total",
+    '\' "$report"',
+  ];
+  for (const anchor of required) {
+    if (!step.includes(anchor)) failures.push(anchor);
+  }
+  if (step.includes(SPAWN_PLAN_REPORT)) failures.push("cross-report-read");
+  return failures;
+}
+
+const killTreeGateStep = extractNamedStep(ciWorkflow, KILL_TREE_GATE_STEP);
+const spawnPlanGateStep = extractNamedStep(ciWorkflow, SPAWN_PLAN_GATE_STEP);
+
 describe("the windows CI leg asserts the win32 kill-tree suite ran (LIF-01)", () => {
   it("carries a gate step for it", () => {
-    expect(ciWorkflow).toContain(KILL_TREE_GATE_STEP);
+    expect(killTreeGateStep).not.toBe("");
+    expect(killTreeGateStep).toContain(KILL_TREE_GATE_STEP);
   });
 
   it("re-runs the suite under the JSON reporter, which is what makes the count readable", () => {
     // A bare `vitest run` reports nothing about WHICH files executed, and its
     // exit status is 0 for a fully skipped file. The count has to be read.
-    expect(ciWorkflow).toContain(WIN32_SUITE_PATH);
-    expect(ciWorkflow).toContain("--reporter=json");
+    expect(killTreeGateStep).toContain(WIN32_SUITE_PATH);
+    expect(killTreeGateStep).toContain("--reporter=json");
+    expect(killTreeGateStep).toContain(KILL_TREE_REPORT);
   });
 
   it("fails on a skipped, uncollected or partly-failing run", () => {
     // The three ways the leg could go green with nothing proven.
-    expect(ciWorkflow).toContain("pending > 0");
-    expect(ciWorkflow).toContain("total === 0");
-    expect(ciWorkflow).toContain("passed !== total");
+    expect(validateKillTreeGateStep(killTreeGateStep)).toEqual([]);
   });
 
   it("names a suite path that exists — a rename must not leave the gate pointing at nothing", () => {
@@ -88,10 +118,23 @@ describe("the windows CI leg asserts the win32 kill-tree suite ran (LIF-01)", ()
   // exists. Pinning both step names and both report filenames, and asserting the
   // filenames differ, is what makes each gate falsifiable on its own step.
   it("cannot be satisfied by the Phase 7 gate step, nor it by this one", () => {
-    expect(ciWorkflow).toContain(KILL_TREE_GATE_STEP);
-    expect(ciWorkflow).toContain(SPAWN_PLAN_GATE_STEP);
-    expect(ciWorkflow).toContain(KILL_TREE_REPORT);
-    expect(ciWorkflow).toContain(SPAWN_PLAN_REPORT);
+    expect(killTreeGateStep).toContain(KILL_TREE_GATE_STEP);
+    expect(spawnPlanGateStep).toContain(SPAWN_PLAN_GATE_STEP);
+    expect(killTreeGateStep).toContain(KILL_TREE_REPORT);
+    expect(spawnPlanGateStep).toContain(SPAWN_PLAN_REPORT);
+    expect(killTreeGateStep).not.toContain(SPAWN_PLAN_REPORT);
+    expect(spawnPlanGateStep).not.toContain(KILL_TREE_REPORT);
     expect(KILL_TREE_REPORT).not.toEqual(SPAWN_PLAN_REPORT);
+  });
+
+  it("fails its own validation if the validator cross-reads the spawn-plan report", () => {
+    const mutated = killTreeGateStep.replace(
+      '\' "$report"',
+      `' "$RUNNER_TEMP/${SPAWN_PLAN_REPORT}"`,
+    );
+
+    expect(mutated).not.toBe(killTreeGateStep);
+    expect(validateKillTreeGateStep(mutated)).toContain("cross-report-read");
+    expect(validateKillTreeGateStep(mutated)).toContain('\' "$report"');
   });
 });
