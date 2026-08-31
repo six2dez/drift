@@ -4,18 +4,18 @@ milestone: v1.0
 current_phase: 08
 current_phase_name: Process Lifecycle
 status: executing
-stopped_at: Completed 08-23-PLAN.md; phase verification remains gaps_found
-last_updated: "2026-08-31T17:05:04.000Z"
+stopped_at: Phase 08 re-verified human_needed at 16/20; runtime evidence remains
+last_updated: "2026-08-31T17:13:24.000Z"
 last_activity: 2026-08-31
-last_activity_desc: Completed all 23 Phase 08 plans; native-Windows and real-provider evidence remain open
+last_activity_desc: Re-verified all 23 Phase 08 plans; actionable gaps closed and human runtime evidence remains
 state_head: 6df7cabf54abd7bdebb5803a9eb7fcf74333e1b3
 progress:
   total_phases: 13
   completed_phases: 5
   total_plans: 63
   completed_plans: 63
-verification_status: gaps_found
-verification_score: 10/20 must-haves verified
+verification_status: human_needed
+verification_score: 16/20 must-haves verified
 milestone_name: milestone
 ---
 
@@ -30,11 +30,11 @@ See: .planning/PROJECT.md (updated 2026-06-26)
 
 ## Current Position
 
-Phase: 08 (Process Lifecycle) — PLAN EXECUTION COMPLETE; VERIFICATION GAPS REMAIN
-Plan: 23 of 23 complete; phase verification is next
-Status: All planned repairs and record gates are committed; do not advance while native-Windows and real-provider evidence remain unresolved
-Last activity: 2026-08-31 — Completed 08-23 evidence convergence and final-package T-08-01…T-08-94 audit
-Verification: `08-VERIFICATION.md` rules **`gaps_found`, score 10/20 must-haves verified** (2026-08-31T15:01:21Z). The truth frame grew from 14 to 20 after the final review and record checks, so this is not directly comparable to the superseded 9/14, 4/9, or 2/8 verdicts; the report preserves every transition.
+Phase: 08 (Process Lifecycle) — PLAN EXECUTION COMPLETE; HUMAN EVIDENCE REQUIRED
+Plan: 23 of 23 complete; follow-up review and verification recorded
+Status: No actionable code or record gaps remain; do not advance while native-Windows, real-provider causality, and completion-order evidence remain unresolved
+Last activity: 2026-08-31 — Re-verified Phase 08 after Plans 08-20…08-23 and closed all six prior actionable gaps
+Verification: `08-VERIFICATION-2.md` rules **`human_needed`, score 16/20 must-haves verified** (2026-08-31T17:10:03Z). Four behavior truths remain unverified at the native/runtime boundary; the dirty historical `08-VERIFICATION.md` remains untouched and its current conclusions are superseded by the additive report.
 
 Progress: [███░░░░░░░] 30% (3 of 10 milestone phases)
 
