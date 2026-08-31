@@ -432,7 +432,7 @@ Plans:
 
 **Gap Wave 16** *(blocked on Gap Waves 13–15; consumes the final package head)*
 
-- [ ] 08-23-PLAN.md — Correct LIF-02/Windows living records, prove the safe 2/2 contract, and re-audit T-08-01…T-08-94 at the final code head (LIF-01, LIF-02)
+- [x] 08-23-PLAN.md — Correct LIF-02/Windows living records, prove the safe 2/2 contract, and re-audit T-08-01…T-08-94 at the final code head (LIF-01, LIF-02)
 
 **Research flag**: RESOLVED 2026-08-24 by `08-RESEARCH.md`. The primitives are indeed standard; the **mechanism** was not. `detached: true` is source-verified honoured by Caido's LLRT fork (`command.process_group(0)`), but the canonical group-signalling spelling `process.kill(-pid, sig)` **throws** there — LLRT types `pid` as `u32` and rquickjs range-checks through `f64`, raising `Underflow` before `libc::kill` is reached — while working perfectly under Node, the only vehicle any CI leg in this repository runs. SC-2 is amended in place by plan 08-05 accordingly (see the criterion's own note).
 
@@ -559,7 +559,7 @@ Parallelism opportunities: Phase 2 may run alongside Phase 3 (both depend only o
 | 5. Kill Shell Wrappers | 6/6 | Complete   | 2026-08-20 |
 | 6. Windows Command Resolution | 7/7 | Complete    | 2026-08-21 |
 | 7. Provider Spawn & Registration | 0/3 | Not started | - |
-| 8. Process Lifecycle | 22/23 | In Progress|  |
+| 8. Process Lifecycle | 23/23 | In Progress — verification gaps remain |  |
 | 9. CI Hardening | 0/1 | Not started | - |
 | 10. Windows Polish | 0/1 | Not started | - |
 | 11. Plugin Capability Discovery | 0/3 | Not started | - |

@@ -4,16 +4,16 @@ milestone: v1.0
 current_phase: 08
 current_phase_name: Process Lifecycle
 status: executing
-stopped_at: Completed 08-22-PLAN.md
-last_updated: "2026-08-31T16:37:35.443Z"
+stopped_at: Completed 08-23-PLAN.md; phase verification remains gaps_found
+last_updated: "2026-08-31T17:05:04.000Z"
 last_activity: 2026-08-31
-last_activity_desc: Completed 08-22; 08-23 is next
-state_head: 12a7136d358786b15d377c43ed3ba234cc0004b8
+last_activity_desc: Completed all 23 Phase 08 plans; native-Windows and real-provider evidence remain open
+state_head: 6df7cabf54abd7bdebb5803a9eb7fcf74333e1b3
 progress:
   total_phases: 13
   completed_phases: 5
   total_plans: 63
-  completed_plans: 62
+  completed_plans: 63
 verification_status: gaps_found
 verification_score: 10/20 must-haves verified
 milestone_name: milestone
@@ -30,10 +30,10 @@ See: .planning/PROJECT.md (updated 2026-06-26)
 
 ## Current Position
 
-Phase: 08 (Process Lifecycle) — EXECUTING
-Plan: 22 of 23 complete; next 08-23
-Status: Ready to execute
-Last activity: 2026-08-31 — Completed 08-22 content-aware runtime health repair; 08-23 is next
+Phase: 08 (Process Lifecycle) — PLAN EXECUTION COMPLETE; VERIFICATION GAPS REMAIN
+Plan: 23 of 23 complete; phase verification is next
+Status: All planned repairs and record gates are committed; do not advance while native-Windows and real-provider evidence remain unresolved
+Last activity: 2026-08-31 — Completed 08-23 evidence convergence and final-package T-08-01…T-08-94 audit
 Verification: `08-VERIFICATION.md` rules **`gaps_found`, score 10/20 must-haves verified** (2026-08-31T15:01:21Z). The truth frame grew from 14 to 20 after the final review and record checks, so this is not directly comparable to the superseded 9/14, 4/9, or 2/8 verdicts; the report preserves every transition.
 
 Progress: [███░░░░░░░] 30% (3 of 10 milestone phases)
@@ -93,6 +93,7 @@ Progress: [███░░░░░░░] 30% (3 of 10 milestone phases)
 | Phase 08 P20 | 3 min | 2 tasks | 4 files |
 | Phase 08 P21 | 3 min | 2 tasks | 4 files |
 | Phase 08 P22 | 4 min | 2 tasks | 4 files |
+| Phase 08 P23 | 23 min | 3 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -266,7 +267,7 @@ Recent decisions affecting current work:
 - [Phase 08]: The repaired three-valued probe confirmed the favourable A1 outcome on 2026-08-31; the invalid 2026-08-27 reading remains retracted as of 2026-08-28.
 - [Phase 08]: LIF-01 and LIF-02 remain unchecked because record convergence does not supply native-Windows execution or real-turn causality evidence.
 - [Phase 08]: The Spike, authoritative verification, project contract, and all 17 historical Phase 08 summaries remain immutable; Plan 08-19 owns the security roll-up.
-- [Phase 08]: Phase 08 Plan 19: freeze 318fe24a as the package audit boundary; later plan commits are support/documentation only and package drift after it is zero
+- [Phase 08]: SUPERSEDED 2026-08-31 by Plan 08-23 — Plan 08-19 froze 318fe24a as its then-current package audit boundary, but Plans 08-20…08-22 subsequently made 29 package-changing commits in total after that boundary. The old statement is historical, not current security evidence.
 - [Phase 08]: Phase 08 Plan 19: retain 13 explicit accepted residuals and separately expose accepted-high T-08-47 / AR-06 beside threats_open zero
 - [Phase 08]: Phase 08 Plan 19: require a repository-wide newline-path preflight before parsing any package or support citation
 - [Phase 08]: Phase 08 Plan 19: leave LIF-01 and LIF-02 unchecked; citation/register integrity supplies neither native-Windows execution nor real-turn causality
@@ -276,6 +277,8 @@ Recent decisions affecting current work:
 - [Phase 08]: Artifact inspection fails closed through three explicit presence fields and never throws into Start. — The existing lifecycle disposition remains the single reuse-or-replace decision.
 - [Phase 08]: The server artifact is opened and closed for read without execution or import. — Readability is required without trusting or interpreting staged code.
 - [Phase 08]: LIF-01 and LIF-02 remain open after portable WR-03 closure. — Native Windows execution and wider real-provider causality are still unmeasured.
+- [Phase 08]: Plan 08-23 final package audit boundary is 12a7136, the latest package-changing commit; its package tree is 67ece25a and the standing gate requires zero later package commits. — Planning-only close-out commits do not stale the code audit, but any package commit does.
+- [Phase 08]: The security register is contiguous T-08-01…T-08-94 plus T-08-SC with 13 accepted residuals and zero open blocking mitigations. — This secured register does not complete LIF-01/LIF-02; the requirement boxes remain unchecked for native-Windows and real-provider evidence.
 
 ### Pending Todos
 
