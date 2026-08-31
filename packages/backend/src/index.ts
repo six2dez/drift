@@ -63,6 +63,7 @@ import {
   acquireMcpDirectCall,
   acquireProviderStartLease,
   beginMcpRuntimeGeneration,
+  cleanupRetiredProviderStartRoot,
   commitProviderStartLease,
   countMcpDirectCalls,
   createMcpLifecycleState,
@@ -1623,21 +1624,6 @@ async function cleanupOwnedMcpConfigPaths(
     appendSessionDebugLog(debugLogPath, `config cleanup: rm ${configPath}`);
     await rm(configPath, { force: true }).catch(() => undefined);
   }
-}
-
-type RetiredProviderStartRoot = {
-  leaseTempDir: string | undefined;
-  currentTempDir: string | undefined;
-};
-
-async function cleanupRetiredProviderStartRoot(
-  input: RetiredProviderStartRoot,
-): Promise<void> {
-  const { leaseTempDir, currentTempDir } = input;
-  if (leaseTempDir === undefined || currentTempDir === leaseTempDir) return;
-  await rm(leaseTempDir, { recursive: true, force: true }).catch(
-    () => undefined,
-  );
 }
 
 // parseRuntimeActivityEvents used to live here. PERF-02 replaced its ONLY caller
@@ -6266,7 +6252,10 @@ async function sendCliMessage(
     });
     return err(`sendCliMessage failed: ${String(e)}`);
   } finally {
-    releaseProviderStartLease(mcpLifecycle, providerStartLease);
+    const providerStartRetired = releaseProviderStartLease(
+      mcpLifecycle,
+      providerStartLease,
+    );
     await cleanupOwnedMcpConfigPaths(
       ownedMcpConfigPaths,
       sessionDebugLogPath,
@@ -6278,8 +6267,13 @@ async function sendCliMessage(
         debugLogPath: sessionDebugLogPath,
       });
       await cleanupRetiredProviderStartRoot({
-        leaseTempDir: providerStartLease.tempDir,
-        currentTempDir: mcpTempDir,
+        retired: providerStartRetired,
+        tempDir: providerStartLease.tempDir,
+        removeRoot: async (root) => {
+          await rm(root, { recursive: true, force: true }).catch(
+            () => undefined,
+          );
+        },
       });
     }
   }

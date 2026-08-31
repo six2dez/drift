@@ -1244,7 +1244,10 @@ describe("index.ts wires the orphan reap at every counted site and nowhere else 
     const retiredResult = send.indexOf(
       "const providerStartRetired = releaseProviderStartLease(",
     );
-    const configCleanup = send.indexOf("cleanupOwnedMcpConfigPaths(");
+    const configCleanup = send.indexOf(
+      "cleanupOwnedMcpConfigPaths(",
+      retiredResult,
+    );
     expect(retiredResult).not.toBe(-1);
     expect(configCleanup).not.toBe(-1);
     expect(retiredResult).toBeLessThan(configCleanup);
