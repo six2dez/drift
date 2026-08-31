@@ -1726,17 +1726,18 @@ describe("formatOrphanReapRecord renders one scalar-only line per reap outcome",
     "session-active",
   ];
 
-  it("names the kind, the exit code and the killed count for a completed reap", () => {
+  it("names the kind, exit code and spawn-attempt count without claiming a kill", () => {
     const rendered = formatOrphanReapRecord({
       kind: "reap",
       exitCode: 0,
-      killed: 3,
+      attempted: 3,
       ageMs: 12,
     });
 
     expect(rendered).toContain("kind=reap");
     expect(rendered).toContain("exit=0");
-    expect(rendered).toContain("killed=3");
+    expect(rendered).toContain("attempted=3");
+    expect(rendered).not.toContain("killed=");
   });
 
   // THE ONE DISTINCTION THE KEY EXISTS FOR. "The mechanism never ran on this
@@ -1762,7 +1763,7 @@ describe("formatOrphanReapRecord renders one scalar-only line per reap outcome",
   });
 
   // RED INPUT: a formatter that collapses two reasons onto one string — for
-  // instance by rendering only `kind=noop killed=0` — passes every case above
+  // instance by rendering only `kind=noop attempted=0` — passes every case above
   // and fails here. That collapse is precisely what would make the key unable to
   // answer the question it was added for.
   it("renders pairwise-distinct strings across the whole no-op reason union", () => {
@@ -1845,7 +1846,7 @@ describe("formatOrphanReapRecord renders one scalar-only line per reap outcome",
       }) as unknown as OrphanReapRecord;
 
     const records: OrphanReapRecord[] = [
-      { kind: "reap", exitCode: 0, killed: 2, ageMs: 11 },
+      { kind: "reap", exitCode: 0, attempted: 2, ageMs: 11 },
       { kind: "gate-closed", sessions: 1, directDepth: 0, ageMs: 0 },
       ...NOOP_REASONS.map(
         (reason): OrphanReapRecord => ({

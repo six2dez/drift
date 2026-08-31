@@ -1289,7 +1289,7 @@ export type OrphanReapRecord =
   | {
       kind: "reap";
       exitCode: number | null | undefined;
-      killed: number;
+      attempted: number;
       ageMs: number;
     };
 
@@ -1302,23 +1302,23 @@ export type OrphanReapRecord =
 // destroy the only reading the key was added for.
 export function formatOrphanReapRecord(record: OrphanReapRecord): string {
   if (record.kind === "plan-refused") {
-    return `kind=refused reason=${record.reason} killed=0 ageMs=${String(record.ageMs)}`;
+    return `kind=refused reason=${record.reason} attempted=0 ageMs=${String(record.ageMs)}`;
   }
   if (record.kind === "gate-closed") {
     return (
       `kind=refused reason=gate-closed sessions=${String(record.sessions)}` +
-      ` directDepth=${String(record.directDepth)} killed=0` +
+      ` directDepth=${String(record.directDepth)} attempted=0` +
       ` ageMs=${String(record.ageMs)}`
     );
   }
   if (record.kind === "noop") {
     return (
       `kind=noop reason=${record.reason} exit=${String(record.exitCode)}` +
-      ` killed=0 ageMs=${String(record.ageMs)}`
+      ` attempted=0 ageMs=${String(record.ageMs)}`
     );
   }
   return (
     `kind=reap exit=${String(record.exitCode)}` +
-    ` killed=${String(record.killed)} ageMs=${String(record.ageMs)}`
+    ` attempted=${String(record.attempted)} ageMs=${String(record.ageMs)}`
   );
 }

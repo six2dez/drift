@@ -534,7 +534,7 @@ let lastTempWriteAttempts = 0;
 //
 // SCALARS ONLY (T-08-75, the same T-04-04 rendering rule the reap's own console
 // line obeys): the value is built by `formatOrphanReapRecord` in `kill-plan.ts`
-// from closed reason unions, an exit code, a killed COUNT and an age. No pid, no
+// from closed reason unions, an exit code, an attempted-spawn COUNT and an age. No pid, no
 // path, no argv, no environment value — a diagnostics key is a support-bundle
 // key and a support bundle is pasted into public issues.
 let lastOrphanReap: string | undefined;
@@ -3933,7 +3933,7 @@ function reapMcpOrphans(
     // process table.
     if (outcome.kind === "noop") {
       sdk.console.log(
-        `[drift lifecycle] orphan reap: kind=noop reason=${outcome.reason} exit=${String(result.exitCode)} killed=0`,
+        `[drift lifecycle] orphan reap: kind=noop reason=${outcome.reason} exit=${String(result.exitCode)} attempted=0`,
       );
       recordOrphanReapOutcome({
         kind: "noop",
@@ -3944,7 +3944,7 @@ function reapMcpOrphans(
       return;
     }
 
-    let signalled = 0;
+    let attempted = 0;
     for (const pid of outcome.pids) {
       const killPlan = buildOrphanKillPlan({ pid, platform: host?.platform });
       if (killPlan.kind === "none") continue;
@@ -3962,19 +3962,22 @@ function reapMcpOrphans(
         killer.stdout?.on("data", () => undefined);
         killer.stderr?.on("data", () => undefined);
         killer.on("error", () => undefined);
-        signalled += 1;
+        // This proves only that `spawn` returned a child handle. Delivery is
+        // asynchronous and can still fail through `error` or a non-zero exit,
+        // so the diagnostic names this an attempt rather than a kill.
+        attempted += 1;
       } catch {
-        /* unspawnable killer; counted as not signalled */
+        /* unspawnable killer; counted as not attempted */
       }
     }
 
     sdk.console.log(
-      `[drift lifecycle] orphan reap: kind=reap exit=${String(result.exitCode)} killed=${String(signalled)}`,
+      `[drift lifecycle] orphan reap: kind=reap exit=${String(result.exitCode)} attempted=${String(attempted)}`,
     );
     recordOrphanReapOutcome({
       kind: "reap",
       exitCode: result.exitCode,
-      killed: signalled,
+      attempted,
       ageMs: settledAgeMs,
     });
   };
@@ -4090,7 +4093,7 @@ function reapSessionOrphansIfIdle(sdk: BackendSDK): void {
   if (!shouldReapSessionOrphans({ activeSessionCount, directMcpCallDepth })) {
     // THE REFUSAL LOGS (review WR-02). Every other refusal on this path already
     // did: `reapMcpOrphans` logs `no orphan reap: <reason>` for a plan refusal
-    // and `kind=noop reason=… exit=… killed=0` for all four enumerator
+    // and `kind=noop reason=… exit=… attempted=0` for all enumerator
     // outcomes. This gate was the exception, and it is the ONE arm that can
     // suppress the reap for a whole Caido session — through AR-07's accepted
     // multi-session window, through a depth that leaked, or through any future
