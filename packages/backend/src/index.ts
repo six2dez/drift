@@ -89,6 +89,10 @@ import {
   type McpOrphanReapGate,
   type ProviderStartLease,
 } from "./mcp-lifecycle";
+import {
+  inspectRequiredMcpRuntimeArtifacts,
+  type McpRuntimeArtifactPresence,
+} from "./mcp-runtime-artifacts";
 import { cleanupOwnedPaths, writeOwnedTempFile } from "./owned-temp-file";
 import {
   MCP_SELF_TEST_CHECKS,
@@ -1203,40 +1207,17 @@ function getMcpContextFilePath(): string | undefined {
   return getMcpContextPath(mcpTempDir);
 }
 
-type McpRuntimeArtifactPresence = {
-  runtimeDirectoryPresent: boolean;
-  runtimeScriptPresent: boolean;
-  runtimeContextPresent: boolean;
-};
-
 async function inspectMcpRuntimeArtifacts(
   tempDir: string | undefined,
 ): Promise<McpRuntimeArtifactPresence> {
-  if (tempDir === undefined) {
-    return {
-      runtimeDirectoryPresent: false,
-      runtimeScriptPresent: false,
-      runtimeContextPresent: false,
-    };
-  }
-
-  let runtimeDirectoryPresent = false;
-  try {
-    const directoryInfo = await stat(tempDir);
-    runtimeDirectoryPresent = directoryInfo.isDirectory();
-  } catch {
-    // Missing or unreadable is unhealthy. Start must replace, never reuse on
-    // an optimistic inference from the previous auth result.
-  }
-  const scriptPath = getMcpScriptPath(tempDir);
-  const contextPath = getMcpContextPath(tempDir);
-  return {
-    runtimeDirectoryPresent,
-    runtimeScriptPresent:
-      scriptPath !== undefined && (await fileExists(scriptPath)),
-    runtimeContextPresent:
-      contextPath !== undefined && (await fileExists(contextPath)),
-  };
+  return inspectRequiredMcpRuntimeArtifacts({
+    tempDir,
+    scriptPath: getMcpScriptPath(tempDir),
+    contextPath: getMcpContextPath(tempDir),
+    statPath: stat,
+    openReadable: async (artifactPath) => openFile(artifactPath, "r"),
+    readText: async (artifactPath) => readFile(artifactPath, "utf-8"),
+  });
 }
 
 // RUN-02 / D-10. The SINGLE projection point: Claude's `mcp-<chatId>.json` and
@@ -4678,6 +4659,8 @@ async function startMcpServerOperation(
   // first committed. A healthy runtime is returned as-is. An inconsistent or
   // unhealthy active directory is fully retired before any replacement epoch
   // begins, so no staging root can be abandoned by overwriting mcpTempDir.
+  // T-08-93/T-08-94: this content-aware probe must stay before disposition;
+  // existence alone cannot authorize reuse of the script or context.
   const startTempDir = mcpTempDir;
   const runtimeArtifacts = await inspectMcpRuntimeArtifacts(startTempDir);
   const startDisposition = getMcpStartDisposition({
