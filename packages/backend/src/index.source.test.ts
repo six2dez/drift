@@ -1212,6 +1212,41 @@ describe("index.ts wires the orphan reap at every counted site and nowhere else 
     expect(send).toContain("cleanupUncommittedProviderStart({");
   });
 
+  it("owns every token-bearing provider config in one cleanup funnel", () => {
+    const send = functionBody(code, "sendCliMessage");
+    expect(send).not.toBe("");
+
+    // Claude and Copilot each write one per-turn config. Both paths must enter
+    // the same provider-neutral owner instead of one living in a special local
+    // that the other provider cannot reach from finalize().
+    expect(
+      send.match(/ownedMcpConfigPaths\.add\(cfgFile\)/g) ?? [],
+    ).toHaveLength(2);
+    expect(send).not.toContain("claudeMcpConfigPath");
+
+    // A committed child reaches finalize on success, async spawn error, or
+    // timeout. A refused/stale/synchronously throwing start reaches the outer
+    // finally. Both consume the same ownership set; the helper clears it before
+    // awaiting unlink so a second consumer cannot unlink the path twice.
+    const cleanupCalls = callArgumentTexts(
+      send,
+      "cleanupOwnedMcpConfigPaths",
+    );
+    expect(cleanupCalls).toHaveLength(2);
+    for (const call of cleanupCalls) {
+      expect(call).toContain("ownedMcpConfigPaths");
+    }
+    expect(send).toContain('finalize(err("Process timed out"))');
+    expect(send).toContain("finalize(err(`Spawn error: ${e.message}`))");
+
+    const cleanup = functionBody(code, "cleanupOwnedMcpConfigPaths");
+    const clear = cleanup.indexOf("configPaths.clear()");
+    const unlink = cleanup.indexOf("await rm(");
+    expect(clear).not.toBe(-1);
+    expect(unlink).not.toBe(-1);
+    expect(clear).toBeLessThan(unlink);
+  });
+
   it("invalidates provider start leases before teardown's process pass", () => {
     const cleanup = functionBody(code, "cleanupMcpRuntime");
     const generation = functionBody(code, "cleanupMcpRuntimeGeneration");

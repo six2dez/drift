@@ -1555,7 +1555,6 @@ async function createSessionRuntimeFiles(
 async function cleanupUncommittedProviderStart(input: {
   sessionId: string;
   runtimeFiles: SessionRuntimeFiles | undefined;
-  mcpConfigPaths: string[];
   debugLogPath: string | undefined;
 }): Promise<void> {
   if (
@@ -1572,10 +1571,22 @@ async function cleanupUncommittedProviderStart(input: {
       () => undefined,
     );
   }
-  for (const configPath of new Set(input.mcpConfigPaths)) {
+  await disposeSessionDebugLog(input.debugLogPath);
+}
+
+async function cleanupOwnedMcpConfigPaths(
+  configPaths: Set<string>,
+  debugLogPath: string | undefined,
+): Promise<void> {
+  // Transfer ownership synchronously before the first unlink await. finalize()
+  // and the outer send finally can both call this helper, but only the first
+  // consumer receives paths; the second is a no-op rather than a double unlink.
+  const ownedPaths = [...configPaths];
+  configPaths.clear();
+  for (const configPath of ownedPaths) {
+    appendSessionDebugLog(debugLogPath, `config cleanup: rm ${configPath}`);
     await rm(configPath, { force: true }).catch(() => undefined);
   }
-  await disposeSessionDebugLog(input.debugLogPath);
 }
 
 // parseRuntimeActivityEvents used to live here. PERF-02 replaced its ONLY caller
@@ -4972,9 +4983,8 @@ async function sendCliMessage(
   }
   let providerStartCommitted = false;
   let runtimeFiles: SessionRuntimeFiles | undefined;
-  const stagedMcpConfigPaths: string[] = [];
+  const ownedMcpConfigPaths = new Set<string>();
   let sessionDebugLogPath: string | undefined;
-  let claudeMcpConfigPath: string | undefined;
 
   try {
     await dataReady;
@@ -5086,8 +5096,7 @@ async function sendCliMessage(
             setSessionState("error", "Drift could not prepare the Claude MCP configuration file.");
             return err("Drift could not prepare the Claude MCP configuration file.");
           }
-          stagedMcpConfigPaths.push(cfgFile);
-          claudeMcpConfigPath = cfgFile;
+          ownedMcpConfigPaths.add(cfgFile);
           claudeMcpConfigForLaunch = cfgFile;
         }
 
@@ -5140,7 +5149,7 @@ async function sendCliMessage(
             setSessionState("error", "Drift could not prepare the Copilot MCP configuration file.");
             return err("Drift could not prepare the Copilot MCP configuration file.");
           }
-          stagedMcpConfigPaths.push(cfgFile);
+          ownedMcpConfigPaths.add(cfgFile);
           copilotMcpConfigForLaunch = cfgFile;
         }
         args.push(
@@ -5288,17 +5297,17 @@ async function sendCliMessage(
       sessionDebugLogPath,
       `sendCliMessage start provider=${providerId} mcpAttached=${String(mcpTempDir !== undefined)} timeoutSeconds=${String(currentSettings.processTimeoutSeconds)}`,
     );
-    // The Claude MCP wrapper dump that used to sit here has no successor,
-    // because there is no wrapper (D-11). The CONFIG dump below stays: its
-    // content is JSON and redactDebugText's JSON arm already covers it.
-    if (claudeMcpConfigPath !== undefined) {
+    // The provider config content is JSON and redactDebugText's JSON arm covers
+    // it. Keep this provider-neutral just like ownership/cleanup: Copilot's
+    // token-bearing document has the same diagnostic and lifetime contract.
+    for (const configPath of ownedMcpConfigPaths) {
       appendSessionDebugLog(
         sessionDebugLogPath,
-        `Claude MCP config path=${claudeMcpConfigPath}`,
+        `Provider MCP config path=${configPath}`,
       );
       appendSessionDebugLog(
         sessionDebugLogPath,
-        `Claude MCP config content:\n${redactDebugText(await readFile(claudeMcpConfigPath, "utf-8"))}`,
+        `Provider MCP config content:\n${redactDebugText(await readFile(configPath, "utf-8"))}`,
       );
     }
     // D-11. Command, args and the injected env KEY NAMES - never a value. The
@@ -5832,10 +5841,10 @@ async function sendCliMessage(
             appendSessionDebugLog(sessionDebugLogPath, `finalize(): rm ${runtimeFiles.approvalsFilePath}`);
             await rm(runtimeFiles.approvalsFilePath, { force: true }).catch(() => undefined);
           }
-          if (claudeMcpConfigPath !== undefined) {
-            appendSessionDebugLog(sessionDebugLogPath, `finalize(): rm ${claudeMcpConfigPath}`);
-            await rm(claudeMcpConfigPath, { force: true }).catch(() => undefined);
-          }
+          await cleanupOwnedMcpConfigPaths(
+            ownedMcpConfigPaths,
+            sessionDebugLogPath,
+          );
           appendSessionDebugLog(
             sessionDebugLogPath,
             `finalize(): resolve kind=${result.kind}`,
@@ -6204,11 +6213,14 @@ async function sendCliMessage(
     return err(`sendCliMessage failed: ${String(e)}`);
   } finally {
     releaseProviderStartLease(mcpLifecycle, providerStartLease);
+    await cleanupOwnedMcpConfigPaths(
+      ownedMcpConfigPaths,
+      sessionDebugLogPath,
+    );
     if (!providerStartCommitted) {
       await cleanupUncommittedProviderStart({
         sessionId: input.sessionId,
         runtimeFiles,
-        mcpConfigPaths: stagedMcpConfigPaths,
         debugLogPath: sessionDebugLogPath,
       });
     }
