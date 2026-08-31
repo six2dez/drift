@@ -4,16 +4,16 @@ milestone: v1.0
 current_phase: 08
 current_phase_name: Process Lifecycle
 status: executing
-stopped_at: Planned 08-18-PLAN.md and 08-19-PLAN.md
-last_updated: "2026-08-31T11:17:58.635Z"
+stopped_at: Completed 08-18-PLAN.md
+last_updated: "2026-08-31T12:01:56.204Z"
 last_activity: 2026-08-31
-last_activity_desc: Phase 08 execution started
-state_head: e44c29720f4ecd2ff60f0d75a93e81351c750dbc
+last_activity_desc: "Completed 08-18 A1 carrier convergence; 08-19 security-register audit is next"
+state_head: 42a6bad71c3bef250c6ae390567743ed1df33e1b
 progress:
   total_phases: 13
   completed_phases: 5
   total_plans: 59
-  completed_plans: 57
+  completed_plans: 58
 verification_status: gaps_found
 verification_score: 9/14 must-haves verified
 milestone_name: milestone
@@ -30,10 +30,10 @@ See: .planning/PROJECT.md (updated 2026-06-26)
 
 ## Current Position
 
-Phase: 08 (Process Lifecycle) — EXECUTING
-Plan: 1 of 19
-Status: Executing Phase 08
-Last activity: 2026-08-31 — Phase 08 execution started
+Phase: 08 (Process Lifecycle) — READY TO EXECUTE
+Plan: 18 of 19 complete; next 08-19
+Status: Ready to execute
+Last activity: 2026-08-31 — Completed 08-18 A1 carrier convergence; 08-19 security-register audit is next
 Verification: `08-VERIFICATION.md` rules **`gaps_found`, score 9/14 must-haves verified** (2026-08-31T09:35Z). The truth frame grew from 9 to 14, so this is not directly comparable to the superseded 2026-08-27 `gaps_found` / 4/9 or 2026-08-24 `human_needed` / 2/8 verdicts; the report preserves both transitions.
 
 Progress: [███░░░░░░░] 30% (3 of 10 milestone phases)
@@ -88,6 +88,7 @@ Progress: [███░░░░░░░] 30% (3 of 10 milestone phases)
 | Phase 08 P15 | 25 min | 3 tasks | 7 files |
 | Phase 08 P16 | 22 min | 3 tasks | 3 files |
 | Phase 08 P17 | continuation session | 3 tasks | 5 files |
+| Phase 08 P18 | 28 min | 3 tasks | 11 files |
 
 ## Accumulated Context
 
@@ -254,6 +255,10 @@ Recent decisions affecting current work:
 **A1 correction:** The repaired three-valued probe CONFIRMED the favourable A1 outcome on 2026-08-31. The invalid 2026-08-27 reading remains RETRACTED as of 2026-08-28 and is preserved only as history.
 <!-- DRIFT:A1-CORRECTION:END -->
 
+- [Phase 08]: The repaired three-valued probe confirmed the favourable A1 outcome on 2026-08-31; the invalid 2026-08-27 reading remains retracted as of 2026-08-28.
+- [Phase 08]: LIF-01 and LIF-02 remain unchecked because record convergence does not supply native-Windows execution or real-turn causality evidence.
+- [Phase 08]: The Spike, authoritative verification, project contract, and all 17 historical Phase 08 summaries remain immutable; Plan 08-19 owns the security roll-up.
+
 ### Pending Todos
 
 [From .planning/todos/pending/ — ideas captured during sessions]
@@ -309,8 +314,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-31T09:19:46.756Z
-Stopped at: Completed 08-17-PLAN.md
+Last session: 2026-08-31T12:01:55.989Z
+Stopped at: Completed 08-18-PLAN.md
 Resume file: None
 
 **Live on the public remote: nothing of ours.** Plan 03-04 tore down all three `scratch/*` branches (`ci-proof-windows-probe`, `ci-proof-windows-probe-negative`, `ci-proof-windows-gate-negative`) locally and remotely. Asserted with a `test -z` discrimination over the captured glob (`scratch-glob-empty=0`) plus the full unfiltered listing, which now shows only `main` at `2d8cf16` and the pre-existing, unrelated `fix/security-hotfixes` at `0cd81f3`. `origin/main` was never pushed by this phase and is still `2d8cf16`; local `main` is 23 commits ahead and deliberately unpushed. **Re-verified 2026-08-13 (plan 03-05):** the remote still lists only `main` `2d8cf16` and the pre-existing `fix/security-hotfixes` `0cd81f3`, and all eight Phase 3 run records (4 probe + 4 `CI` control) still resolve with their recorded conclusions — which is what makes the URLs in `03-FINDINGS.md` valid citations after the branches were deleted. The probe **artifacts** do not survive: they expire 2026-09-12, which is why D-11 required the committed findings document.
