@@ -91,6 +91,45 @@ Two consequences, recorded rather than acted on here:
    and the static gate still earns its place; only the stated mechanism is partial. Worth
    a marked correction in the `07-VALIDATION.md` style, not a scramble.
 
+## Observations from the 2026-08-31 readings (plan 08-17)
+
+Recorded for the same reason the 2026-08-27 observations were: they are real-hardware readings
+the project had not previously taken. Neither closes a test on its own.
+
+**G-01 is now STATED BY THE RUNTIME ITSELF, on both builds, rather than inferred.** The
+diagnostics reported, verbatim:
+
+```
+"runtimeParentEnv": "ok (reported): parent environment carries 0 keys; the PATH variable is absent from that block",
+"parentEnvKeyCount": "0",
+"parentEnvPathEntryCount": "absent",
+```
+
+Since 2026-08-27 the empty `process.env` was an inference from behaviour; the runtime now says so
+directly, on a real install, on **both** the probe build and HEAD. This confirms the **POSIX** half
+of the identity floor commit `39876b5` shipped (ledger entry 22) — and it confirms it in the
+strongest available way, because the pre-fix Control could not have been taken at all without that
+floor. **Its Windows half is untouched and stays owned by Phase 9**: the claim that libuv back-fills
+`USERNAME` and `USERPROFILE` on win32 is source analysis, not a reading. **G-01's risk rating stated
+on 2026-08-27 is unchanged by this** — a policy that is now confirmed rather than inferred is not a
+policy that got safer.
+
+**The orphan reap was observed taking its acting arm for the first time anywhere.** HEAD build at
+10:47: `"lastOrphanReap": "kind=reap exit=0 killed=2 ageMs=31"`, `"activeSessions": "0"`. Every
+prior reading was `kind=noop`, so until now the mechanism had only ever been observed matching
+nothing. Three days had elapsed since the 2026-08-28 session, so a start-up previous-run reap
+(AR-02 / OQ-3) clearing that session's leftovers is *consistent* with it. **What it killed is not
+established by this value** — the record carries a count, not identities, and naming its targets
+would be inference. Ledger entries 13 and 15 are narrowed by it and both stay open, because a
+runtime observation is not an executed assertion.
+
+**A diagnostics defect, recorded as ledger entry 24.** `reasonCode` reported `completed` for a
+**SIGTERM** death (`exitCode: 143`). The human-readable `reason` and `exitCode` carry the truth; the
+machine-readable code does not, so a consumer branching on `reasonCode` cannot distinguish a
+cancelled turn from a completed one. This is not cosmetic: the same session produced a second run
+that ended on its own, also `reasonCode: completed`, and the two were separable only by the presence
+of `exitCode`. That is precisely the discrimination test 3's Control depended on.
+
 **Operational, outside Phase 8 scope (Phase 7 / registration territory):**
 `mcpCliRemovalFailures: gemini: 2 failed (scope=user exit=127, scope=project exit=127)`.
 Drift's own message states a Drift MCP entry carrying a Caido session token may still be
@@ -197,7 +236,49 @@ correction: >-
 ### 3. The LIF-02 defect reproduces on real hardware (pre-fix baseline)
 source: 08-01-SUMMARY.md D4
 expected: Against the pre-fix build, a cancel leaves a non-zero `pgrep -f mcp-server.mjs | wc -l`. This is the baseline test 9 compares against; without it, a post-fix zero has no control.
-result: [pending]
+result: issues
+reported: |
+  2026-08-31, probe build 68199fa + a1-probe-fix.patch installed in Caido 0.58.2 on darwin
+  25.6.0, provider claude-cli, plugin id d8aee773-b939-4164-a576-9c276ee30df8. This build
+  predates the argv-marker orphan reap entirely, which is what makes it the pre-fix baseline.
+  Chat `chat-1788166552577-7obc`, prompt "resume en detalle qué hace este proyecto".
+  1 Hz `pgrep -f mcp-server.mjs | wc -l` sampler:
+    10:55:53  count=0
+    10:55:54  count=1    <- child born
+    10:56:04  count=1    <- last non-zero
+    10:56:05  count=0    <- first zero AFTER Stop
+    10:56:11  count=0    <- sixth consecutive zero
+  `pgrep -f mcp-server.mjs` reads 0 at rest afterwards. Stop WAS clicked, corroborated by the
+  session record rather than by assertion: state "stopped", reason "Provider exited with code
+  143.", exitCode 143. 143 = 128 + 15 = SIGTERM.
+evidence: >-
+  THE READING WAS TAKEN AND THE TEST'S OWN EXPECTATION WAS FALSIFIED. This test expected a
+  NON-ZERO after-Stop count. The measurement is ZERO. It is recorded as `issues` rather than
+  `passed` for exactly that reason, and rather than `pending` because a reading exists -- the
+  defect did not reproduce, which is a result and not an absence. On a build with no `detached`
+  at the provider spawn (the pre-fix provider inherits Caido's own process group 91048, measured
+  twice) and only a single-pid SIGTERM, the token-bearing MCP child died anyway. Claude Code
+  cleans up its own MCP child on SIGTERM. Full transcription in `08-SPIKE.md` § *The
+  patched-probe A1 re-run and the pre-fix Control -- TAKEN 2026-08-31*, Table 2.
+scope_and_caveats: >-
+  THE CONSEQUENCE RUNS AGAINST THIS PHASE'S OWN EVIDENCE AND IS NOT SOFTENED. The CLI-cleanup
+  confounder is no longer merely unexcluded -- it is IMPLICATED, because it is now the only
+  candidate with a positive observation behind it. Test 9's post-fix zero therefore proves LESS
+  than it appeared to, since the pre-fix build yields the same zero; test 9's own
+  `scope_and_caveats` is corrected accordingly. For Claude Code on macOS, Drift's group-kill
+  machinery is REDUNDANT with the provider's own cleanup on this path -- redundant, NOT useless:
+  the 2026-08-27 G-04 orphan was a codex process, foreign-parented, that Drift never spawned, and
+  A6 shows codex puts its MCP child in its OWN process group, so neither the group kill nor this
+  cleanup path is established for it. One provider (claude-cli), one platform (darwin 25.6.0),
+  one Caido version (0.58.2), one machine. A SECOND RUN THE SAME SESSION WAS DISCARDED, NOT USED:
+  it sampled 0->1->0 but its session record read reasonCode "completed" with NO exitCode and its
+  turn ended on its own, so it was not a cancellation measurement. Recorded as Reading D in
+  `08-SPIKE.md` so it is not later mistaken for this one.
+note: >-
+  Closes the `insufficient_spec` item (08-01 truth 3) abstained on 2026-08-24, and it closes it by
+  FALSIFYING the truth rather than by satisfying it. Ledger entry 11 is narrowed and stays open;
+  the follow-on question -- a Control run against codex, whose own cleanup is not implicated -- is
+  recorded as ownerless in `deferred-items.md` items 3 and 11.
 
 ### 4. Stop terminates the CLI *and* its token-bearing MCP child
 source: 08-02-SUMMARY.md D5
@@ -242,14 +323,29 @@ evidence: >-
   consecutive zero samples. The attestation is now a measurement. Full transcription, the raw
   paste and the provenance are in `08-SPIKE.md` § *HEAD-build readings, 2026-08-28*, Table 1.
 scope_and_caveats: >-
-  THE CONFOUNDER NAMED IN THIS TEST'S OWN NOTE IS NOT EXCLUDED. The reading shows the
+  CORRECTED 2026-08-31, AND THE CORRECTION WEAKENS WHAT THIS TEST PROVES. As written on
+  2026-08-28 this caveat said the confounder was not excluded and that test 3 would exclude it.
+  Test 3 was taken on 2026-08-31 and came back ZERO -- the same result as this test, on the
+  PRE-FIX build. So the confounder is not merely unexcluded, it is IMPLICATED, and the numbers
+  below prove LESS than they appeared to: a before/after pair whose two halves agree does not
+  separate the candidate causes. THE READING ITSELF IS UNCHANGED AND STILL CORRECT -- 1 during
+  the turn, 0 after Stop, on build 39876b5. What is corrected is the weight it carries. Drift's
+  spawned group kill, the single-pid SIGTERM->SIGKILL ladder, the argv-marker orphan reap and
+  Claude Code's own cleanup of its MCP child remain all consistent with 1 -> 0, and the pre-fix
+  Control did not separate them. The provider-CLI liveness cell is still a dated abstention --
+  no post-Stop `ps` was re-run -- and it is still the single cheapest reading that would narrow
+  this. One provider, one platform, one Caido version (0.58.2), one build. See `08-SPIKE.md`
+  § *The Control CONTRADICTS `08-01` truth 3*.
+superseded_scope_and_caveats: >-
+  SUPERSEDED 2026-08-31, preserved because it was correct on 2026-08-28 when test 3 had no
+  reading: "THE CONFOUNDER NAMED IN THIS TEST'S OWN NOTE IS NOT EXCLUDED. The reading shows the
   token-bearing child is gone; it does not show that Drift is what removed it. Drift's spawned
   group kill, the single-pid SIGTERM->SIGKILL ladder, the argv-marker orphan reap and Claude
   Code's own cleanup of its MCP child are all consistent with 1 -> 0. The provider-CLI liveness
   cell is a dated abstention -- no post-Stop `ps` was re-run -- so the half of this re-test that
   was meant to exclude the confounder was not achieved. Excluding it needs the PRE-FIX Control,
   which is test 3, still `[pending]`, against build 68199fa, owned by plan 08-17. One provider,
-  one platform, one Caido version (0.58.2), one build.
+  one platform, one Caido version (0.58.2), one build."
 note: Previously satisfied by attestation on 2026-08-24 — `approved` with no numeric values supplied. Re-testing here to convert the attestation into a measurement and to exclude the confounder that the provider CLI may kill its own child.
 
 ### 10. The timeout path leaves no orphan either
@@ -283,8 +379,8 @@ scope_and_caveats: >-
 
 total: 10
 passed: 2
-issues: 2
-pending: 6
+issues: 3
+pending: 5
 at_risk: 1
 degraded_as_designed: 1
 skipped: 0
