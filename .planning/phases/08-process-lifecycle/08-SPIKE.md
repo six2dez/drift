@@ -681,9 +681,21 @@ resolving toward a convenient value.
 ## The patched-probe A1 re-run and the pre-fix Control — TAKEN 2026-08-31 on the maintainer's hardware
 
 **Staged empty by plan 08-17 task 1; FILLED 2026-08-31 by plan 08-17 task 3** from readings the
-maintainer took on their own machine, on the probe build task 1 produced. Of the **17** staged value
-cells, **15 carry a verbatim transcription** and **2 carry a dated marked abstention** naming what
-stopped them. 15 + 2 = 17; there are no unexplained blanks. No cell was filled from a neighbouring
+maintainer took on their own machine, on the probe build task 1 produced. **The census below was
+derived by enumerating the rows, not asserted** — this phase's carrier and cell counts have been
+wrong five times, and a count nobody re-derived is the defect this whole gap-closure round exists
+to correct. Tables 1 and 2 carry **20** value cells between them (11 + 9; table 2 gained two rows
+this plan added, the chat identity and the Stop corroboration):
+
+| Class | Count | Which |
+|---|---|---|
+| **Verbatim transcription of a 2026-08-31 reading** | **13** | table 1: date, platform, Caido version, `spikeProcessKillType`, `spikeDetachedGroupKill`, `spikeNote`, fixture count (7). Table 2: date, chat/turn, Stop corroboration, count during, count after, survivor (6) |
+| **Dated marked abstention**, naming what stopped it | **1** | table 1: the eyeball `ps` scan for leftover fixture rows |
+| **Not applicable** — the cell's precondition did not obtain | **1** | table 1: the inconclusive reason token. Recorded as n/a rather than as an abstention, because this is not a reading anybody failed to take |
+| **Provenance / cross-reference**, filled by task 1 or from plan 08-16 rather than by this session | **3** | table 1: probe build. Table 2: build identity, what it pairs with |
+| **Verdict row** — the table's own labelled conclusion over the cells above | **2** | one per table |
+
+13 + 1 + 1 + 3 + 2 = **20**; there are no unexplained blanks. No cell was filled from a neighbouring
 cell, and no cell was filled from an expectation.
 
 **Read this before the tables, because it is the largest thing in the section and the tables alone
