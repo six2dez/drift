@@ -323,7 +323,7 @@ Plans:
   4. Session finalize / `stopMcpServer` kills all tracked pids before sweeping the temp dir, so token-bearing processes die before their env-source files are removed.
   5. macOS/Linux cancellation and timeout semantics visible to the user are unchanged and existing tests stay green.
 
-**Plans**: 19/19 plans executed (10/10 earlier plans and 7/9 verification-gap plans executed; 2 third-round gap-closure plans added 2026-08-31 from `08-VERIFICATION.md`)
+**Plans**: 23 plans total — 19 executed; 4 fourth-round gap-closure plans ready to execute from the 2026-08-31 final verification/review
 
 Plans:
 
@@ -413,6 +413,26 @@ Plans:
 **Gap Wave 12** *(blocked on Gap Wave 11; consumes the corrected `08-SECURITY.md` A1 carrier)*
 
 - [x] 08-19-PLAN.md — Roll T-08-51…T-08-88 into a current evidence-backed security register and add a non-vacuous citation-integrity gate over live package and Phase 8 support artifacts (LIF-01, LIF-02)
+
+---
+
+*Fourth gap-closure round (planned 2026-08-31 from the final `08-VERIFICATION.md`, score 10/20). The two prior record gaps are joined by three reproducible warning-level code defects and a stale audit boundary: retired provider-start identity, token-config ownership, runtime-artifact reuse, LIF-02 traceability, the safe two-case Windows contract, and a final-head security re-audit. Native-Windows execution and real-provider causality remain explicitly open.*
+
+**Gap Wave 13** *(blocked on Gap Wave 12; closes final review WR-01 first)*
+
+- [ ] 08-20-PLAN.md — Replace path-equality retirement inference with explicit provider-start identity and execute the invalidated-lease/equal-pointer/root-recreation interleaving (LIF-01, LIF-02)
+
+**Gap Wave 14** *(blocked on Gap Wave 13; shares `index.ts` and its source gate)*
+
+- [ ] 08-21-PLAN.md — Own Claude/Copilot configs before write, atomically publish them, and retain ownership across unlink failure with real-filesystem tests (LIF-01, LIF-02)
+
+**Gap Wave 15** *(blocked on Gap Wave 14; shares Start wiring and its source gate)*
+
+- [ ] 08-22-PLAN.md — Require readable regular runtime artifacts plus parseable context before reuse, with real-filesystem directory/unreadable/malformed cases (LIF-01, LIF-02)
+
+**Gap Wave 16** *(blocked on Gap Waves 13–15; consumes the final package head)*
+
+- [ ] 08-23-PLAN.md — Correct LIF-02/Windows living records, prove the safe 2/2 contract, and re-audit T-08-01…T-08-94 at the final code head (LIF-01, LIF-02)
 
 **Research flag**: RESOLVED 2026-08-24 by `08-RESEARCH.md`. The primitives are indeed standard; the **mechanism** was not. `detached: true` is source-verified honoured by Caido's LLRT fork (`command.process_group(0)`), but the canonical group-signalling spelling `process.kill(-pid, sig)` **throws** there — LLRT types `pid` as `u32` and rquickjs range-checks through `f64`, raising `Underflow` before `libc::kill` is reached — while working perfectly under Node, the only vehicle any CI leg in this repository runs. SC-2 is amended in place by plan 08-05 accordingly (see the criterion's own note).
 
@@ -539,7 +559,7 @@ Parallelism opportunities: Phase 2 may run alongside Phase 3 (both depend only o
 | 5. Kill Shell Wrappers | 6/6 | Complete   | 2026-08-20 |
 | 6. Windows Command Resolution | 7/7 | Complete    | 2026-08-21 |
 | 7. Provider Spawn & Registration | 0/3 | Not started | - |
-| 8. Process Lifecycle | 19/19 | In Progress|  |
+| 8. Process Lifecycle | 19/23 | In Progress|  |
 | 9. CI Hardening | 0/1 | Not started | - |
 | 10. Windows Polish | 0/1 | Not started | - |
 | 11. Plugin Capability Discovery | 0/3 | Not started | - |
