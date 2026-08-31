@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { appendBounded, createBoundedBuffer } from "./bounded-buffer";
 
 import {
   buildKillTreePlan,
@@ -710,6 +711,16 @@ describe("parseOrphanScanPids — text from another process becomes numbers exac
     ).toEqual([123, 124]);
   });
 
+  it("rejects numeric prefixes, decimals, multiple values and unsafe integers", () => {
+    expect(
+      parseOrphanScanPids({
+        stdout:
+          "123junk\n123 456\n123.9\n+123\n9007199254740992\n00123\n",
+        excludePids: [],
+      }),
+    ).toEqual([123]);
+  });
+
   it("drops 0, 1 and any negative — the floor is 1, not 0", () => {
     // `0` is a process-GROUP reference on POSIX (signalling it would signal
     // Drift's own group) and `1` is init. Neither can ever be a Drift MCP child,
@@ -841,6 +852,27 @@ describe("the orphan path never renders a pid as a leading-minus operand (GD-01)
 const FRESH = { scanAgeMs: 5, scanFreshnessBudgetMs: 1000 } as const;
 
 describe("classifyOrphanScanOutcome — every unavailable-enumeration outcome is a no-op", () => {
+  it("fails closed when the bounded output head ends with a partial pid line", () => {
+    let output = createBoundedBuffer({ maxChars: 6, retention: "head" });
+    output = appendBounded(output, "123\n456789\n");
+
+    // The retained text alone looks like two valid pids (`123` and `45`). The
+    // dropped-byte signal is what proves the second line is incomplete.
+    expect(parseOrphanScanPids({ stdout: output.head, excludePids: [] })).toEqual([
+      123, 45,
+    ]);
+    expect(output.droppedChars).toBeGreaterThan(0);
+    expect(
+      classifyOrphanScanOutcome({
+        spawnThrew: false,
+        exitCode: 0,
+        timedOut: false,
+        outputTruncated: output.droppedChars > 0,
+        pids: parseOrphanScanPids({ stdout: output.head, excludePids: [] }),
+        ...FRESH,
+      }),
+    ).toEqual({ kind: "noop", kill: false, reason: "scan-failed" });
+  });
   // RED INPUT for the whole block: make any single arm return `kill: true` and
   // that arm's case goes red; hardwire the classifier to refuse and the positive
   // case at the end goes red. The two directions are what make this block a

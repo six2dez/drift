@@ -3889,12 +3889,14 @@ function reapMcpOrphans(
     spawnThrew: boolean;
     exitCode: number | null | undefined;
     timedOut: boolean;
+    outputTruncated: boolean;
     stdout: string;
   }): void => {
     const outcome = classifyOrphanScanOutcome({
       spawnThrew: result.spawnThrew,
       exitCode: result.exitCode,
       timedOut: result.timedOut,
+      outputTruncated: result.outputTruncated,
       pids: parseOrphanScanPids({ stdout: result.stdout, excludePids }),
       // THE AGE, MEASURED RATHER THAN ASSUMED. The `setTimeout` below already
       // bounds this window when it gets to run; on a starved event loop it does
@@ -3999,6 +4001,7 @@ function reapMcpOrphans(
       spawnThrew: true,
       exitCode: undefined,
       timedOut: false,
+      outputTruncated: false,
       stdout: "",
     });
     return;
@@ -4019,6 +4022,7 @@ function reapMcpOrphans(
       spawnThrew: false,
       exitCode: undefined,
       timedOut: true,
+      outputTruncated: false,
       stdout: "",
     });
   }, ORPHAN_SCAN_TIMEOUT_MS);
@@ -4035,6 +4039,7 @@ function reapMcpOrphans(
       spawnThrew: true,
       exitCode: undefined,
       timedOut: false,
+      outputTruncated: false,
       stdout: "",
     });
   });
@@ -4049,6 +4054,7 @@ function reapMcpOrphans(
       spawnThrew: false,
       exitCode: code,
       timedOut: false,
+      outputTruncated: out.droppedChars > 0,
       stdout: out.head,
     });
   });

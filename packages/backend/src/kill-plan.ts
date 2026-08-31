@@ -652,8 +652,14 @@ export function parseOrphanScanPids(input: {
   for (const rawLine of input.stdout.split("\n")) {
     const line = rawLine.trim();
     if (line === "") continue;
-    const parsed = Number.parseInt(line, 10);
-    if (!Number.isInteger(parsed)) continue;
+    // `parseInt` is deliberately not used: it accepts a numeric PREFIX, so a
+    // truncated `123456` line retained as `123` or a diagnostic like `123junk`
+    // can manufacture the pid of an unrelated process. Only one complete
+    // ASCII-decimal line is evidence, and the converted value must remain exact
+    // in JavaScript's integer representation (T-08-23).
+    if (!/^[0-9]+$/.test(line)) continue;
+    const parsed = Number(line);
+    if (!Number.isSafeInteger(parsed)) continue;
     // THE FLOOR IS 1, NOT 0, and both excluded values have their own reason: `0`
     // is a process-GROUP reference on POSIX (signalling it would signal Drift's
     // own group) and `1` is init. Neither can ever be a Drift MCP child, so
@@ -786,6 +792,7 @@ export function classifyOrphanScanOutcome(input: {
   spawnThrew: boolean;
   exitCode: number | null | undefined;
   timedOut: boolean;
+  outputTruncated?: boolean;
   pids: number[];
   scanAgeMs: number;
   scanFreshnessBudgetMs: number;
@@ -801,6 +808,13 @@ export function classifyOrphanScanOutcome(input: {
   // count on a teardown path for a scan that is best-effort by construction.
   if (input.timedOut) {
     return { kind: "noop", kill: false, reason: "scan-timeout" };
+  }
+
+  // A head-retained buffer can end halfway through a pid line. Even the strict
+  // parser cannot distinguish that prefix from a complete line, so truncation
+  // invalidates the whole enumeration before any pid can reach a signal.
+  if (input.outputTruncated === true) {
+    return { kind: "noop", kill: false, reason: "scan-failed" };
   }
 
   // THE FRESHNESS ARM, above every arm that can reach a kill. See the FRESHNESS
