@@ -1,4 +1,4 @@
-import { spawn } from "child_process";
+import { spawn, type ChildProcess } from "child_process";
 import { existsSync } from "fs";
 import { mkdtemp, rm, writeFile } from "fs/promises";
 import os from "os";
@@ -65,15 +65,20 @@ const SETTLE_MS = 1000;
 const FIXTURE_LIFETIME_MS = 20000;
 
 const tempDirs: string[] = [];
-const strayPids: number[] = [];
+const strayParents: ChildProcess[] = [];
+
+function forgetOwnedParent(parent: ChildProcess): void {
+  const index = strayParents.indexOf(parent);
+  if (index !== -1) strayParents.splice(index, 1);
+}
 
 afterEach(async () => {
-  for (const pid of strayPids.splice(0)) {
-    try {
-      process.kill(pid, "SIGKILL");
-    } catch {
-      /* already gone */
-    }
+  // Only owned handles are eligible for forceful cleanup. The grandchild has
+  // no handle in this process and therefore relies on FIXTURE_LIFETIME_MS; a
+  // numeric pid can be recycled between an exit observation and this hook.
+  for (const parent of strayParents.splice(0)) {
+    if (parent.exitCode !== null || parent.signalCode !== null) continue;
+    parent.kill("SIGKILL");
   }
   await Promise.all(
     tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })),
@@ -196,13 +201,18 @@ async function spawnFixtureTree(): Promise<FixtureTree> {
 
   const parentPid = parent.pid;
   if (parentPid === undefined) throw new Error("fixture parent did not spawn");
-  strayPids.push(parentPid);
+  strayParents.push(parent);
 
   // Resolved from the EXIT EVENT rather than from a liveness probe, the same
   // reason `kill-tree.posix.test.ts` gives: the event is the unambiguous signal
   // that the handle this process holds has been reaped.
   const parentExited = new Promise<void>((resolve) => {
-    parent.on("exit", () => resolve());
+    parent.on("exit", () => {
+      // Remove the owned handle at the same instant its exit is established;
+      // afterEach must never translate that stale identity back to a raw pid.
+      forgetOwnedParent(parent);
+      resolve();
+    });
   });
 
   const reported = await new Promise<number[]>((resolve, reject) => {
@@ -237,7 +247,6 @@ async function spawnFixtureTree(): Promise<FixtureTree> {
   if (reportedParentPid !== parentPid) {
     throw new Error("fixture parent reported a pid other than its own");
   }
-  strayPids.push(grandchildPid);
 
   return { parentPid, grandchildPid, parentExited };
 }

@@ -35,6 +35,10 @@ const ciWorkflow = readFileSync(
 );
 
 const WIN32_SUITE_PATH = "packages/backend/src/kill-tree.win32.test.ts";
+const win32SuiteSource = readFileSync(
+  fileURLToPath(new URL(WIN32_SUITE_PATH, repoRoot)),
+  "utf-8",
+);
 
 // The Phase 8 anchors, and the Phase 7 anchors they must not collide with
 // (recorded decision D-P2). Spelled as constants so the sixth case below reads
@@ -102,11 +106,20 @@ describe("the windows CI leg asserts the win32 kill-tree suite ran (LIF-01)", ()
   it("still needs the gate: the suite is platform-gated and skips silently elsewhere", () => {
     // The falsifiability partner. If someone removes the `skipIf`, this test
     // fails and the gate's justification has to be re-read rather than assumed.
-    const suite = readFileSync(
-      fileURLToPath(new URL(WIN32_SUITE_PATH, repoRoot)),
-      "utf-8",
+    expect(win32SuiteSource).toContain(
+      'describe.skipIf(process.platform !== "win32")',
     );
-    expect(suite).toContain('describe.skipIf(process.platform !== "win32")');
+  });
+
+  it("never force-signals a raw fixture pid after its owned process exited (WR-02)", () => {
+    expect(win32SuiteSource).toContain("const strayParents:");
+    expect(win32SuiteSource).toContain("forgetOwnedParent(parent);");
+    expect(win32SuiteSource).toContain("parent.kill(\"SIGKILL\")");
+    expect(win32SuiteSource).toContain("FIXTURE_LIFETIME_MS");
+    expect(win32SuiteSource).not.toContain("strayPids");
+    expect(win32SuiteSource).not.toMatch(
+      /process\.kill\([^,]+,\s*["']SIGKILL["']\)/,
+    );
   });
 
   // THE SIXTH CASE, unique to Phase 8, and the direct closure of the collision
