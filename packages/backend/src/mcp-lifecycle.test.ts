@@ -1,9 +1,14 @@
+import { mkdtemp, mkdir, rm, stat } from "fs/promises";
+import { tmpdir } from "os";
+import { join } from "path";
+
 import { describe, expect, it } from "vitest";
 
 import {
   acquireProviderStartLease,
   acquireMcpDirectCall,
   beginMcpRuntimeGeneration,
+  cleanupRetiredProviderStartRoot,
   commitProviderStartLease,
   countMcpDirectCalls,
   createMcpLifecycleState,
@@ -11,6 +16,7 @@ import {
   getMcpStartDisposition,
   isMcpOrphanReapGateCurrent,
   isMcpRuntimeEpochCurrent,
+  releaseProviderStartLease,
   releaseMcpDirectCall,
   retireMcpDirectCalls,
   runMcpLifecycleOperation,
@@ -244,6 +250,100 @@ describe("MCP start disposition", () => {
 });
 
 describe("provider start lease", () => {
+  it("consumes only the exact retired lease identity and only once", async () => {
+    const state = createMcpLifecycleState();
+    beginMcpRuntimeGeneration(state);
+    const runtimeDir = "/tmp/drift-mcp-retired-identity";
+    const lease = acquireProviderStartLease(state, runtimeDir);
+    expect(lease).toBeDefined();
+
+    let finishTeardown: () => void = () => undefined;
+    const teardownCanFinish = new Promise<void>((resolve) => {
+      finishTeardown = resolve;
+    });
+    const teardown = runMcpProviderTeardown(state, async () => {
+      await teardownCanFinish;
+    });
+
+    const equalLookingLease = { ...lease! };
+    expect(releaseProviderStartLease(state, equalLookingLease)).toBe(false);
+    expect(releaseProviderStartLease(state, lease!)).toBe(true);
+    expect(releaseProviderStartLease(state, lease!)).toBe(false);
+
+    finishTeardown();
+    await teardown;
+  });
+
+  it("preserves an outer teardown's retired lease through a nested teardown", async () => {
+    const state = createMcpLifecycleState();
+    beginMcpRuntimeGeneration(state);
+    const lease = acquireProviderStartLease(
+      state,
+      "/tmp/drift-mcp-nested-retired",
+    );
+    expect(lease).toBeDefined();
+
+    await runMcpProviderTeardown(state, async () => {
+      await runMcpProviderTeardown(state, async () => undefined);
+      expect(releaseProviderStartLease(state, lease!)).toBe(true);
+      expect(releaseProviderStartLease(state, lease!)).toBe(false);
+    });
+  });
+
+  it("removes a recreated retired root while the installed pointer is equal", async () => {
+    const state = createMcpLifecycleState();
+    beginMcpRuntimeGeneration(state);
+    const runtimeDir = await mkdtemp(
+      join(tmpdir(), "drift-mcp-retired-root-"),
+    );
+    const lease = acquireProviderStartLease(state, runtimeDir);
+    expect(lease).toBeDefined();
+
+    let finishTeardown: () => void = () => undefined;
+    const teardownCanFinish = new Promise<void>((resolve) => {
+      finishTeardown = resolve;
+    });
+    const teardown = runMcpProviderTeardown(state, async () => {
+      await teardownCanFinish;
+    });
+
+    await rm(runtimeDir, { recursive: true, force: true });
+    await mkdir(runtimeDir, { recursive: true });
+    const installedPointer = runtimeDir;
+    const retired = releaseProviderStartLease(state, lease!);
+
+    await cleanupRetiredProviderStartRoot({
+      retired,
+      tempDir: runtimeDir,
+      removeRoot: async (root) => {
+        await rm(root, { recursive: true, force: true });
+      },
+    });
+
+    expect(installedPointer).toBe(runtimeDir);
+    await expect(stat(runtimeDir)).rejects.toMatchObject({ code: "ENOENT" });
+    finishTeardown();
+    await teardown;
+  });
+
+  it("does not retire a lease that commits while current", () => {
+    const state = createMcpLifecycleState();
+    beginMcpRuntimeGeneration(state);
+    const runtimeDir = "/tmp/drift-mcp-current-negative-control";
+    const lease = acquireProviderStartLease(state, runtimeDir);
+    expect(lease).toBeDefined();
+
+    expect(
+      commitProviderStartLease({
+        state,
+        lease: lease!,
+        currentTempDir: runtimeDir,
+        commit: () => "spawned",
+      }),
+    ).toEqual({ kind: "committed", value: "spawned" });
+    expect(releaseProviderStartLease(state, lease!)).toBe(false);
+  });
+
   it("refuses a paused start after teardown and lets the caller remove staged files", async () => {
     const state = createMcpLifecycleState();
     beginMcpRuntimeGeneration(state);
