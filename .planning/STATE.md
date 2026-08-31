@@ -4,16 +4,16 @@ milestone: v1.0
 current_phase: 08
 current_phase_name: Process Lifecycle
 status: executing
-stopped_at: Completed 08-21-PLAN.md
-last_updated: "2026-08-31T16:28:05.042Z"
+stopped_at: Completed 08-22-PLAN.md
+last_updated: "2026-08-31T16:37:35.443Z"
 last_activity: 2026-08-31
-last_activity_desc: Completed 08-21; 08-22 is next
-state_head: 6e46ebe4e0dabc3176e50914a394fa40e6f957bb
+last_activity_desc: Completed 08-22; 08-23 is next
+state_head: 12a7136d358786b15d377c43ed3ba234cc0004b8
 progress:
   total_phases: 13
   completed_phases: 5
   total_plans: 63
-  completed_plans: 61
+  completed_plans: 62
 verification_status: gaps_found
 verification_score: 10/20 must-haves verified
 milestone_name: milestone
@@ -31,9 +31,9 @@ See: .planning/PROJECT.md (updated 2026-06-26)
 ## Current Position
 
 Phase: 08 (Process Lifecycle) — EXECUTING
-Plan: 21 of 23 complete; next 08-22
+Plan: 22 of 23 complete; next 08-23
 Status: Ready to execute
-Last activity: 2026-08-31 — Completed 08-21 atomic provider-config ownership repair; 08-22 is next
+Last activity: 2026-08-31 — Completed 08-22 content-aware runtime health repair; 08-23 is next
 Verification: `08-VERIFICATION.md` rules **`gaps_found`, score 10/20 must-haves verified** (2026-08-31T15:01:21Z). The truth frame grew from 14 to 20 after the final review and record checks, so this is not directly comparable to the superseded 9/14, 4/9, or 2/8 verdicts; the report preserves every transition.
 
 Progress: [███░░░░░░░] 30% (3 of 10 milestone phases)
@@ -92,6 +92,7 @@ Progress: [███░░░░░░░] 30% (3 of 10 milestone phases)
 | Phase 08 P19 | 31 min | 3 tasks | 6 files |
 | Phase 08 P20 | 3 min | 2 tasks | 4 files |
 | Phase 08 P21 | 3 min | 2 tasks | 4 files |
+| Phase 08 P22 | 4 min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -267,6 +268,10 @@ Recent decisions affecting current work:
 - [Phase 08]: Phase 08 Plan 19: leave LIF-01 and LIF-02 unchecked; citation/register integrity supplies neither native-Windows execution nor real-turn causality
 - [Phase 08]: Provider-start retirement is an exact one-shot lease tombstone; path equality never authorizes or suppresses retired-root cleanup. — This closes WR-01 without allowing an equal-looking lease or a reused pathname to delete a current generation.
 - [Phase 08]: Token-bearing provider configs are owned at both final and staging paths before I/O, atomically promoted, and forgotten only after confirmed removal. — This closes WR-02 without weakening retry diagnostics, 0o600/0o700 modes, or the expandable-value refusal.
+- [Phase 08]: Runtime reuse now requires a readable regular server file and a readable JSON object context. — Existence-only checks admitted directories, unreadable objects, and malformed context.
+- [Phase 08]: Artifact inspection fails closed through three explicit presence fields and never throws into Start. — The existing lifecycle disposition remains the single reuse-or-replace decision.
+- [Phase 08]: The server artifact is opened and closed for read without execution or import. — Readability is required without trusting or interpreting staged code.
+- [Phase 08]: LIF-01 and LIF-02 remain open after portable WR-03 closure. — Native Windows execution and wider real-provider causality are still unmeasured.
 
 ### Pending Todos
 
@@ -323,8 +328,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-31T16:28:04.794Z
-Stopped at: Completed 08-21-PLAN.md
+Last session: 2026-08-31T16:37:35.191Z
+Stopped at: Completed 08-22-PLAN.md
 Resume file: None
 
 **Live on the public remote: nothing of ours.** Plan 03-04 tore down all three `scratch/*` branches (`ci-proof-windows-probe`, `ci-proof-windows-probe-negative`, `ci-proof-windows-gate-negative`) locally and remotely. Asserted with a `test -z` discrimination over the captured glob (`scratch-glob-empty=0`) plus the full unfiltered listing, which now shows only `main` at `2d8cf16` and the pre-existing, unrelated `fix/security-hotfixes` at `0cd81f3`. `origin/main` was never pushed by this phase and is still `2d8cf16`; local `main` is 23 commits ahead and deliberately unpushed. **Re-verified 2026-08-13 (plan 03-05):** the remote still lists only `main` `2d8cf16` and the pre-existing `fix/security-hotfixes` `0cd81f3`, and all eight Phase 3 run records (4 probe + 4 `CI` control) still resolve with their recorded conclusions — which is what makes the URLs in `03-FINDINGS.md` valid citations after the branches were deleted. The probe **artifacts** do not survive: they expire 2026-09-12, which is why D-11 required the committed findings document.
