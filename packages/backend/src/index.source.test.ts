@@ -957,6 +957,25 @@ describe("index.ts wires the orphan reap at every counted site and nowhere else 
     expect(body.indexOf("killTree(")).toBeLessThan(body.indexOf("rm("));
   });
 
+  it("cleanupMcpRuntime removes only its captured directory and guards stale mutations", () => {
+    const body = functionBody(code, "cleanupMcpRuntime");
+    expect(body).not.toBe("");
+    expect(body).toContain("const cleanupTempDir = mcpTempDir");
+    expect(body.indexOf("const cleanupTempDir = mcpTempDir")).toBeLessThan(
+      body.indexOf("await unregisterMcpFromCli"),
+    );
+    expect(body).toContain(
+      "await rm(cleanupTempDir, { recursive: true, force: true })",
+    );
+    expect(body).not.toContain("await rm(mcpTempDir");
+    expect(
+      body.match(
+        /isMcpRuntimeEpochCurrent\(mcpLifecycle, cleanupEpoch\)/g,
+      ) ?? [],
+    ).toHaveLength(2);
+    expect(body).toContain("mcpTempDir !== cleanupTempDir");
+  });
+
   // 4. FIRE-AND-FORGET, exactly as the shipped `await killTree` gate is. Awaiting
   // either reap would suspend an RPC handler on a child-process callback and a
   // timer Caido's runtime does not reliably deliver during an await — the
@@ -982,48 +1001,29 @@ describe("index.ts wires the orphan reap at every counted site and nowhere else 
     expect(code).toContain("reapSessionOrphansIfIdle(");
   });
 
-  // 5. THE DEPTH COUNTER'S SYMMETRY. `callMcpMethod` spawns `node
+  // 5. THE GENERATION TOKEN'S SYMMETRY. `callMcpMethod` spawns `node
   // mcp-server.mjs` directly and that child's argv is byte-identical to a CLI's
-  // MCP child, so the idle reap would select it (T-08-28). The counter is what
-  // excludes it, and a counter with two increments or two decrements is a
-  // counter that drifts — in the decrement direction it would open the gate on a
-  // live self-test.
-  //
-  // WIDENED 2026-08-27 (review CR-01). The arithmetic moved OUT of
-  // `callMcpMethod` and into the two shared mutators, because the counter has to
-  // cover a CLASS of three Drift-owned spawns rather than the one member that
-  // happened to be written first. The exact-one totals are unchanged and are now
-  // the stronger claim: one spelling of the increment and one of the release for
-  // the whole file, wherever they are called from.
-  //
-  // RED INPUT: add a second increment or a second release anywhere, move either
-  // out of its mutator, or drop `callMcpMethod`'s acquire, and this fails.
-  it("increments and releases the direct-call depth exactly once each, through the shared mutators", () => {
-    expect(code.match(/mcpDirectCallDepth \+= 1/g) ?? []).toHaveLength(1);
-    expect(
-      code.match(/mcpDirectCallDepth = Math\.max\(0, mcpDirectCallDepth - 1\)/g) ??
-        [],
-    ).toHaveLength(1);
-    // The UNCLAMPED spelling must be gone, not merely outnumbered. A bare
-    // `-= 1` alongside the clamped one would restore the negative-depth path
-    // the clamp exists to close, while both totals above stayed at 1.
-    expect(code.match(/mcpDirectCallDepth -= 1/g)).toBeNull();
+  // MCP child, so the idle reap would select it (T-08-28). An acquire now
+  // returns an epoch-bound identity and every release must carry that SAME
+  // identity; scalar decrement/reset spellings are forbidden because a stale
+  // release could consume a newer generation's slot.
+  it("acquires and releases the exact direct-call token through the shared mutators", () => {
+    expect(code).not.toContain("mcpDirectCallDepth");
 
     const acquire = topLevelDeclarationSlice(code, "acquireDirectMcpCall");
     expect(acquire).not.toBe("");
-    expect(acquire.match(/mcpDirectCallDepth \+= 1/g) ?? []).toHaveLength(1);
+    expect(acquire).toContain("return acquireMcpDirectCall(mcpLifecycle)");
 
     const release = topLevelDeclarationSlice(code, "releaseDirectMcpCall");
     expect(release).not.toBe("");
-    expect(
-      release.match(/mcpDirectCallDepth = Math\.max\(0, mcpDirectCallDepth - 1\)/g) ??
-        [],
-    ).toHaveLength(1);
+    expect(release).toContain("releaseMcpDirectCall(mcpLifecycle, token)");
 
     const slice = topLevelDeclarationSlice(code, "callMcpMethod");
     expect(slice).not.toBe("");
     expect(slice).toContain("spawnWithEnv(");
     expect(slice.match(/acquireDirectMcpCall\(\)/g) ?? []).toHaveLength(1);
+    expect(slice).toContain("const directCallToken = acquireDirectMcpCall()");
+    expect(slice).toContain("releaseDirectMcpCall(directCallToken)");
 
     // Released from ALL THREE handlers, because any of them can be this child's
     // last event and none is guaranteed to fire under Caido's runtime. `exit` is
@@ -1036,25 +1036,32 @@ describe("index.ts wires the orphan reap at every counted site and nowhere else 
     }
   });
 
-  // 5c. THE FAIL-SAFE RESET (review WR-01). The counter is module-level and,
-  // before this, nothing ever wrote zero to it — so a single undelivered release
-  // left the idle gate closed at all four sites for the whole life of the plugin
-  // load. Bounding the counter to the MCP runtime's own lifetime is what makes
-  // that failure recoverable rather than permanent.
-  //
-  // RED INPUT: delete the reset and the count falls to 1 (the declaration alone);
-  // move it out of `cleanupMcpRuntime` and the body assertion goes red while the
-  // total still reads 2.
-  it("zeroes the direct-call depth when the runtime it belongs to is torn down", () => {
-    // TWO occurrences and no more: the declaration's initialiser and this reset.
-    // A third would be a second place the counter can be silently cleared, which
-    // is how a live self-test gets reaped.
-    expect(code.match(/mcpDirectCallDepth = 0/g) ?? []).toHaveLength(2);
-    expect(code).toContain("let mcpDirectCallDepth = 0;");
-
+  // 5c. Cleanup retires only its captured generation. A global reset is the bug:
+  // it lets an old cleanup erase calls acquired by a replacement runtime.
+  it("retires direct-call tokens only for cleanup's captured epoch", () => {
     const cleanup = functionBody(code, "cleanupMcpRuntime");
     expect(cleanup).not.toBe("");
-    expect(cleanup.match(/mcpDirectCallDepth = 0;/g) ?? []).toHaveLength(1);
+    expect(cleanup).toContain(
+      "const cleanupEpoch = getMcpRuntimeEpoch(mcpLifecycle)",
+    );
+    expect(cleanup).toContain(
+      "retireMcpDirectCalls(mcpLifecycle, cleanupEpoch)",
+    );
+    expect(cleanup).not.toContain("mcpLifecycle.directCalls.clear()");
+  });
+
+  it("serializes start, stop and refresh through the same lifecycle queue", () => {
+    const operations = {
+      startMcpServer: "startMcpServerOperation(sdk)",
+      stopMcpServer: "stopMcpServerOperation(sdk)",
+      refreshActiveMcpRuntime: "refreshActiveMcpRuntimeOperation(sdk)",
+    };
+    for (const [name, delegatedCall] of Object.entries(operations)) {
+      const body = functionBody(code, name);
+      expect(body).not.toBe("");
+      expect(body).toContain("runMcpLifecycleOperation(mcpLifecycle");
+      expect(body).toContain(delegatedCall);
+    }
   });
 
   // 5b. THE CR-01 CENSUS — every spawn whose argv carries the MCP server script

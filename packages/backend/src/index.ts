@@ -60,6 +60,18 @@ import {
   buildGeminiLaunchArgs,
 } from "./provider-launch";
 import {
+  acquireMcpDirectCall,
+  beginMcpRuntimeGeneration,
+  countMcpDirectCalls,
+  createMcpLifecycleState,
+  getMcpRuntimeEpoch,
+  isMcpRuntimeEpochCurrent,
+  releaseMcpDirectCall,
+  retireMcpDirectCalls,
+  runMcpLifecycleOperation,
+  type DirectMcpCallToken,
+} from "./mcp-lifecycle";
+import {
   MCP_SELF_TEST_CHECKS,
   MCP_TOOL_NAMES,
   buildMcpToolPolicy,
@@ -325,25 +337,22 @@ const sessionWatchdogs = new Map<string, () => void | Promise<void>>();
 // getMcpStatus RPC handler (via a frontend keep-alive ping) to prod the
 // pending callMcpMethod promise when Caido's event loop has gone idle.
 let activeSelfTestPoll: (() => void) | undefined;
-// How many of Drift's OWN direct `node mcp-server.mjs` spawns are currently
-// running. `callMcpMethod` spawns the MCP server directly for the self-test, and
+// Generation-scoped identities for Drift's OWN direct `node mcp-server.mjs`
+// spawns. `callMcpMethod` spawns the MCP server directly for the self-test, and
 // that child's command line is BYTE-IDENTICAL to the one a provider CLI's MCP
 // child carries — so the idle orphan reap's argv pattern selects it too. At
 // teardown that is correct: everything must die. At an IDLE reap it is not, and
 // killing it would surface to the user as a self-test failure with no visible
 // cause (T-08-28).
 //
-// A COUNTER AND NOT A PID EXCLUSION LIST, deliberately. A stale pid in such a
-// list would shield a genuine orphan that later reused the number — T-08-04's
-// failure shape pointed the wrong way. A counter cannot go stale in that
-// direction: if a release never runs (Caido's runtime does not reliably deliver
-// child_process callbacks while an RPC is awaiting) the depth stays POSITIVE and
-// the idle reap is SUPPRESSED. That is the safe direction, and it is the same
-// rule `hasTrackedProcessExited` and `isPidAlive` already follow — every unknown
-// in this phase resolves toward NOT killing.
+// TOKENS AND NOT A PID EXCLUSION LIST, deliberately. A stale pid in such a list
+// would shield a genuine orphan that later reused the number — T-08-04's failure
+// shape pointed the wrong way. A token that never releases keeps its generation's
+// depth positive and suppresses the idle reap, the safe direction. Unlike the old
+// scalar, a late release from a retired generation cannot decrement a newer one.
 // CORRECTION, 2026-08-27 (review CR-01). The paragraph above states what this
-// counter is FOR. It did not state what it COVERED. Until this fix the one
-// increment sat inside `callMcpMethod` alone, while THREE Drift-owned spawns
+// guard is FOR. It did not state what it COVERED. Until this fix the one acquire
+// sat inside `callMcpMethod` alone, while THREE Drift-owned spawns
 // carry an argv the reaper's pattern selects:
 //
 //   1. `callMcpMethod`'s self-test child — `node <mcpTempDir>/mcp-server.mjs`.
@@ -360,30 +369,23 @@ let activeSelfTestPoll: (() => void) | undefined;
 // Drift's OWN auth probe, `kill -KILL` took it mid-request, `validateCaidoAuth`
 // read the empty output as a generic failure and `refreshActiveMcpRuntime`
 // called `cleanupMcpRuntime` — Drift tearing down its entire MCP runtime because
-// the user clicked Stop. The counter now covers the CLASS rather than one member
-// of it, through the two mutators below and nowhere else.
-let mcpDirectCallDepth = 0;
+// the user clicked Stop. The token set covers the CLASS rather than one member
+// of it, through the two mutators below and nowhere else. The same state owns the
+// FIFO used by start, stop and refresh, so those operations cannot cross awaits.
+const mcpLifecycle = createMcpLifecycleState();
 
-// THE ONLY TWO STATEMENTS THAT MOVE THE COUNTER. They are functions rather than
-// inline arithmetic so the class above has exactly ONE spelling in each
-// direction: `index.source.test.ts` asserts `mcpDirectCallDepth += 1` and its
-// release each appear exactly once in this file, which is the machine form of
-// the claim. A fourth direct spawn cannot raise the depth by writing its own
-// arithmetic without turning that gate red.
-function acquireDirectMcpCall(): void {
-  mcpDirectCallDepth += 1;
+// The only two local boundaries that acquire/release a token. Keeping them
+// named makes the class census in `index.source.test.ts` non-vacuous and ensures
+// every event-bound release carries the exact identity returned at acquire.
+function acquireDirectMcpCall(): DirectMcpCallToken {
+  return acquireMcpDirectCall(mcpLifecycle);
 }
 
-// CLAMPED AT ZERO (review WR-01), and the clamp is load-bearing rather than
-// defensive padding. `cleanupMcpRuntime` resets this counter to 0, and a release
-// that arrives AFTER such a reset — a `close` for a self-test child that was
-// killed by the teardown, an `mcp add` whose await was still unwinding — would
-// otherwise drive the depth NEGATIVE. `shouldReapSessionOrphans` demands an
-// EXACT zero, so a negative depth suppresses every idle reap for the rest of the
-// plugin load: the same permanent disablement the reset exists to prevent,
-// reintroduced by the reset itself.
-function releaseDirectMcpCall(): void {
-  mcpDirectCallDepth = Math.max(0, mcpDirectCallDepth - 1);
+// Releases are identity deletions, not arithmetic. Cleanup retires only tokens
+// carrying its captured epoch; a later close/error from that child may delete
+// its already-retired token but cannot touch any replacement generation.
+function releaseDirectMcpCall(token: DirectMcpCallToken): void {
+  releaseMcpDirectCall(mcpLifecycle, token);
 }
 
 // The guard for a direct MCP spawn Drift AWAITS, as distinct from the one it
@@ -399,11 +401,11 @@ function releaseDirectMcpCall(): void {
 // and balances them against the file total, so a fourth such spawn added
 // outside this helper goes red.
 async function withDirectMcpCall<T>(run: () => Promise<T>): Promise<T> {
-  acquireDirectMcpCall();
+  const token = acquireDirectMcpCall();
   try {
     return await run();
   } finally {
-    releaseDirectMcpCall();
+    releaseDirectMcpCall(token);
   }
 }
 
@@ -2140,7 +2142,9 @@ async function updateSettings(
       syncError =
         `Settings were saved, but Drift failed to refresh the MCP runtime: ${String(e)}`;
       sdk.console.error(`[drift] ${syncError}`);
-      await cleanupMcpRuntime(sdk, "error", syncError);
+      await runMcpLifecycleOperation(mcpLifecycle, () =>
+        cleanupMcpRuntime(sdk, "error", syncError),
+      );
     }
   }
   if (resetCliSessions) cliSessions.clear();
@@ -2155,7 +2159,17 @@ async function updateSettings(
   return ok(currentSettings);
 }
 
-async function refreshActiveMcpRuntime(sdk: BackendSDK): Promise<string | undefined> {
+async function refreshActiveMcpRuntime(
+  sdk: BackendSDK,
+): Promise<string | undefined> {
+  return runMcpLifecycleOperation(mcpLifecycle, () =>
+    refreshActiveMcpRuntimeOperation(sdk),
+  );
+}
+
+async function refreshActiveMcpRuntimeOperation(
+  sdk: BackendSDK,
+): Promise<string | undefined> {
   const mcpScriptPath = getTempMcpScriptPath();
   if (mcpScriptPath === undefined) return undefined;
 
@@ -2494,19 +2508,17 @@ async function callMcpMethod(
       detached: false,
     });
 
-    // THE ONE INCREMENT, immediately after the spawn RETURNS — not before it.
+    // THE ONE ACQUIRE, immediately after the spawn RETURNS — not before it.
     // `spawnWithEnv` throws synchronously for an unspawnable file, and a throw
-    // above this line means no process exists to protect; placing the increment
-    // here means such a throw leaks nothing, because the counter was never
-    // raised.
-    acquireDirectMcpCall();
-    // THE ONE RELEASE, guarded so the arithmetic has exactly one site in each
-    // direction. Called from BOTH the `close` and the `error` handler below,
+    // above this line means no process exists to protect; placing the acquire
+    // here means such a throw leaks no token.
+    const directCallToken = acquireDirectMcpCall();
+    // THE ONE RELEASE boundary, called from every terminal handler below,
     // because either can be the last thing this child does and neither is
     // guaranteed to fire.
     //
     // NOT called at the settle paths, and that is the whole distinction: this
-    // counter measures THE PROCESS'S OWN END, not the promise's. `finish()`
+    // token measures THE PROCESS'S OWN END, not the promise's. `finish()`
     // settles the promise and only then asks the child to exit, and the timeout
     // arm settles while the child is still being SIGKILLed — releasing at either
     // would open the idle gate on a process that is still in the table and still
@@ -2521,7 +2533,7 @@ async function callMcpMethod(
     const releaseDirectCall = (): void => {
       if (directCallReleased) return;
       directCallReleased = true;
-      releaseDirectMcpCall();
+      releaseDirectMcpCall(directCallToken);
     };
 
     // NOT a BoundedBuffer, and it must not become one. This is a line-DRAIN
@@ -2676,8 +2688,8 @@ async function callMcpMethod(
     // fs-retry.ts already classifies transient filesystem errors.
     proc.on("error", (error: Error) => {
       // Released FIRST, unconditionally, and before `finish`'s settled guard can
-      // return early. An `error` means this child will never run, so the depth
-      // it reserved must come back whether or not the promise is still pending.
+      // return early. An `error` means this child will never run, so the token
+      // it reserved must be released whether or not the promise is still pending.
       releaseDirectCall();
       finish(() => reject(error));
     });
@@ -2693,12 +2705,9 @@ async function callMcpMethod(
     // alongside `close`. `releaseDirectCall()` is idempotent, so a runtime that
     // delivers both releases once.
     //
-    // WHY THIS IS NOT COSMETIC. The counter is module-level and, before the
-    // reset added to `cleanupMcpRuntime` below, was never zeroed: ONE undelivered
-    // `close` on ONE self-test child left the depth at >=1 and closed the idle
-    // gate at all four sites — cancel, close, delete and turn end — for the whole
-    // life of the plugin load, silently regressing LIF-02. The first thing a user
-    // is likely to do, the "Run preflight" button, is what armed it.
+    // WHY THIS IS NOT COSMETIC. One undelivered terminal event keeps this token
+    // live and closes the idle gate for its runtime generation. Cleanup retires
+    // that generation without allowing its later release to consume a new one.
     proc.on("exit", () => {
       releaseDirectCall();
     });
@@ -2707,7 +2716,7 @@ async function callMcpMethod(
       // Released FIRST, ABOVE the `settled` early return. `close` is the
       // process's actual end, and it fires for a child whose promise the timeout
       // arm already settled — returning early there without releasing would
-      // strand the depth at 1 and suppress every later idle reap.
+      // strand the token and suppress every later idle reap in this generation.
       releaseDirectCall();
       if (settled) return;
       finish(() =>
@@ -4089,7 +4098,7 @@ function reapMcpOrphans(
 // keeps the RPC handler off the event-loop starvation path CLAUDE.md names.
 function reapSessionOrphansIfIdle(sdk: BackendSDK): void {
   const activeSessionCount = activeProcesses.size;
-  const directMcpCallDepth = mcpDirectCallDepth;
+  const directMcpCallDepth = countMcpDirectCalls(mcpLifecycle);
   if (!shouldReapSessionOrphans({ activeSessionCount, directMcpCallDepth })) {
     // THE REFUSAL LOGS (review WR-02). Every other refusal on this path already
     // did: `reapMcpOrphans` logs `no orphan reap: <reason>` for a plan refusal
@@ -4134,8 +4143,21 @@ async function cleanupMcpRuntime(
   authState: McpAuthState = "unknown",
   authMessage = "",
 ): Promise<void> {
+  // Capture identity before the first await. Every later destructive mutation
+  // is conditional on this epoch and this exact directory still being current;
+  // a stale cleanup may finish its own I/O, but it cannot erase a replacement
+  // runtime staged by a newer operation (T-08-27).
+  const cleanupEpoch = getMcpRuntimeEpoch(mcpLifecycle);
+  const cleanupTempDir = mcpTempDir;
   await unregisterMcpFromCli("gemini", sdk);
   await unregisterMcpFromCli("codex", sdk);
+
+  if (
+    !isMcpRuntimeEpochCurrent(mcpLifecycle, cleanupEpoch) ||
+    mcpTempDir !== cleanupTempDir
+  ) {
+    return;
+  }
 
   // SC-4 / LIF-01 / LIF-02 — THE SEAM PHASE 7 MARKED HERE, NOW ACTED ON. Phase 7
   // left a marker at this exact spot recording that the provider process tree
@@ -4213,26 +4235,10 @@ async function cleanupMcpRuntime(
     }
   }
 
-  // THE FAIL-SAFE RESET (review WR-01). The depth counter belongs to the MCP
-  // RUNTIME, and this function is where that runtime ends: every direct MCP
-  // child was staged from the temp directory removed below, and the loop above
-  // has just killed everything Drift holds a handle on. A depth still standing
-  // at this point is a release that never arrived, not a call still in flight.
-  //
-  // Without this the leak is PERMANENT rather than per-operation — the counter
-  // is module-level and nothing else ever writes zero to it — so one undelivered
-  // `close` disabled the idle reap for the rest of the plugin load. Bounding it
-  // to the runtime's own lifetime is what makes the failure recoverable: the
-  // next `startMcpServer` begins from a counter that means what it says.
-  //
-  // Safe in the other direction too, and that is the half worth checking rather
-  // than assuming: this is a TEARDOWN, so a reap that fires afterwards has
-  // nothing of Drift's left to protect, and `getMcpSessionDirName()` returns
-  // `undefined` once `mcpTempDir` is cleared below — which makes the scan
-  // builder refuse with `bad-marker` in any case. A release arriving after this
-  // line cannot drive the counter negative because `releaseDirectMcpCall`
-  // clamps.
-  mcpDirectCallDepth = 0;
+  // Retire only this cleanup's generation. A direct child whose terminal event
+  // never arrives cannot suppress the next runtime, while a late event from the
+  // old generation can delete only its own already-retired token (T-08-28).
+  retireMcpDirectCalls(mcpLifecycle, cleanupEpoch);
 
   // THE ORPHAN REAP, ABOVE THE REMOVAL — SC-4's statement order, extended to the
   // mechanism that does not depend on `activeProcesses`. The loop above reaches
@@ -4261,19 +4267,29 @@ async function cleanupMcpRuntime(
     sdk,
     buildSessionOrphanScanPlan({
       platform: host?.platform,
-      sessionDirName: getMcpSessionDirName(),
+      sessionDirName:
+        cleanupTempDir === undefined
+          ? undefined
+          : path.basename(cleanupTempDir),
     }),
     [],
   );
 
-  if (mcpTempDir !== undefined) {
+  if (cleanupTempDir !== undefined) {
     try {
-      await rm(mcpTempDir, { recursive: true, force: true });
+      await rm(cleanupTempDir, { recursive: true, force: true });
     } catch (error) {
-      sdk.console.error(`[drift] Failed to remove MCP temp dir ${mcpTempDir}: ${String(error)}`);
+      sdk.console.error(`[drift] Failed to remove MCP temp dir ${cleanupTempDir}: ${String(error)}`);
     }
-    mcpTempDir = undefined;
   }
+
+  if (
+    !isMcpRuntimeEpochCurrent(mcpLifecycle, cleanupEpoch) ||
+    mcpTempDir !== cleanupTempDir
+  ) {
+    return;
+  }
+  mcpTempDir = undefined;
   cliSessions.clear();
   setMcpAuthStatus(authState, authMessage);
   await publishMcpStatus(sdk);
@@ -4379,7 +4395,17 @@ async function sweepOrphanedMcpTempDirs(
   }
 }
 
-async function startMcpServer(sdk: BackendSDK): Promise<Result<McpServerInfo>> {
+async function startMcpServer(
+  sdk: BackendSDK,
+): Promise<Result<McpServerInfo>> {
+  return runMcpLifecycleOperation(mcpLifecycle, () =>
+    startMcpServerOperation(sdk),
+  );
+}
+
+async function startMcpServerOperation(
+  sdk: BackendSDK,
+): Promise<Result<McpServerInfo>> {
   // Check prerequisites
   const caidoToken = getEffectiveCaidoToken();
   if (caidoToken === "") {
@@ -4415,6 +4441,11 @@ async function startMcpServer(sdk: BackendSDK): Promise<Result<McpServerInfo>> {
       `[drift] runtime probe: ${describeProbeSummary(lastProbeReport)}`,
     );
   }
+
+  // Start a new identity immediately before the first startup sweep. The sweep
+  // and every file staged below belong to this epoch; prerequisites that fail
+  // above never perturb an already-running generation.
+  beginMcpRuntimeGeneration(mcpLifecycle);
 
   // The sweep moved below the probe for the reason above; it used to run here
   // with mcpTempDir still undefined. Its existing `dir !== mcpTempDir` guard was
@@ -4594,6 +4625,12 @@ async function startMcpServer(sdk: BackendSDK): Promise<Result<McpServerInfo>> {
 }
 
 async function stopMcpServer(sdk: BackendSDK): Promise<Result<void>> {
+  return runMcpLifecycleOperation(mcpLifecycle, () =>
+    stopMcpServerOperation(sdk),
+  );
+}
+
+async function stopMcpServerOperation(sdk: BackendSDK): Promise<Result<void>> {
   // SC-4 is satisfied here BY DELEGATION and nothing needs to be added: the
   // kill-every-tracked-pid-before-the-sweep loop lives inside cleanupMcpRuntime,
   // so this path inherits it — as does startMcpServer's failure path, which is
