@@ -107,13 +107,48 @@ Not fixed here: no plan in Phase 8 can push a branch or run a Windows host, and 
 cannot test native Windows locally — CI on `windows-latest` is the only vehicle, by the project's
 own stated constraint.
 
+**REVISED 2026-08-31 — the re-deferral stands unchanged, and the 2026-08-31 readings widened what
+sits behind it rather than narrowing it.** Everything measured on 2026-08-31 is macOS
+(darwin 25.6.0, Caido 0.58.2, claude-cli), so **none of it transfers to win32 and none of it is
+offered as if it did**:
+
+- **A1's causal half is now CONFIRMED on POSIX** — and A1 is a POSIX question by construction. The
+  win32 arm has no process groups and no `detached` semantics to honour; `buildOrphanScanPlan`
+  refuses on `unsupported-platform` before any spawn. A favourable POSIX reading says nothing about
+  the Windows leg and must not be cited as if the mechanism were now "measured".
+- **Reading F is the one that touches Windows, and only by making its absence sharper.** The
+  runtime reported `parentEnvKeyCount: "0"` on both builds, so G-01 — Caido's sandbox exposing an
+  empty `process.env` — is now stated by the runtime itself on a real install rather than inferred.
+  That confirms the **POSIX** half of ledger entry 22's identity floor. **Its Windows half is
+  untouched**: the claim that libuv back-fills `USERNAME` and `USERPROFILE` is still source
+  analysis, not a reading, and it stays owned by Phase 9 alongside G-01's Windows half. If that
+  analysis is wrong, the Windows provider CLI cannot authenticate for the same reason macOS could
+  not before `39876b5` — and **no green CI matrix run would detect it**, because CI never spawns a
+  provider CLI.
+- **Ledger entry 12 is unchanged and stays open.** No 2026-08-31 reading touched
+  `kill-tree.win32.test.ts`, which is still 3 cases collected 3/3 pending on every host that has
+  ever run it, and the reserved dead-pid block is still honestly empty.
+
+**So the closing condition is unchanged** — one green matrix run, the `Gate: the win32 kill-tree
+suite actually ran` step reporting 3 executed / 0 pending / 0 failed, and the `[measurement]` line
+filled. Re-checked against Phase 9's actual wording on 2026-08-31: SC-4 still reads as quoted above
+and the gate step still lives at `.github/workflows/ci.yml:269`.
+
 ## The ownerless list — everything Phase 8 leaves open that no remaining phase owns
 
-Written 2026-08-28 by plan 08-17, **at the point that plan halted at its blocking-human gate**, and
-therefore describing the state as of that halt. If the maintainer takes the two hardware readings
-plan 08-17 is waiting on, entries 1, 2 and 3 below change and this list is revised by the plan's
-own task 3 — they are listed here because on the evidence that exists today they are unowned, and a
-list that omitted them until they were certain would omit them forever.
+Written 2026-08-28 by plan 08-17 at the point that plan halted at its blocking-human gate, and
+**REVISED 2026-08-31 by the same plan's task 3** once the maintainer supplied the readings. The
+revision is applied in place, entry by entry, rather than by rewriting the list: what each entry
+said on 2026-08-28 was true on 2026-08-28, and the point of the list is that items do not quietly
+change status. Entries **1, 2, 3, 6 and 7** are revised below and each carries its own dated note;
+entries **4, 5, 8 and 9** are unchanged; entries **10 and 11** are NEW, created by the readings
+rather than closed by them.
+
+**The headline of the revision, stated once here so it is not buried in an entry:** A1's causal
+half was measured and came back favourable, so entry 1 CLOSES. The pre-fix Control was taken and
+came back **ZERO**, which is the opposite of what it was expected to show, so entry 2 closes as a
+*reading* while entry 3 — the CLI-cleanup confounder — **gets worse rather than better**: the
+confounder is now implicated rather than merely unexcluded.
 
 Found during: 08-17, by checking every remaining phase in `.planning/ROADMAP.md` against every item
 this phase leaves open, rather than by assuming.
@@ -138,11 +173,36 @@ paraphrased:
 > without it, A1 is ownerless AND currently recorded as closed.
 
 The second half of that sentence is no longer true — plans 08-11 through 08-14 corrected every
-carrier, and `verdict-gate.sh` now enforces the correction in both directions. **The first half is
-still true.** Narrowed 2026-08-28: plan 08-16's Table 5 measured A1's **topology** half favourably
-by direct `ps` observation, so what remains ownerless is the **causal** half — that a kill aimed at
-that group actually reaches a grandchild inside it. *What would close it:* one diagnostics call on
-the probe build plan 08-17 task 1 produced, on a real macOS Caido. Ledger entry **11** stays open.
+carrier, and `verdict-gate.sh` now enforces the correction in both directions. Narrowed 2026-08-28:
+plan 08-16's Table 5 measured A1's **topology** half favourably by direct `ps` observation, so what
+remained ownerless was the **causal** half — that a kill aimed at that group actually reaches a
+grandchild inside it.
+
+**CLOSED 2026-08-31 — the reading was taken, on the artifact this plan built, by the one person who
+could take it.** One diagnostics call on the probe build (`68199fa` + `a1-probe-fix.patch`, plugin
+id `d8aee773-b939-4164-a576-9c276ee30df8`) on a real macOS Caido 0.58.2 returned
+`spikeDetachedGroupKill: "grandchild-died (detached honoured)"` — `formatSpikeVerdict`'s `dead` arm,
+from a classifier that defaults to `inconclusive` and could have printed either of the other two
+values. Ledger entry **20** is CLOSED on it.
+
+**The 2026-08-27 reading of that same string stays RETRACTED, and this sentence exists so the two
+travel together in this file as well.** The string above is byte-identical to the one withdrawn on
+2026-08-28, and that is not a coincidence to be smoothed over — it is the reason `08-SPIKE.md`
+carries a written discriminator (§ *Why Reading A is a measurement and not the retraction
+repeated*). What makes the 2026-08-31 value a reading is that the code between
+`spikeProcessKillType` and the verdict is different: the coalescing `?? false` on an absent
+`process.kill` is deleted, the verdict runs through a classifier that defaults to `inconclusive`,
+and `pgrep -f 'node -e'` returning `0` proves the patched build is what ran. **A later favourable
+measurement on a repaired instrument does not make the earlier vacuous one informative**, and no
+correction plans 08-11 through 08-14 made is reverted. **Ledger entry 11 stays OPEN**, narrowed: three of its
+four clauses are answered and the fourth — the Control — is answered in the wrong direction (entry 3
+below).
+
+**This entry is closed as an OWNERSHIP problem, and the ownership problem was real.** No later phase
+would have taken this reading; the milestone would have closed with A1's causal half unmeasured. It
+was closed by the maintainer running it by hand in a session this plan halted for, which is not a
+mechanism and does not generalise. **The next hardware-only reading this project needs will be
+ownerless in exactly the same way**, which is what entries 10 and 11 below now record.
 
 **2. The pre-fix Control — `08-01` truth 3.**
 Abstained 2026-08-24, still unmet, and the phase's most load-bearing open measurement: plan 08-16's
@@ -151,11 +211,38 @@ it needs a live turn on a **pre-fix** build on a **macOS** Caido. *What would cl
 `pgrep -f mcp-server.mjs | wc -l` counts of `08-SPIKE.md` § *How to run this spike later*, step 4,
 on the same probe build as entry 1.
 
-**3. The CLI-cleanup confounder.**
-Closes with entry 2 and with nothing else. Drift's spawned group kill, the single-pid
-SIGTERM→SIGKILL ladder, the argv-marker reap and Claude Code's own cleanup of its MCP child are all
-consistent with plan 08-16's `1 → 0`, and no reading yet taken separates them. Recorded as accepted
-residual behind threat **T-08-14** since 2026-08-24.
+**CLOSED AS A READING 2026-08-31 — and the reading came back the other way.** Both counts were
+taken on the probe build: **1** during a live turn (10:55:54), **0** at the first post-Stop sample
+(10:56:05), six consecutive zero samples, and `0` at rest afterwards. Stop was corroborated by the
+session record rather than asserted — `exitCode: 143` = 128 + 15 = SIGTERM. **`08-01` truth 3
+predicted a NON-ZERO count and the measurement is zero**, so the truth is closed by being
+*falsified*, not by being satisfied. `08-UAT.md` test 3 moves out of `[pending]` and is recorded as
+an **issue** for that reason. **This entry closes; entry 3 does not, and gets worse.**
+
+**3. The CLI-cleanup confounder — REVISED 2026-08-31, and it moved in the wrong direction.**
+It was recorded here on 2026-08-28 as closing with entry 2. **It did not close with entry 2; entry 2
+made it worse.** Drift's spawned group kill, the single-pid SIGTERM→SIGKILL ladder, the argv-marker
+reap and Claude Code's own cleanup of its MCP child were all consistent with plan 08-16's `1 → 0`,
+and the Control was supposed to separate them by showing a non-zero on a build where none of Drift's
+machinery exists. **The pre-fix build produced the SAME zero.** So:
+
+- The confounder is **no longer merely unexcluded — it is IMPLICATED.** It is now the only candidate
+  with a positive observation behind it: on the build with no `detached` at the provider spawn
+  (Table 3 shows the pre-fix provider inheriting Caido's group 91048, twice) and only a single-pid
+  SIGTERM, the token-bearing child died anyway.
+- **Plan 08-16's post-fix zero proves LESS than it appeared to.** Qualified in place at both live
+  carriers (`08-SPIKE.md` § *What these readings close, and what they do not*, and `08-UAT.md`
+  test 9's `scope_and_caveats`). `08-16-SUMMARY.md` is a dated record in the ARM C immutable class
+  and is deliberately **not** edited — it was correct on its date.
+- **For Claude Code on macOS, Drift's group-kill machinery is REDUNDANT with the provider's own
+  cleanup on this path.** Redundant, not useless: the 2026-08-27 G-04 orphan was a **codex**
+  process, foreign-parented, that Drift never spawned, and A6 shows codex puts its MCP child in its
+  **own** process group — so neither the group kill nor this cleanup path is established for it.
+
+Still recorded as accepted residual behind threat **T-08-14**, and still ownerless. *What would now
+close it:* a Control run against a provider whose own cleanup is NOT implicated — codex is the
+obvious candidate and is the one this phase already has an orphan report for. **That reading has
+never been taken on any build.**
 
 **4. Ledger entry 13 — no executed assertion over `reapMcpOrphans` and its `cleanupMcpRuntime` call
 site.** Narrowed 2026-08-28 by a runtime observation and deliberately left open, because a runtime
@@ -168,17 +255,36 @@ reachable by a test — the second is a standing structural problem this milesto
 Same exclusions and same reasoning as entry 4. *What would close it:* a reading taken with
 `activeSessions > 0` and a Drift-owned MCP call in flight, or an executed assertion over the gate.
 
-**6. A6 for gemini and copilot — unmeasured in either direction.**
-A6 is now a per-provider split: TRUE for Claude Code, **FALSIFIED** for codex. Phase 10 SC-6 is the
+**6. A6 for gemini and copilot — unmeasured in either direction. WIDENED 2026-08-31.**
+A6 is a per-provider split: TRUE for Claude Code, **FALSIFIED** for codex. Phase 10 SC-6 is the
 nearest thing to an owner and is **not** one: it asks whether Gemini works on **Windows**, not
 whether Gemini's MCP child shares Gemini's process group. *What would close it:* `08-SPIKE.md`
 § *Step 3*, run against a Drift-spawned gemini turn and a Drift-spawned copilot turn.
 
-**7. The three cells plan 08-16 abstained on**, carried forward verbatim with their blockers:
-provider-CLI liveness after Stop (*no post-Stop `ps` was re-run*); provider-CLI liveness after the
-timeout fired (*same blocker*); the elapsed interval between the cancel and the diagnostics capture
-(*not timed, and `ageMs` is not it*). Same three exclusions. *What would close them:* one more
-`ps -eo pid,ppid,pgid,args` immediately after Stop, on any future hardware session.
+**Widened by the 2026-08-31 readings, because the per-provider gap now costs more than it did.**
+Every reading this phase has — the A1 causal half, the topology control pair, both Controls, all
+four HEAD-build readings — is **claude-cli only**. With the Control showing that Claude Code cleans
+up its own MCP child, "which provider" stopped being a coverage detail and became the variable that
+decides what Drift's termination machinery is actually doing. **codex now belongs on this entry
+too**: it is not merely unmeasured for A6 (it is measured, and FALSIFIED), it is unmeasured on the
+Control path, which is the path that matters most for it.
+
+**7. The abstained cells, carried forward verbatim with their blockers. EXTENDED 2026-08-31.**
+
+*The three from plan 08-16, unchanged:* provider-CLI liveness after Stop (*no post-Stop `ps` was
+re-run*); provider-CLI liveness after the timeout fired (*same blocker*); the elapsed interval
+between the cancel and the diagnostics capture (*not timed, and `ageMs` is not it*).
+
+*The two added by plan 08-17 on 2026-08-31:* a raw `ps` listing scanned by eye for leftover
+fixture-shaped rows after the A1 diagnostics call (*the maintainer reported the
+`pgrep -f 'node -e' | wc -l` count, which is the stronger reading for the leak question, and did not
+additionally paste a listing — so the cross-check against a mis-specified pattern was not
+performed*); and the identity of the **two pids Reading E's `kind=reap exit=0 killed=2` signalled**
+(*the reap's record carries a count, not identities; naming its targets would be inference*).
+
+Same three exclusions for all five. *What would close them:* one more
+`ps -eo pid,ppid,pgid,args` immediately after Stop, on any future hardware session — which would
+also, in the same command, answer the provider-liveness cells that are the direct route to entry 3.
 
 **8. `SUMMARY_KNOWN_UNPINNED` in `verdict-gate.sh` still lists seven names.** ARM C pins ten summary
 blobs and accepts seven by name; each unpinned name is a hole in the immutability assertion.
@@ -191,6 +297,76 @@ at char 255). Both are Phase 6 entries, both already `fixed`. Observed by plan 0
 unrepaired under its scope boundary; no phase owns register hygiene. *What would close it:* one
 escaping fix in whichever representation is wrong, with the parity check re-run.
 
+**10. THE A1 PROPAGATION FOLLOW-UP — `verdict-gate.sh` is RED and is EXPECTED to stay red until
+this lands. NEW 2026-08-31, created by the reading rather than closed by it.**
+
+`08-SPIKE.md` now states A1's causal half favourably, in Table 1's verdict cell, and it is the only
+carrier in the tree that does. Its exact wording is block-quoted here rather than restated on a live
+line — **this file must not become a second carrier of the claim while describing it**, which is a
+trap the gate itself catches and which is why the quote marks are load-bearing:
+
+> **CLOSED FAVOURABLY — MEASURED 2026-08-31 on the probe build, with an instrument that could have
+> printed either of the other two values.**
+
+ARM A/A1-STALE therefore fails on `08-SPIKE.md`. **That red is the
+gate working, not the gate breaking** — it was written down in advance in `08-SPIKE.md` § *What a
+definite verdict here does to `verdict-gate.sh`, said in advance*, before any reading existed,
+specifically so it could not be met as a surprise and resolved the cheap way. The gate is
+**UNMODIFIED**: `git diff` on `verdict-gate.sh` is empty, no exclusion was added, no pattern was
+narrowed, and no wording in `08-SPIKE.md` was chosen to dodge the match.
+
+The gate's own output, verbatim, is the discovery half of the worklist:
+
+```
+== ARM A: repo-wide discovery (.planning/ and packages/, exclusion-list) ==
+FAIL [ARM A/A1-STALE] .planning/phases/08-process-lifecycle/08-SPIKE.md states A1's WITHDRAWN
+favourable verdict on 1 live line(s) (outside any block quote). A1's reading was retracted
+2026-08-28; the verdict is OPEN.
+```
+
+**And ARM B's `CARRIERS_A1` array is the list of files that must change**, quoted from the gate's
+own source rather than re-enumerated by hand — this phase's carrier census has been wrong five
+times, which is why the gate consumes no count:
+
+```
+.planning/phases/08-process-lifecycle/08-SPIKE.md   <- already updated; the red is here
+.planning/phases/08-process-lifecycle/08-VALIDATION.md
+.planning/phases/08-process-lifecycle/08-SECURITY.md
+.planning/WINDOWS.md                                 <- entry 11 narrowed, entry 20 closed
+.planning/STATE.md
+packages/backend/src/index.ts
+packages/backend/src/kill-plan.ts
+packages/backend/src/kill-tree.posix.test.ts
+```
+
+plus `.planning/ROADMAP.md` and `.planning/REQUIREMENTS.md`, which ARM B does not police in this
+direction but which ledger entry 20 records as having carried the propagated claim.
+
+**Why this plan did not do the propagation itself:** its `files_modified` frontmatter names three
+files, the source carriers are code, and rewriting eight carriers' A1 verdicts is a change with its
+own review surface — doing it as an unplanned tail on a transcription plan is how the original
+defect propagated in the first place. *What would close it:* one plan that rewrites the eight
+carriers to state the 2026-08-31 verdict **while preserving the 2026-08-27 retraction as a marked
+correction**, then updates `RETRACTION_TOKEN`/`RETRACTION_DATE` handling in ARM B to match, and
+turns the gate green by making the tree consistent rather than by making the gate quieter.
+**Nobody owns it.** Same three exclusions as every entry above; it is not a hardware reading, so it
+is the one item on this list that any phase *could* technically absorb — none of them says it will.
+
+**11. WHAT THE NINE POSIX TERMINATION SITES ARE BUYING, given the Control. NEW 2026-08-31.**
+
+The Control shows that for **claude-cli on macOS** the token-bearing child dies with or without
+Drift's machinery. That does not make the machinery removable — codex is measured FALSIFIED for A6
+and untested on the Control path, and it is the provider the one real orphan report came from — but
+it does mean **nothing in this repository currently demonstrates a case where Drift's group kill is
+what saved a process from being orphaned.** That is a real open question about the phase's central
+mechanism and it did not exist before 2026-08-31.
+
+Recorded here rather than resolved, because resolving it either way from this evidence would be
+exactly the over-reach this phase exists to correct: **redundant for one combination is not useless,
+and it is not proven-necessary either.** *What would close it:* the Control path run against codex,
+which is entry 3's own suggested resolution — the two entries close together or not at all.
+**Nobody owns it.**
+
 ---
 
 **Two items are deliberately NOT on this list, because they already have a written entry point
@@ -199,11 +375,28 @@ phase entered through `/gsd-discuss-phase`"*) and the live Gemini `mcp remove` e
 Both are recorded above with a suggested resolution. Adding them twice would make the ownerless list
 look longer than it is.
 
-**Suggested resolution for entries 1, 2, 3 and 7 — an entry point, not an assignment.** They are one
-maintainer session on one macOS machine, and plan 08-17 has already built the artifact they need.
+**Suggested resolution — an entry point, not an assignment. REVISED 2026-08-31.**
+
+*Entries 1 and 2 are closed by readings.* What is left splits in two, and the two halves want
+different routes.
+
+**The hardware half — entries 3, 6, 7 and 11.** Still one maintainer session on one macOS machine,
+and the probe build already exists. But the shopping list changed: on 2026-08-28 the ask was "take
+the two readings"; after 2026-08-31 it is **"take them again against codex, and run one
+`ps -eo pid,ppid,pgid,args` immediately after Stop."** That single extra command answers entry 7's
+provider-liveness cells, and codex answers entries 3, 6 and 11 together, because codex is the one
+provider whose own cleanup is not implicated and whose MCP child is known to sit outside the CLI's
+group. The route is unchanged: `/gsd-phase` to insert a short hardware-reading phase before the
+milestone closes, or `/gsd-audit-uat` to sweep this class across phases.
+
+**The desk half — entry 10.** Not a reading; it is eight carriers and a gate. It needs a plan, not
+a machine, and it is the one item here that any remaining phase could absorb without a hardware
+session. Until it lands, **`verdict-gate.sh` exits non-zero by design** and anyone running it should
+expect ARM A red on `08-SPIKE.md` — that expectation is written into `08-SPIKE.md` itself so a
+future reader meets it there and not only here.
+
 The house style in this file is to suggest a route rather than assign work, because assigning it
-would imply a decision that has not been made: the cheapest route is `/gsd-phase` to insert a short
-hardware-reading phase before the milestone closes, or `/gsd-audit-uat`, which is the command that
-exists to sweep exactly this class of outstanding item across phases. What must **not** happen is
-the thing this list exists to prevent — the milestone completing with these recorded as closed by
-nobody having looked.
+would imply a decision that has not been made. What must **not** happen is the thing this list
+exists to prevent — the milestone completing with these recorded as closed by nobody having looked.
+**Note that entry 1 closed only because a human was asked, in a session a plan halted for. That is
+not a mechanism, and entries 3, 6, 7 and 11 need the same thing again.**
