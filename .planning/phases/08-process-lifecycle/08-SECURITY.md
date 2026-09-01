@@ -5,14 +5,16 @@ status: secured
 # threats_open = count of OPEN threats at or above workflow.security_block_on severity (the blocking gate)
 threats_open: 0
 # threats_open moved 1 → 0 on 2026-08-24 when T-08-01 closed. The closer was a maintainer
-# ATTESTATION, not a recorded measurement — see § "T-08-01 — closed by attestation" before
-# treating this zero as equivalent to Phase 7's.
+# ATTESTATION, not a recorded measurement — see § "T-08-01 — closed by attestation" for that
+# historical closure basis. The 2026-09-01 re-audit adds recorded Codex cancel/timeout evidence
+# without rewriting how the threat originally moved to closed.
 #
-# RE-AUDITED 2026-09-01 after the cleanup-completion repair at the latest package-changing commit. The main
-# register now has 94 numeric rows plus T-08-SC (95 rows total), including the complete
-# T-08-51…T-08-94 roll-up. Closure comes from current source/tests and executable gates;
-# PLAN/SUMMARY prose is used only to locate an allocated mechanism. Thirteen accepted residuals
-# remain explicit, and LIF-01/LIF-02 remain open requirements for their separate runtime evidence.
+# RE-AUDITED 2026-09-01 after the cleanup-completion repair and the Codex launch/timeout fixes at
+# the latest package-changing commit. The main register still has 94 numeric rows plus T-08-SC
+# (95 rows total), including the complete T-08-51…T-08-94 roll-up. Closure comes from current
+# source/tests, executable gates, and the bounded real-Caido lifecycle measurement; PLAN/SUMMARY
+# prose is used only to locate an allocated mechanism. Thirteen accepted residuals remain explicit,
+# and LIF-01/LIF-02 remain open at the narrower boundaries stated below.
 #
 # Among those thirteen, T-08-47 is an ACCEPTED `high` under `block_on: high`. It does not count toward
 # threats_open — an accepted residual is closed-with-a-decision, not open — but it is called out
@@ -23,10 +25,10 @@ threats_open_note: "0 open; 1 accepted high (T-08-47 / AR-06, decider six2dez pe
 asvs_level: 1
 block_on: high
 created: 2026-08-24
-audited_at_head: 415ae7e4704cc23f30dcd9ff959672ed10622ad6
-package_tree_at_audit: 8ec7d8d8f47b9406f844c4223b4d04d9171ffaa5
-package_tree_sha256_at_audit: d404134003d4a37b6424ac294a0e640e14d3f602da8c51a7ec60424f8b6f27bd
-former_baseline_package_commits: 61
+audited_at_head: 174c0b6eab9bbc68022d5e2348b76908c0a7a5d7
+package_tree_at_audit: 1d12c91fc161cf05850ba91c50237cc713b5ca67
+package_tree_sha256_at_audit: ca4f8ae43f11dc3fbb3771585fe07b28ccd99fb36c923c7953ea8e6edfc24d8f
+former_baseline_package_commits: 62
 package_commits_after_audit: 0
 register_numeric_rows: 94
 register_sentinel_rows: 1
@@ -106,13 +108,14 @@ Rolled up from the five plan blocks.
 in.) Severity and disposition remain as authored at plan time, except where a row records an
 explicit re-rating with its reason.
 
-**Re-audited 2026-09-01 at `415ae7e4704cc23f30dcd9ff959672ed10622ad6`.** The canonical
-through-94 register plus T-08-SC is unchanged: the cleanup repair closes an already allocated
-ROADMAP SC-4 boundary and does not create T-08-95. The package tree at the audit boundary is Git
-tree `8ec7d8d8f47b9406f844c4223b4d04d9171ffaa5` (SHA-256 census
-`d404134003d4a37b6424ac294a0e640e14d3f602da8c51a7ec60424f8b6f27bd`), with 61
-package-changing commits after former baseline `d2d502b`, one after the prior `12a7136` audit, and
-zero after the current package boundary. The standing gate recomputes the latest package-changing
+**Re-audited 2026-09-01 at `174c0b6eab9bbc68022d5e2348b76908c0a7a5d7`.** The canonical
+through-94 register plus T-08-SC is unchanged: the timeout repair strengthens the already allocated
+T-08-01 cancel/timeout boundary, and the fixed Codex argv introduces no new dynamic input, shell,
+environment value, process, or dependency, so neither creates T-08-95. The package tree at the
+audit boundary is Git tree `1d12c91fc161cf05850ba91c50237cc713b5ca67` (SHA-256 census
+`ca4f8ae43f11dc3fbb3771585fe07b28ccd99fb36c923c7953ea8e6edfc24d8f`), with 62
+package-changing commits after former baseline `d2d502b`, two after the `12a7136` audit, one after
+the prior `415ae7e` audit, and zero after the current package boundary. The standing gate recomputes the latest package-changing
 commit, tree, digest, and post-audit commit count rather than trusting these fields.
 Identifiers, categories, severities, and dispositions are transcribed from the allocating plan;
 current source/tests/gates determine closure. **T-08-03 remains RE-RATED** in place, from medium to
@@ -204,7 +207,7 @@ high, with its original reason intact.
 | **T-08-82** (18) | Information disclosure | gate diagnostics and execution records | medium | mitigate | Verdict-gate diagnostics remain labels, counts, IDs, and relative paths only; no matched source line or environment value is emitted | closed (value-free gate output) |
 | **T-08-83** (18) | Tampering | ARM C historical-summary integrity | **high** | mitigate | ARM C pins the canonical Spike digest and every committed Phase 08 summary blob while rejecting committed, working-tree, and unexpected-discovery mutations | closed (ARM C) |
 | **T-08-84** (19/23) | Tampering | live citation and allocation census | **high** | mitigate | `threat-register-gate.sh` requires contiguous T-08-01…T-08-94 plus T-08-SC, dynamically discovers both live families, and pins the original sentinels plus exact source citations for T-08-89…T-08-94 | closed (citation gate + self-test) |
-| **T-08-85** (19/23) | Repudiation | `audited_at_head` and package-history comparison | **high** | mitigate | Current audit baseline `415ae7e4704cc23f30dcd9ff959672ed10622ad6`, package tree `8ec7d8d8…`, SHA-256 census `d4041340…`, 61 package commits since `d2d502b`, the one package commit after `12a7136` inspected, and zero package-changing commits after this boundary. The gate recomputes the latest package commit, tree, digest, and delta; a fixture commit after the audit is red | closed (standing Git audit gate) |
+| **T-08-85** (19/23) | Repudiation | `audited_at_head` and package-history comparison | **high** | mitigate | Current audit baseline `174c0b6eab9bbc68022d5e2348b76908c0a7a5d7`, package tree `1d12c91f…`, SHA-256 census `ca4f8ae4…`, 62 package commits since `d2d502b`, the one package commit after `415ae7e` inspected, and zero package-changing commits after this boundary. The gate recomputes the latest package commit, tree, digest, and delta; a fixture commit after the audit is red | closed (standing Git audit gate) |
 | **T-08-86** (19/23) | Repudiation | threat disposition and mitigation closure | **high** | mitigate | Every rolled row points to current source, a current record, or an executable suite/gate. The 44-row T-08-51…T-08-94 ledger must match register severity/disposition, carry an accountable owner, and map T-08-89…T-08-94 to their helper plus executable test; plans and summaries cannot satisfy the live join | closed (current evidence audit + ledger gate) |
 | **T-08-87** (19/23) | Tampering | `status`, `threats_open`, totals, and accepted residuals | **high** | mitigate | Parsed aggregates require 94 numeric rows plus T-08-SC, 13 numeric accepts, exactly AR-01…AR-13, and zero open high mitigations, with accepted-high T-08-47 separately visible. An empty mitigation or non-closed high mitigation makes `secured` and `threats_open: 0` red | closed (derived totals + false-closure fixture) |
 | **T-08-88** (19/23) | Tampering | `threat-register-gate.sh` discovery/parser/output | **high** | mitigate | One implementation serves live and fixture roots with pathname preflight, NUL-delimited discovery, newline refusal, bounded diagnostics, through-94 citation/ledger checks, and Git audit integrity. Both production self-test and the independent 32-case matrix exercise missing new citations/mappings, empty high mitigation, stale digest, false aggregate closure, and a package commit after audit | closed (production self-test + independent matrix) |
@@ -214,7 +217,7 @@ high, with its original reason intact.
 | **T-08-92** (21) | Repudiation / Information Disclosure | config cleanup owner set | **high** | mitigate | `cleanupOwnedPaths` snapshots without eager clear and deletes ownership only after `rm` resolves. EACCES and overlapping-cleanup tests prove ownership survives a failed unlink and a later retry removes it; finalize and outer finally share the same set | closed (WR-02 ownership retry controls) |
 | **T-08-93** (22) | Tampering / Denial of Service | MCP runtime artifact reuse | **high** | mitigate | `inspectRequiredMcpRuntimeArtifacts` requires a directory root plus regular, openable script before reuse; missing, directory-at-file-path, non-regular, stat/open EACCES, and real unreadable cases fail closed. `index.source.test.ts` pins inspection before disposition/reuse and bans the old `fileExists` shortcut | closed (WR-03 helper + executable artifact matrix) |
 | **T-08-94** (22) | Tampering / Information Disclosure | MCP context reuse | **high** | mitigate | Context must be a readable regular file whose bytes parse as a non-null, non-array JSON object. Malformed JSON, null, array, scalar, read failure, and non-regular inputs force replacement without logging bytes; production wiring passes only `readFile` into the import-free helper | closed (WR-03 parse matrix + source wiring) |
-| **T-08-SC** (×5) | Tampering | npm/pip/cargo installs | n/a | accept | **This phase installs zero packages.** `08-RESEARCH.md` § *Package Legitimacy Audit* is present and empty ("audited, empty", not "skipped"). `git diff` over dependency manifests remains empty through current package commit `415ae7e`; the post-`12a7136` repair changes four backend source/test files and no dependency manifest. If a later plan proposes a dependency, the gate must be run then. `pgrep` remains a base-system utility on macOS and supported Linux | closed |
+| **T-08-SC** (×5) | Tampering | npm/pip/cargo installs | n/a | accept | **This phase installs zero packages.** `08-RESEARCH.md` § *Package Legitimacy Audit* is present and empty ("audited, empty", not "skipped"). `git diff` over dependency manifests remains empty through current package commit `174c0b6`; the post-`415ae7e` fix changes four backend source/test files and no dependency manifest. If a later plan proposes a dependency, the gate must be run then. `pgrep` remains a base-system utility on macOS and supported Linux | closed |
 
 *Status: open · closed · closed (accepted) — an accepted residual is recorded in the Accepted Risks
 Log below, never silently closed.*
@@ -411,6 +414,16 @@ them is rhetorical:
 3. **The scope is one machine, one Caido build, one provider CLI, one path.** The **timeout path was
    not reported** and is recorded as **not exercised** — the cancel-path attestation does not carry
    to it.
+
+**CURRENT ADDENDUM (2026-09-01, `174c0b6`).** The historical closure above is preserved as
+historical provenance, but limitations (1) and (3) are now narrower. A recorded Codex run captured
+clean/during/after counts, parent and process-group topology, a Stop timestamp, and zero provider/MCP
+processes about 210 ms later. A separate 10-second run captured the provider and MCP before the
+deadline, zero at about 10.24 seconds after Send, the UI's timeout state, and absence of the requested
+60-second completion marker. The original timeout implementation first failed this control and was
+fixed before the successful re-run. Limitation (2) remains: the MCP child was in a distinct group
+and `lastOrphanReap` reported exit 1/no match, so the evidence is product-causal without proving
+that group signalling or a reap signal removed the child.
 
 **What this does and does not close.** It closes the *outcome* claim T-08-01 actually states — after
 a cancel, no token-bearing MCP child survives — on the runtime users run. It does **not** close A1 or
@@ -699,7 +712,12 @@ restated — a restatement is where a caveat gets softened. Its five items, **by
    `cleanupMcpRuntime` or the timeout handler. **CORRECTED 2026-09-01:** the production-wired
    completion-order harness now executes the session-finalize / `stopMcpServer` generation cleanup
    and observes its recursive removal boundary. It does not execute `closeCliSession`, `deleteChat`,
-   the startup sweep, native Windows termination, or cancel/absolute-timeout causality.
+   or the startup sweep. **CORRECTED AGAIN 2026-09-01 at `174c0b6`:** bounded real-Caido Codex
+   runs now execute both cancel and absolute timeout with an external process watcher. They prove
+   the product-level causal zero-survivor outcome on the measured POSIX provider; they do not prove
+   which internal mechanism removed the MCP child. The child occupied a different process group,
+   and `lastOrphanReap` observed exit 1/no match, so neither group-kill reach nor a reap signal is
+   inferred from the favorable result. Native Windows termination remains unexecuted.
 2. It will not prove Caido's LLRT — `detached` and `process.kill`'s `u32` typing are source-verified
    and never executed. **CORRECTED 2026-08-27: the `detached` half IS now proven on the shipped
    runtime by measurement (A1); the `u32`-typing half is not, and is moot because the sandbox
@@ -738,28 +756,35 @@ restated — a restatement is where a caveat gets softened. Its five items, **by
 
 ## Final package-head delta audit (2026-09-01)
 
-The prior package boundary was `12a7136d358786b15d377c43ed3ba234cc0004b8`; the current package
-boundary is `415ae7e4704cc23f30dcd9ff959672ed10622ad6`. Git reports exactly one
-package-changing commit, four changed backend source/test paths, 443 insertions, 39 deletions, and
+The prior package boundary was `415ae7e4704cc23f30dcd9ff959672ed10622ad6`; the current package
+boundary is `174c0b6eab9bbc68022d5e2348b76908c0a7a5d7`. Git reports exactly one
+package-changing commit, four changed backend source/test paths, 73 insertions, 47 deletions, and
 zero dependency-manifest changes:
 
 | Package commit | Paths inspected | Security conclusion |
 |----------------|-----------------|---------------------|
-| `415ae7e4704cc23f30dcd9ff959672ed10622ad6` | `index.ts`, `index.source.test.ts`, `mcp-lifecycle.ts`, `mcp-lifecycle.test.ts` | Adds the generation-scoped completion barrier and its unit/source contracts. Provider exit, tree-killer settlement, and orphan-reap settlement gate the session-finalize / `stopMcpServer` recursive generation-root removal. Failed/uncertain reap or completion timeout retains the root and blocks replacement Start. Tree-killer `close` remains settlement regardless of exit code; native Windows outcome stays outside SC-4 proof and inside the open LIF-01/SC-1/SC-3 evidence boundary. No distinct threat was introduced, so the canonical register remains T-08-01…T-08-94 plus T-08-SC. |
+| `174c0b6eab9bbc68022d5e2348b76908c0a7a5d7` | `index.ts`, `index.source.test.ts`, `provider-launch.ts`, `provider-launch.test.ts` | Adds Codex's fixed `--skip-git-repo-check` automation flag so Caido's non-repository working directory can launch a turn, and snapshots a per-turn deadline that the existing keep-alive-pumped heartbeat enforces through the same kill-before-finalize function as the native timer. The flag is a constant argument, not user input; it opens no shell or environment path. The deadline is a scalar and reuses the existing `killTree`, session-state, and cleanup funnels without new logging or token flow. T-08-01 already allocates cancel/timeout survivor risk, T-08-13 still forbids awaited child callbacks, and no distinct threat was introduced; the canonical register remains T-08-01…T-08-94 plus T-08-SC. |
 
-The production-wired completion-order oracle is separate from the user's real-Caido confirmation.
+The production-wired completion-order oracle is separate from the new real-Caido measurements.
 The oracle controls an adverse schedule and proves that recursive removal observes all three
-completion flags; the user confirmation proves the live-provider Stop/restart workflow no longer
-reproduces the defect. Neither supplies native Windows execution or Drift-caused Codex
-cancel/absolute-timeout evidence.
+completion flags. The measured Codex cancellation ties provider/MCP disappearance to the Stop
+action from a clean baseline; the measured timeout ties disappearance and the UI timeout state to
+the pumped 10-second deadline, long before the requested 60-second work could complete. This is
+product-level causality. It does not claim the argv-marker reap sent a signal: the diagnostic was
+the current no-match spelling (`kind=noop reason=scan-failed exit=1 attempted=0`), and the observed
+MCP child was outside the provider's process group. Native Windows execution remains absent.
 
 The standing gate separately proves that `audited_at_head` is the latest package-changing commit
-and that tree `8ec7d8d8f47b9406f844c4223b4d04d9171ffaa5`, SHA-256 census
-`d404134003d4a37b6424ac294a0e640e14d3f602da8c51a7ec60424f8b6f27bd`, 61-commit census, and
+and that tree `1d12c91fc161cf05850ba91c50237cc713b5ca67`, SHA-256 census
+`ca4f8ae43f11dc3fbb3771585fe07b28ccd99fb36c923c7953ea8e6edfc24d8f`, 62-commit census, and
 zero post-audit package commits agree. Planning-only commits after it do not invalidate the package
 boundary; any package commit does.
 
-### Preserved 2026-08-31 audit boundary
+### Preserved earlier audit boundaries
+
+The `415ae7e` re-audit remains historical evidence: one package-changing commit after `12a7136`,
+four backend source/test paths, 443 insertions, 39 deletions, and no dependency-manifest change.
+Its generation-root completion-barrier conclusion and AR-05 narrowing remain intact.
 
 The preceding `318fe24a..12a7136` re-audit remains historical evidence: 29 package-changing
 commits, 19 changed backend source/test paths, 2,861 insertions, 515 deletions, and no dependency
@@ -778,6 +803,7 @@ identity; its allocations T-08-89…T-08-94 and conclusions remain intact.
 | 2026-08-31 (current-head re-audit at `318fe24a`) | **89** (88 numeric + T-08-SC) | **89** | **0 open; 13 accepted residuals**, including accepted `high` T-08-47 / AR-06 with decider **six2dez**. Current package tree `1250a4c4`, SHA-256 census `5116876f…`, 31 package commits since `d2d502b`, zero after the audit boundary | plan 08-19 |
 | 2026-08-31 (final package-head re-audit at `12a7136`) | **95** (94 numeric + T-08-SC) | **95** | **0 open; 13 accepted residuals**, including accepted `high` T-08-47 / AR-06 with decider **six2dez**. Package tree `67ece25a`, SHA-256 census `df578b95…`, 60 package commits since `d2d502b`, 29 inspected after the prior audit, zero after the final boundary | plan 08-23 |
 | 2026-09-01 (post-fix package-head re-audit at `415ae7e`) | **95** (94 numeric + T-08-SC) | **95** | **0 open; 13 accepted residuals**. Package tree `8ec7d8d8`, SHA-256 census `d4041340…`, 61 package commits since `d2d502b`, the one post-`12a7136` package commit inspected, and zero after the current boundary. ROADMAP SC-4's generation-root path is protected; AR-05 remains current for close/delete/startup removals | quick 260901-l8h |
+| 2026-09-01 (Codex lifecycle package-head re-audit at `174c0b6`) | **95** (94 numeric + T-08-SC) | **95** | **0 open; 13 accepted residuals**. Package tree `1d12c91f`, SHA-256 census `ca4f8ae4…`, 62 package commits since `d2d502b`, the one post-`415ae7e` package commit inspected, and zero after the current boundary. Real-Caido cancel/timeout is product-causal on measured Codex; mechanism-specific attribution and native Windows remain open | GSD debug continuation |
 
 **Note on this phase's dominant defect class**, recorded because it recurred across three plans: a
 **control that is green for the wrong reason**. The LLRT trap itself (green on every CI vehicle,
@@ -820,15 +846,18 @@ if the mechanism were absent* — never by the gate itself.
       08-07's prose only and no verifier would have found it there
 - [x] `threats_open` reaches **0** — T-08-01 closed 2026-08-24 by the T-08-14 real-hardware
       confirmation. **Qualified:** the closer is a maintainer *attestation*, not a recorded
-      measurement — no counts captured, no pre-fix control on the same machine, timeout path not
-      exercised. Read § *T-08-01 — closed by attestation* before treating this zero as equivalent to
-      Phase 7's
+      measurement — no counts were captured and the timeout path was not exercised at that closure.
+      The current `174c0b6` addendum now records Codex cancel and timeout outcomes, while retaining
+      the provider-cleanup/mechanism-attribution caveat. Read § *T-08-01 — closed by attestation*
+      before treating the original zero as equivalent to Phase 7's
 - [~] A1 and A6 closed as mechanism claims — **PARTIALLY REACHED, CORRECTED 2026-08-31.** The
       repaired three-valued A1 probe produced the favourable outcome; the invalid 2026-08-27
       reading remains explicitly RETRACTED and is not rehabilitated. The pre-fix Control also
       produced zero survivors, so the favourable A1 outcome does **not** establish that Drift's
       group kill, rather than provider cleanup, caused it. A6 remains provider-split (Claude true,
-      codex false), and native-Windows plus real-turn causality limits remain visible. The exact
+      codex false). The 2026-09-01 Codex runs now establish product-level cancel/timeout causality,
+      but their distinct process groups and no-match reap diagnostic do not attribute the MCP
+      child's death to group signalling or a reap signal; native Windows also remains unrun. The exact
       current-plus-retraction record is bounded by `DRIFT:A1-CORRECTION`; the gate treats it as one
       inseparable record.
 
