@@ -33,7 +33,7 @@ See: .planning/PROJECT.md (updated 2026-06-26)
 Phase: 08 (Process Lifecycle) — PLAN EXECUTION COMPLETE; HUMAN EVIDENCE REQUIRED
 Plan: 23 of 23 complete; follow-up review and verification recorded
 Status: No actionable code or record gaps remain; do not advance while native-Windows, real-provider causality, and completion-order evidence remain unresolved
-Last activity: 2026-08-31 — Re-verified Phase 08 after Plans 08-20…08-23 and closed all six prior actionable gaps
+Last activity: 2026-09-01 - Completed quick task 260901-l8h: Refresh Phase 8 post-fix security audit and additive verification after cleanup completion fix
 Verification: `08-VERIFICATION-2.md` rules **`human_needed`, score 16/20 must-haves verified** (2026-08-31T17:10:03Z). Four behavior truths remain unverified at the native/runtime boundary; the dirty historical `08-VERIFICATION.md` remains untouched and its current conclusions are superseded by the additive report.
 
 Progress: [███░░░░░░░] 30% (3 of 10 milestone phases)
@@ -317,9 +317,10 @@ None yet. Eleven items are parked in the ROADMAP backlog (999.1-999.11): nine fr
 
 ### Quick Tasks Completed
 
-| # | Description | Date | Commit | Directory |
-|---|-------------|------|--------|-----------|
-| 260813-dc7 | Close the SIG-01h forwarding gap — make the storage guard falsifiable, correct 01-VALIDATION.md | 2026-08-13 | 6d1943d | [260813-dc7-add-a-settings-test-ts-case-driving-a-pr](./quick/260813-dc7-add-a-settings-test-ts-case-driving-a-pr/) |
+| # | Description | Date | Commit | Status | Directory |
+|---|-------------|------|--------|--------|-----------|
+| 260813-dc7 | Close the SIG-01h forwarding gap — make the storage guard falsifiable, correct 01-VALIDATION.md | 2026-08-13 | 6d1943d |  | [260813-dc7-add-a-settings-test-ts-case-driving-a-pr](./quick/260813-dc7-add-a-settings-test-ts-case-driving-a-pr/) |
+| 260901-l8h | Refresh Phase 8 post-fix security audit and additive verification after cleanup completion fix | 2026-09-01 | 6e57441 | Verified | [260901-l8h-refresh-phase-8-post-fix-security-audit-](./quick/260901-l8h-refresh-phase-8-post-fix-security-audit-/) |
 
 ## Deferred Items
 
