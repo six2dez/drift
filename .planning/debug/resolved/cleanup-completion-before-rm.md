@@ -2,7 +2,7 @@
 status: resolved
 trigger: "ok, pues arregla"
 created: 2026-09-01T12:35:46Z
-updated: 2026-09-01T15:08:30+02:00
+updated: 2026-09-01T15:10:30+02:00
 ---
 
 ## Current Focus
@@ -10,7 +10,7 @@ updated: 2026-09-01T15:08:30+02:00
 hypothesis: confirmed and resolved — cleanup treated void kill/reap issuance as completion, so recursive removal had no happens-before edge from process terminal events
 test: completed — automated completion-order oracle, full project gates, and real-Caido human verification all passed
 expecting: satisfied — Stop returns promptly, provider/MCP children terminate, deferred cleanup completes before root removal, and MCP restarts cleanly
-next_action: archive the resolved session and add its recurrence guard to the debug knowledge base
+next_action: none — session archived and recurrence guard recorded in the durable debug knowledge base
 bug_class: concurrency
 reasoning_checkpoint:
   hypothesis: "cleanupMcpRuntimeGeneration starts recursive rm before provider/tree/reap terminal events because killTree and reapMcpOrphans expose only issuance (void), so statement order is mistaken for completion order"
@@ -163,6 +163,11 @@ started: present in the current Phase 8 fire-and-forget cleanup design; demonstr
   checked: real-Caido human verification checkpoint
   found: the user confirmed the original live-provider Stop and MCP restart workflow is fixed
   implication: the repair is verified end-to-end in the runtime environment that local automation cannot reproduce
+
+- timestamp: 2026-09-01T15:10:30+02:00
+  checked: semantic debug-recall indexing
+  found: the mempalace CLI is not installed in this environment; the resolved-session entry was written successfully to .planning/debug/knowledge-base.md
+  implication: semantic indexing is skipped explicitly and the durable keyword-recall fallback remains available
 
 ## Resolution
 
