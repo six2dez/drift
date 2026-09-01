@@ -75,6 +75,7 @@ import {
   cleanupRetiredProviderStartRoot,
   commitProviderStartLease,
   countMcpDirectCalls,
+  createMcpCleanupBarrier,
   createMcpLifecycleState,
   getMcpRuntimeEpoch,
   getMcpStartDisposition,
@@ -85,7 +86,9 @@ import {
   retireMcpDirectCalls,
   runMcpLifecycleOperation,
   runMcpProviderTeardown,
+  settleMcpCleanupPrerequisite,
   type DirectMcpCallToken,
+  type McpCleanupBarrier,
   type McpOrphanReapGate,
   type ProviderStartLease,
 } from "./mcp-lifecycle";
@@ -335,6 +338,7 @@ const WIN32_PATH_SEARCH_TIMEOUT_MS = 5000;
 // for an answer nothing waits on. `classifyOrphanScanOutcome`'s `scan-timeout`
 // arm is where that decision is asserted.
 const ORPHAN_SCAN_TIMEOUT_MS = POSIX_PATH_SEARCH_TIMEOUT_MS;
+const MCP_CLEANUP_COMPLETION_TIMEOUT_MS = 3000;
 
 // ── State ───────────────────────────────────────────────────────────
 
@@ -435,6 +439,14 @@ async function withDirectMcpCall<T>(run: () => Promise<T>): Promise<T> {
 }
 
 let mcpTempDir: string | undefined;
+type PendingMcpRuntimeCleanup = {
+  epoch: number;
+  tempDir: string;
+  barrier: McpCleanupBarrier;
+  status: "pending" | "removing" | "failed-closed";
+  timer: ReturnType<typeof setTimeout> | undefined;
+};
+let pendingMcpRuntimeCleanup: PendingMcpRuntimeCleanup | undefined;
 let mcpAuthState: McpAuthState = "unknown";
 let mcpAuthMessage = "";
 // PERF-03. One cache for BOTH binary-resolution paths — the provider path
@@ -4063,12 +4075,24 @@ function getMcpSessionDirName(): string | undefined {
 // would suspend an RPC handler on a child-process callback and a timer that
 // Caido's runtime does not reliably deliver during an await, which is the
 // event-loop starvation anti-pattern CLAUDE.md names.
+type CleanupPrerequisiteOutcome =
+  | { safe: true }
+  | { safe: false; reason: string };
+
 function reapMcpOrphans(
   sdk: BackendSDK,
   plan: KillTreePlan,
   excludePids: number[],
   gate: McpOrphanReapGate,
+  onComplete?: (outcome: CleanupPrerequisiteOutcome) => void,
 ): void {
+  let completionReported = false;
+  const reportCompletion = (outcome: CleanupPrerequisiteOutcome): void => {
+    if (completionReported) return;
+    completionReported = true;
+    onComplete?.(outcome);
+  };
+
   if (plan.kind === "none") {
     sdk.console.log(`[drift lifecycle] no orphan reap: ${plan.reason}`);
     recordOrphanReapOutcome({
@@ -4079,6 +4103,11 @@ function reapMcpOrphans(
       // as missing data.
       ageMs: 0,
     });
+    reportCompletion(
+      plan.reason === "unsupported-platform"
+        ? { safe: true }
+        : { safe: false, reason: `reap-${plan.reason}` },
+    );
     return;
   }
 
@@ -4148,6 +4177,20 @@ function reapMcpOrphans(
         exitCode: result.exitCode,
         ageMs: settledAgeMs,
       });
+      // pgrep exit 1 is its documented, complete "no match" answer. The pure
+      // classifier historically folds every non-zero code into scan-failed
+      // because both paths signal zero pids; cleanup completion is the first
+      // consumer for which the distinction controls a destructive transition.
+      const cleanNoMatch =
+        !result.spawnThrew &&
+        !result.timedOut &&
+        result.outputTruncated === false &&
+        (outcome.reason === "no-match" || result.exitCode === 1);
+      reportCompletion(
+        cleanNoMatch
+          ? { safe: true }
+          : { safe: false, reason: `reap-${outcome.reason}` },
+      );
       return;
     }
 
@@ -4179,13 +4222,28 @@ function reapMcpOrphans(
         exitCode: result.exitCode,
         ageMs: settledAgeMs,
       });
+      reportCompletion({ safe: false, reason: "reap-gate-stale" });
       return;
     }
 
     let attempted = 0;
+    let pendingKillers = 0;
+    let killerFailed = false;
+    let allKillersIssued = false;
+    const finishKillersIfSettled = (): void => {
+      if (!allKillersIssued || pendingKillers !== 0) return;
+      reportCompletion(
+        killerFailed
+          ? { safe: false, reason: "orphan-kill-failed" }
+          : { safe: true },
+      );
+    };
     for (const pid of outcome.pids) {
       const killPlan = buildOrphanKillPlan({ pid, platform: host?.platform });
-      if (killPlan.kind === "none") continue;
+      if (killPlan.kind === "none") {
+        killerFailed = true;
+        continue;
+      }
       try {
         const killer: ChildProcessWithoutNullStreams = spawn(
           killPlan.file,
@@ -4204,10 +4262,23 @@ function reapMcpOrphans(
         // asynchronous and can still fail through `error` or a non-zero exit,
         // so the diagnostic names this an attempt rather than a kill.
         attempted += 1;
+        pendingKillers += 1;
+        let killerSettled = false;
+        const settleKiller = (safe: boolean): void => {
+          if (killerSettled) return;
+          killerSettled = true;
+          pendingKillers -= 1;
+          if (!safe) killerFailed = true;
+          finishKillersIfSettled();
+        };
+        killer.on("close", (code) => settleKiller(code === 0));
+        killer.on("error", () => settleKiller(false));
       } catch {
-        /* unspawnable killer; counted as not attempted */
+        killerFailed = true;
       }
     }
+    allKillersIssued = true;
+    finishKillersIfSettled();
 
     sdk.console.log(
       `[drift lifecycle] orphan reap: kind=reap exit=${String(result.exitCode)} attempted=${String(attempted)}`,
@@ -4372,6 +4443,98 @@ function reapSessionOrphansIfIdle(sdk: BackendSDK): void {
   );
 }
 
+function getPendingCleanupStartError(): string | undefined {
+  const pending = pendingMcpRuntimeCleanup;
+  if (pending === undefined) return undefined;
+  if (pending.status === "failed-closed") {
+    return "Drift preserved the previous MCP runtime directory because process termination could not be confirmed. Close any local AI CLI process using Drift, then restart Caido before starting MCP again.";
+  }
+  return "Drift is still confirming that the previous MCP processes have stopped. Try starting MCP again in a moment.";
+}
+
+async function removeCompletedMcpRuntimeCleanup(
+  sdk: BackendSDK,
+  pending: PendingMcpRuntimeCleanup,
+): Promise<void> {
+  if (
+    pendingMcpRuntimeCleanup !== pending ||
+    !isMcpRuntimeEpochCurrent(mcpLifecycle, pending.epoch)
+  ) {
+    pending.status = "failed-closed";
+    return;
+  }
+
+  try {
+    await rm(pending.tempDir, { recursive: true, force: true });
+  } catch {
+    if (pendingMcpRuntimeCleanup === pending) {
+      pending.status = "failed-closed";
+      sdk.console.error(
+        "[drift lifecycle] MCP runtime cleanup failed closed: recursive removal failed",
+      );
+    }
+    return;
+  }
+
+  if (pendingMcpRuntimeCleanup === pending) {
+    pendingMcpRuntimeCleanup = undefined;
+    sdk.console.log(
+      "[drift lifecycle] MCP runtime cleanup completed after all process prerequisites settled",
+    );
+  }
+}
+
+function advancePendingMcpRuntimeCleanup(
+  sdk: BackendSDK,
+  pending: PendingMcpRuntimeCleanup,
+  prerequisite: string,
+  outcome: CleanupPrerequisiteOutcome,
+): void {
+  if (
+    pendingMcpRuntimeCleanup !== pending ||
+    pending.status !== "pending"
+  ) {
+    return;
+  }
+
+  const disposition = settleMcpCleanupPrerequisite({
+    barrier: pending.barrier,
+    prerequisite,
+    safe: outcome.safe,
+    ...(outcome.safe ? {} : { failureReason: outcome.reason }),
+  });
+  if (disposition === "pending") return;
+
+  if (pending.timer !== undefined) {
+    clearTimeout(pending.timer);
+    pending.timer = undefined;
+  }
+  if (disposition === "failed-closed") {
+    pending.status = "failed-closed";
+    sdk.console.log(
+      `[drift lifecycle] MCP runtime cleanup failed closed outcomes=${String(pending.barrier.failedClosedReasons.size)}`,
+    );
+    return;
+  }
+
+  pending.status = "removing";
+  void removeCompletedMcpRuntimeCleanup(sdk, pending);
+}
+
+function armMcpRuntimeCleanupTimeout(
+  sdk: BackendSDK,
+  pending: PendingMcpRuntimeCleanup,
+): void {
+  pending.timer = setTimeout(() => {
+    for (const prerequisite of [...pending.barrier.pending]) {
+      advancePendingMcpRuntimeCleanup(sdk, pending, prerequisite, {
+        safe: false,
+        reason: "completion-timeout",
+      });
+    }
+  }, MCP_CLEANUP_COMPLETION_TIMEOUT_MS);
+}
+
 async function cleanupMcpRuntime(
   sdk: BackendSDK,
   authState: McpAuthState = "unknown",
@@ -4387,6 +4550,12 @@ async function cleanupMcpRuntimeGeneration(
   authState: McpAuthState,
   authMessage: string,
 ): Promise<void> {
+  if (pendingMcpRuntimeCleanup !== undefined) {
+    setMcpAuthStatus(authState, authMessage);
+    await publishMcpStatus(sdk);
+    return;
+  }
+
   // Capture identity before the first await. Every later destructive mutation
   // is conditional on this epoch and this exact directory still being current;
   // a stale cleanup may finish its own I/O, but it cannot erase a replacement
@@ -4456,8 +4625,70 @@ async function cleanupMcpRuntimeGeneration(
   // is in flight at all. Nothing here is awaited — spawnAndWait carries no
   // timeout, so an awaited kill could hold cleanup open indefinitely (Pitfall 8),
   // and `publishSessionState` is synchronous.
-  for (const [sessionId, proc] of activeProcesses.entries()) {
-    killTree(sdk, proc, "kill");
+  const trackedProcesses = [...activeProcesses.entries()];
+  const pendingCleanup =
+    cleanupTempDir === undefined
+      ? undefined
+      : {
+          epoch: cleanupEpoch,
+          tempDir: cleanupTempDir,
+          barrier: createMcpCleanupBarrier([
+            ...trackedProcesses.flatMap(([sessionId]) => [
+              `provider:${sessionId}`,
+              `tree:${sessionId}`,
+            ]),
+            "orphan-reap",
+          ]),
+          status: "pending" as const,
+          timer: undefined,
+        };
+  if (pendingCleanup !== undefined) {
+    pendingMcpRuntimeCleanup = pendingCleanup;
+    armMcpRuntimeCleanupTimeout(sdk, pendingCleanup);
+  }
+
+  for (const [sessionId, proc] of trackedProcesses) {
+    if (pendingCleanup !== undefined) {
+      let providerSettled = false;
+      const settleProvider = (outcome: CleanupPrerequisiteOutcome): void => {
+        if (providerSettled) return;
+        providerSettled = true;
+        advancePendingMcpRuntimeCleanup(
+          sdk,
+          pendingCleanup,
+          `provider:${sessionId}`,
+          outcome,
+        );
+      };
+      proc.once("exit", () => settleProvider({ safe: true }));
+      proc.once("close", () => settleProvider({ safe: true }));
+      proc.once("error", () =>
+        settleProvider({ safe: false, reason: "provider-exit-error" }),
+      );
+      if (
+        hasTrackedProcessExited({
+          observedExitEvent: false,
+          ...readHandleExitState(proc),
+        })
+      ) {
+        settleProvider({ safe: true });
+      }
+    }
+
+    killTree(
+      sdk,
+      proc,
+      "kill",
+      pendingCleanup === undefined
+        ? undefined
+        : (outcome) =>
+            advancePendingMcpRuntimeCleanup(
+              sdk,
+              pendingCleanup,
+              `tree:${sessionId}`,
+              outcome,
+            ),
+    );
     activeProcesses.delete(sessionId);
     // Dropped with the process it pumps. A watchdog left behind is polled by the
     // frontend keep-alive against a session whose child is gone.
@@ -4495,16 +4726,11 @@ async function cleanupMcpRuntimeGeneration(
   // and deleting a token-bearing file is not revocation — the token is in the
   // surviving process's MEMORY. Killing the process that read it is.
   //
-  // WHY THE COMPLETION ORDER IS NOT ENFORCED. Nothing here is awaited, so the
-  // scan may still be running when `rm` below returns. Awaiting it would suspend
-  // an RPC handler on a child-process callback and a timer Caido's runtime does
-  // not reliably deliver during an await — the starvation anti-pattern CLAUDE.md
-  // names, and the reason `killTree` is fire-and-forget in the first place.
-  //
-  // Losing that filesystem race costs this reaper nothing: it identifies its
-  // target by the target's argv, which survives directory removal. The
-  // generation gate separately makes a late callback harmless once a
-  // replacement runtime starts; it records `gate-stale` and signals nothing.
+  // COMPLETION IS CALLBACK-DRIVEN, NOT AWAITED HERE. The cleanup barrier above
+  // has one prerequisite for this reap plus provider-exit and tree-killer
+  // prerequisites for every tracked process. This RPC returns after issuance,
+  // allowing Caido to deliver the child callbacks it starves during an await;
+  // only the later terminal callback that empties the barrier can start rm.
   reapMcpOrphans(
     sdk,
     buildSessionOrphanScanPlan({
@@ -4520,15 +4746,16 @@ async function cleanupMcpRuntimeGeneration(
       epoch: cleanupEpoch,
       tempDir: cleanupTempDir,
     },
+    pendingCleanup === undefined
+      ? undefined
+      : (outcome) =>
+          advancePendingMcpRuntimeCleanup(
+            sdk,
+            pendingCleanup,
+            "orphan-reap",
+            outcome,
+          ),
   );
-
-  if (cleanupTempDir !== undefined) {
-    try {
-      await rm(cleanupTempDir, { recursive: true, force: true });
-    } catch (error) {
-      sdk.console.error(`[drift] Failed to remove MCP temp dir ${cleanupTempDir}: ${String(error)}`);
-    }
-  }
 
   if (
     !isMcpRuntimeEpochCurrent(mcpLifecycle, cleanupEpoch) ||
@@ -4536,6 +4763,10 @@ async function cleanupMcpRuntimeGeneration(
   ) {
     return;
   }
+  // Retire the public pointer immediately so Stop reports stopped, but retain
+  // the captured root itself until the callback barrier authorizes removal.
+  // startMcpServerOperation refuses replacement while that retained generation
+  // is pending or failed closed.
   mcpTempDir = undefined;
   cliSessions.clear();
   setMcpAuthStatus(authState, authMessage);
@@ -4654,6 +4885,9 @@ async function startMcpServer(
 async function startMcpServerOperation(
   sdk: BackendSDK,
 ): Promise<Result<McpServerInfo>> {
+  const pendingCleanupError = getPendingCleanupStartError();
+  if (pendingCleanupError !== undefined) return err(pendingCleanupError);
+
   // This check is INSIDE the lifecycle FIFO: two concurrent Start RPCs become
   // two sequential operations, and the second observes the generation the
   // first committed. A healthy runtime is returned as-is. An inconsistent or
@@ -4674,6 +4908,10 @@ async function startMcpServerOperation(
   }
   if (startDisposition === "replace") {
     await cleanupMcpRuntime(sdk);
+    const replacementCleanupError = getPendingCleanupStartError();
+    if (replacementCleanupError !== undefined) {
+      return err(replacementCleanupError);
+    }
   }
 
   // Check prerequisites
@@ -6486,7 +6724,15 @@ function killTree(
   sdk: BackendSDK,
   proc: ChildProcessWithoutNullStreams,
   rung: KillRung,
+  onComplete?: (outcome: CleanupPrerequisiteOutcome) => void,
 ): void {
+  let completionReported = false;
+  const reportCompletion = (outcome: CleanupPrerequisiteOutcome): void => {
+    if (completionReported) return;
+    completionReported = true;
+    onComplete?.(outcome);
+  };
+
   // Captured ONCE, here. Reading `proc.pid` again inside a deferred rung is
   // Pitfall 2 (pid reuse) — by then the process may have been reaped and the
   // number reassigned.
@@ -6592,6 +6838,7 @@ function killTree(
 
   if (plan.kind === "none") {
     sdk.console.log(`[drift lifecycle] no tree kill: ${plan.reason}`);
+    reportCompletion({ safe: true });
     return;
   }
 
@@ -6614,6 +6861,7 @@ function killTree(
     // by this project, and `kill`'s "no such process" is the normal race.
     killer.on("close", (code) => {
       sdk.console.log(`[drift lifecycle] tree kill exited code=${String(code)}`);
+      reportCompletion({ safe: true });
     });
     killer.on("error", (error: Error & { code?: string }) => {
       // The errno CODE only. `error.message` embeds the resolved file path
@@ -6623,6 +6871,7 @@ function killTree(
         `[drift lifecycle] tree kill spawn error code=${String(error.code ?? "unknown")}`,
       );
       killWin32Leaf(proc);
+      reportCompletion({ safe: false, reason: "tree-kill-spawn-error" });
     });
   } catch {
     // Same rule: the thrown value's message carries the path, so only the
@@ -6631,6 +6880,7 @@ function killTree(
       `[drift lifecycle] tree kill threw synchronously platform=${String(host?.platform ?? "unknown")}`,
     );
     killWin32Leaf(proc);
+    reportCompletion({ safe: false, reason: "tree-kill-spawn-threw" });
   }
 }
 

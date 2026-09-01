@@ -368,6 +368,16 @@ describe("Phase 8 SC-4 completion-order evidence", () => {
 
       armTeardownSchedule = true;
       stopResult = await call<{ kind: string }>("stopMcpServer");
+      // Stop must yield without awaiting Caido-starvable child callbacks. Once
+      // it has yielded, release the controlled host completions and require the
+      // deferred production barrier to reach recursive removal on its own.
+      provider?.complete(null, "SIGKILL");
+      for (const killer of treeKillers) killer.complete(0);
+      teardownScanner?.complete(1);
+      await waitUntil(
+        () => removals.length === 1,
+        "deferred cleanup after every controlled completion",
+      );
       observation = removals[0];
     } finally {
       provider?.complete(null, "SIGKILL");

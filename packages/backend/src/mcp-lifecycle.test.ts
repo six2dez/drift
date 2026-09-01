@@ -11,7 +11,9 @@ import {
   cleanupRetiredProviderStartRoot,
   commitProviderStartLease,
   countMcpDirectCalls,
+  createMcpCleanupBarrier,
   createMcpLifecycleState,
+  getMcpCleanupBarrierDisposition,
   getMcpRuntimeEpoch,
   getMcpStartDisposition,
   isMcpOrphanReapGateCurrent,
@@ -21,7 +23,93 @@ import {
   retireMcpDirectCalls,
   runMcpLifecycleOperation,
   runMcpProviderTeardown,
+  settleMcpCleanupPrerequisite,
 } from "./mcp-lifecycle";
+
+describe("MCP cleanup completion barrier", () => {
+  it("is ready immediately when cleanup has no completion prerequisites", () => {
+    const barrier = createMcpCleanupBarrier([]);
+    expect(getMcpCleanupBarrierDisposition(barrier)).toBe("ready");
+  });
+
+  it("becomes ready only after every prerequisite settles safely", () => {
+    const barrier = createMcpCleanupBarrier([
+      "provider:one",
+      "tree:one",
+      "orphan-reap",
+    ]);
+
+    expect(
+      settleMcpCleanupPrerequisite({
+        barrier,
+        prerequisite: "tree:one",
+        safe: true,
+      }),
+    ).toBe("pending");
+    expect(
+      settleMcpCleanupPrerequisite({
+        barrier,
+        prerequisite: "provider:one",
+        safe: true,
+      }),
+    ).toBe("pending");
+    expect(
+      settleMcpCleanupPrerequisite({
+        barrier,
+        prerequisite: "orphan-reap",
+        safe: true,
+      }),
+    ).toBe("ready");
+  });
+
+  it("retains a fail-closed result after the remaining prerequisites settle", () => {
+    const barrier = createMcpCleanupBarrier(["provider:one", "orphan-reap"]);
+
+    expect(
+      settleMcpCleanupPrerequisite({
+        barrier,
+        prerequisite: "orphan-reap",
+        safe: false,
+        failureReason: "scan-timeout",
+      }),
+    ).toBe("pending");
+    expect(
+      settleMcpCleanupPrerequisite({
+        barrier,
+        prerequisite: "provider:one",
+        safe: true,
+      }),
+    ).toBe("failed-closed");
+    expect([...barrier.failedClosedReasons]).toEqual(["scan-timeout"]);
+  });
+
+  it("ignores duplicate or unknown terminal events", () => {
+    const barrier = createMcpCleanupBarrier(["provider:one"]);
+    expect(
+      settleMcpCleanupPrerequisite({
+        barrier,
+        prerequisite: "provider:one",
+        safe: true,
+      }),
+    ).toBe("ready");
+    expect(
+      settleMcpCleanupPrerequisite({
+        barrier,
+        prerequisite: "provider:one",
+        safe: false,
+        failureReason: "late-error",
+      }),
+    ).toBe("ready");
+    expect(
+      settleMcpCleanupPrerequisite({
+        barrier,
+        prerequisite: "unknown",
+        safe: false,
+        failureReason: "unknown",
+      }),
+    ).toBe("ready");
+  });
+});
 
 describe("MCP lifecycle generations", () => {
   it("prevents a late old-generation release from consuming a new call", () => {
@@ -293,9 +381,7 @@ describe("provider start lease", () => {
   it("removes a recreated retired root while the installed pointer is equal", async () => {
     const state = createMcpLifecycleState();
     beginMcpRuntimeGeneration(state);
-    const runtimeDir = await mkdtemp(
-      join(tmpdir(), "drift-mcp-retired-root-"),
-    );
+    const runtimeDir = await mkdtemp(join(tmpdir(), "drift-mcp-retired-root-"));
     const lease = acquireProviderStartLease(state, runtimeDir);
     expect(lease).toBeDefined();
 

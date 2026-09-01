@@ -38,6 +38,49 @@ export type McpOrphanReapGate =
       tempDir: string | undefined;
     };
 
+export type McpCleanupBarrier = {
+  pending: Set<string>;
+  failedClosedReasons: Set<string>;
+};
+
+export type McpCleanupBarrierDisposition =
+  | "pending"
+  | "ready"
+  | "failed-closed";
+
+export function createMcpCleanupBarrier(
+  prerequisites: Iterable<string>,
+): McpCleanupBarrier {
+  return {
+    pending: new Set(prerequisites),
+    failedClosedReasons: new Set(),
+  };
+}
+
+export function getMcpCleanupBarrierDisposition(
+  barrier: McpCleanupBarrier,
+): McpCleanupBarrierDisposition {
+  if (barrier.pending.size > 0) return "pending";
+  return barrier.failedClosedReasons.size === 0 ? "ready" : "failed-closed";
+}
+
+export function settleMcpCleanupPrerequisite(input: {
+  barrier: McpCleanupBarrier;
+  prerequisite: string;
+  safe: boolean;
+  failureReason?: string;
+}): McpCleanupBarrierDisposition {
+  if (!input.barrier.pending.delete(input.prerequisite)) {
+    return getMcpCleanupBarrierDisposition(input.barrier);
+  }
+  if (!input.safe) {
+    input.barrier.failedClosedReasons.add(
+      input.failureReason ?? input.prerequisite,
+    );
+  }
+  return getMcpCleanupBarrierDisposition(input.barrier);
+}
+
 export function createMcpLifecycleState(): McpLifecycleState {
   return {
     currentEpoch: 0,
@@ -110,9 +153,7 @@ export function isMcpOrphanReapGateCurrent(input: {
     );
   }
 
-  return (
-    input.currentTempDir === input.gate.tempDir && input.sessionIdle
-  );
+  return input.currentTempDir === input.gate.tempDir && input.sessionIdle;
 }
 
 export function acquireMcpDirectCall(

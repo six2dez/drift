@@ -200,8 +200,10 @@ describe("index.ts contains every spawn-plan refusal at its orchestration bounda
     expect(cleanup.indexOf("killTree(")).toBeLessThan(
       cleanup.indexOf("reapMcpOrphans("),
     );
-    expect(cleanup.indexOf("reapMcpOrphans(")).toBeLessThan(
-      cleanup.indexOf("await rm("),
+    expect(cleanup).not.toContain("await rm(");
+    const removal = functionBody(code, "removeCompletedMcpRuntimeCleanup");
+    expect(removal).toContain(
+      "await rm(pending.tempDir, { recursive: true, force: true })",
     );
   });
 
@@ -591,8 +593,22 @@ describe("index.ts kills every tracked tree before it removes the files that car
     // comparison meaningless, so it fails loudly here instead.
     expect(body).not.toBe("");
     expect(body.indexOf("killTree(")).not.toBe(-1);
-    expect(body.indexOf("rm(")).not.toBe(-1);
-    expect(body.indexOf("killTree(")).toBeLessThan(body.indexOf("rm("));
+    expect(body).toContain("createMcpCleanupBarrier([");
+    expect(body).toContain("`provider:${sessionId}`");
+    expect(body).toContain("`tree:${sessionId}`");
+    expect(body).toContain('"orphan-reap"');
+    expect(body).not.toContain("await rm(");
+
+    const advance = functionBody(code, "advancePendingMcpRuntimeCleanup");
+    const removal = functionBody(code, "removeCompletedMcpRuntimeCleanup");
+    expect(advance).toContain('disposition === "pending"');
+    expect(advance).toContain('disposition === "failed-closed"');
+    expect(advance.indexOf('disposition === "failed-closed"')).toBeLessThan(
+      advance.indexOf("removeCompletedMcpRuntimeCleanup("),
+    );
+    expect(removal).toContain(
+      "await rm(pending.tempDir, { recursive: true, force: true })",
+    );
   });
 
   it("closeCliSession terminates before it removes the session's runtime files", () => {
@@ -824,7 +840,7 @@ describe("index.ts guards both deferred rungs on handle identity before liveness
     // the exact spelling that reads `undefined !== null` as "exited" under LLRT.
     const calls = callArgumentTexts(code, "hasTrackedProcessExited");
 
-    expect(calls).toHaveLength(2);
+    expect(calls).toHaveLength(3);
     for (const call of calls) {
       expect(call).toContain("...readHandleExitState(proc)");
     }
@@ -1068,9 +1084,14 @@ describe("index.ts wires the orphan reap at every counted site and nowhere else 
     expect(body).not.toBe("");
     expect(body.indexOf("reapMcpOrphans(")).not.toBe(-1);
     expect(body.indexOf("killTree(")).not.toBe(-1);
-    expect(body.indexOf("rm(")).not.toBe(-1);
-    expect(body.indexOf("reapMcpOrphans(")).toBeLessThan(body.indexOf("rm("));
-    expect(body.indexOf("killTree(")).toBeLessThan(body.indexOf("rm("));
+    expect(body).toContain('"orphan-reap"');
+    expect(body).toContain("advancePendingMcpRuntimeCleanup(");
+    expect(body).not.toContain("await rm(");
+
+    const advance = functionBody(code, "advancePendingMcpRuntimeCleanup");
+    expect(advance.indexOf('disposition === "pending"')).toBeLessThan(
+      advance.indexOf("removeCompletedMcpRuntimeCleanup("),
+    );
   });
 
   it("cleanupMcpRuntime removes only its captured directory and guards stale mutations", () => {
@@ -1080,10 +1101,16 @@ describe("index.ts wires the orphan reap at every counted site and nowhere else 
     expect(body.indexOf("const cleanupTempDir = mcpTempDir")).toBeLessThan(
       body.indexOf("await unregisterMcpFromCli"),
     );
-    expect(body).toContain(
-      "await rm(cleanupTempDir, { recursive: true, force: true })",
-    );
+    expect(body).toContain("tempDir: cleanupTempDir");
     expect(body).not.toContain("await rm(mcpTempDir");
+    const removal = functionBody(code, "removeCompletedMcpRuntimeCleanup");
+    expect(removal).toContain(
+      "await rm(pending.tempDir, { recursive: true, force: true })",
+    );
+    expect(removal).not.toContain("await rm(mcpTempDir");
+    expect(removal).toContain(
+      "isMcpRuntimeEpochCurrent(mcpLifecycle, pending.epoch)",
+    );
     expect(
       body.match(
         /isMcpRuntimeEpochCurrent\(mcpLifecycle, cleanupEpoch\)/g,
