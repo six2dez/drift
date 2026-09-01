@@ -110,8 +110,14 @@ describe("buildGeminiLaunchArgs", () => {
 });
 
 describe("buildCodexLaunchArgs", () => {
-  it("returns the fixed codex exec invocation", () => {
-    expect(buildCodexLaunchArgs()).toEqual(["exec", "--color", "never", "-"]);
+  it("allows Codex to run from Caido's non-repository working directory", () => {
+    expect(buildCodexLaunchArgs()).toEqual([
+      "exec",
+      "--skip-git-repo-check",
+      "--color",
+      "never",
+      "-",
+    ]);
   });
 });
 

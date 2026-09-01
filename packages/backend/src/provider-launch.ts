@@ -64,7 +64,7 @@ export function buildGeminiLaunchArgs(input: GeminiLaunchInput): string[] {
 }
 
 export function buildCodexLaunchArgs(): string[] {
-  return ["exec", "--color", "never", "-"];
+  return ["exec", "--skip-git-repo-check", "--color", "never", "-"];
 }
 
 export interface CopilotLaunchInput {

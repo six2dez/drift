@@ -667,47 +667,57 @@ describe("index.ts publishes and de-registers every session its cleanup loop kil
   });
 });
 
-// ── SC-4: the absolute-timeout handler kills before it finalizes ──
+// ── SC-4: every absolute-timeout wake-up kills before it finalizes ──
 //
-// Pitfall 10. The kill moved UP; `finalize` did NOT move and must not: it is a
-// `const` arrow declared lower in the same promise executor, so hoisting it into
-// the handler puts it in its temporal dead zone and throws a ReferenceError
-// synchronously inside the executor. `finalize` removes the activity and
-// approvals files, which is why the order matters here for the same reason it
-// matters at the three sites above.
-describe("index.ts kills before it finalizes a timed-out turn (SC-4 / Pitfall 10)", () => {
+// Pitfall 10 still applies: `finalize` removes the activity and approvals files,
+// so the process tree must die first. The common expiry function also prevents
+// the timer wake-up and the Caido keep-alive wake-up from drifting into two
+// subtly different timeout implementations.
+//
+// The second wake-up is not optional. Caido can starve plugin `setTimeout`
+// callbacks while the long-running send RPC is awaiting its child. The frontend
+// already pumps `heartbeat` through getCliSessionState for exactly that runtime
+// constraint, so the absolute deadline has to be checked there too.
+describe("index.ts enforces one kill-before-finalize timeout from timer and heartbeat (SC-4 / Pitfall 10)", () => {
   const body = functionBody(code, "sendCliMessage");
+  const deadlineIdx = body.indexOf("const processDeadlineAt =");
+  const expiryIdx = body.indexOf("const expireTimedOutTurn = () => {");
+  const heartbeatIdx = body.indexOf("const heartbeat = () => {");
+  const intervalIdx = body.indexOf("const activityInterval = setInterval(");
+  const timerIdx = body.indexOf("const timeout = setTimeout(");
+  const shutdownIdx = body.indexOf("const requestGracefulShutdown = () => {");
 
-  // THE END ANCHOR IS THE CALL'S FULL CLOSING LINE, AND IT IS SEARCHED FORWARD
-  // FROM THE START ANCHOR — note the second argument to `indexOf`. Do not shorten
-  // it back to the bare `currentSettings.processTimeoutSeconds` identifier: that
-  // identifier's FIRST occurrence inside `sendCliMessage` is the
-  // `sendCliMessage start …` debug-log line, roughly five hundred lines ABOVE the
-  // handler. An unanchored lookup would therefore return an end BEFORE the start,
-  // `.slice` would return "", both inner lookups would return -1, and the
-  // ordering assertion would pass while proving nothing. That vacuous pass is the
-  // precise failure this block exists to prevent, so the guards below are part of
-  // the assertion rather than decoration.
-  const startIdx = body.indexOf("const timeout = setTimeout(");
-  const endIdx = body.indexOf(
-    "}, currentSettings.processTimeoutSeconds * 1000)",
-    startIdx,
-  );
-
-  it("finds a non-empty, correctly-ordered handler slice", () => {
+  it("finds the shared expiry function and both wake-up slices", () => {
     expect(body).not.toBe("");
-    expect(startIdx).not.toBe(-1);
-    expect(endIdx).not.toBe(-1);
-    expect(endIdx).toBeGreaterThan(startIdx);
-    expect(body.slice(startIdx, endIdx)).not.toBe("");
+    expect(deadlineIdx).not.toBe(-1);
+    expect(heartbeatIdx).toBeGreaterThan(deadlineIdx);
+    expect(intervalIdx).toBeGreaterThan(heartbeatIdx);
+    expect(expiryIdx).toBeGreaterThan(intervalIdx);
+    expect(timerIdx).toBeGreaterThan(expiryIdx);
+    expect(shutdownIdx).toBeGreaterThan(timerIdx);
   });
 
-  it("puts the tree kill above finalize()", () => {
-    const slice = body.slice(startIdx, endIdx);
+  it("puts the tree kill above finalize() in the single expiry function", () => {
+    const slice = body.slice(expiryIdx, timerIdx);
 
     expect(slice).toContain("killTree(");
     expect(slice).toContain("finalize(");
     expect(slice.indexOf("killTree(")).toBeLessThan(slice.indexOf("finalize("));
+  });
+
+  it("enforces the absolute deadline from the keep-alive-pumped heartbeat", () => {
+    const slice = body.slice(heartbeatIdx, intervalIdx);
+
+    expect(slice).toContain("now >= processDeadlineAt");
+    expect(slice).toContain("expireTimedOutTurn()");
+  });
+
+  it("routes the native timer wake-up through the same expiry function", () => {
+    const slice = body.slice(timerIdx, shutdownIdx);
+
+    expect(slice).toContain("expireTimedOutTurn()");
+    expect(slice).not.toContain("killTree(");
+    expect(slice).not.toContain("finalize(");
   });
 });
 

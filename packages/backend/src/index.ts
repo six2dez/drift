@@ -5974,6 +5974,8 @@ async function sendCliMessage(
       let lastStdoutAt = Date.now();
       let activityTickCounter = 0;
       let lastActivityTickLogAt = 0;
+      const processDeadlineAt =
+        Date.now() + currentSettings.processTimeoutSeconds * 1000;
       const CLAUDE_STDOUT_SILENCE_BACKSTOP_MS = 20000;
       const heartbeat = () => {
         if (settled) return;
@@ -5997,6 +5999,15 @@ async function sendCliMessage(
           return;
         }
         const now = Date.now();
+        // Caido can starve this turn's native setTimeout while the enclosing RPC
+        // awaits the provider. The frontend already pumps this heartbeat through
+        // getCliSessionState for that runtime constraint, so it is also the
+        // reliable wake-up path for the absolute deadline. The timer below stays
+        // as the native fast path on runtimes that deliver it normally.
+        if (now >= processDeadlineAt) {
+          expireTimedOutTurn();
+          return;
+        }
         if (now - lastActivityTickLogAt > 5000) {
           lastActivityTickLogAt = now;
           sdk.console.log(
@@ -6159,25 +6170,24 @@ async function sendCliMessage(
         })();
       };
 
-      const timeout = setTimeout(() => {
+      const expireTimedOutTurn = () => {
         if (settled) return;
         setSessionState("error", "Process timed out.", {
           mcpAttached: mcpTempDir !== undefined,
           reasonCode: "timeout",
         });
-        // Pitfall 10, and it names which of the next two statements is the
-        // movable one. The KILL moved UP; `finalize` did NOT move and must not:
-        // it is a `const` arrow declared LOWER in this same promise executor, so
-        // hoisting it to this position puts it in its temporal dead zone and
-        // calling it throws a ReferenceError synchronously inside the executor —
-        // the exact bug already recorded above at the spawn guard. Reorder these
-        // two and you get a rejected promise instead of a timed-out turn.
-        //
-        // Why the kill goes first at all (SC-4): `finalize` removes the activity
-        // and approvals files that carried the Caido token into the MCP child's
-        // environment. The tree that was reading them dies before they vanish.
+        // Pitfall 10 remains an ordering invariant even though the two wake-up
+        // paths now share this function. `finalize` removes the activity and
+        // approvals files that carried the Caido token into the MCP child's
+        // environment, so the tree that was reading them dies before they
+        // vanish. Do not duplicate this sequence back into either wake-up: that
+        // would let the native timer and the Caido-pumped heartbeat drift apart.
         killTree(sdk, proc, "kill");
         finalize(err("Process timed out"));
+      };
+
+      const timeout = setTimeout(() => {
+        expireTimedOutTurn();
       }, currentSettings.processTimeoutSeconds * 1000);
 
       const requestGracefulShutdown = () => {
