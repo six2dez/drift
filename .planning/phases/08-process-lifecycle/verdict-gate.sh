@@ -37,11 +37,11 @@ SOURCE_BEGIN='// DRIFT:A1-CORRECTION:BEGIN'
 SOURCE_END='// DRIFT:A1-CORRECTION:END'
 TRACEABILITY_BEGIN='<!-- DRIFT:LIF-02-TRACEABILITY:BEGIN -->'
 TRACEABILITY_END='<!-- DRIFT:LIF-02-TRACEABILITY:END -->'
-TRACEABILITY_CURRENT_LINE='**CURRENT LIF-02 traceability correction (2026-08-31, Plan 08-23):** Plan 08-18 CLOSED deferred item 10 by propagating the repaired A1 result to exactly eight mutable A1 carriers and two live pointers. LIF-01 and LIF-02 remain unchecked. LIF-02 remains open because the argv-marker reap lacks an executed shipping-runtime assertion, no Control exists for a non-Claude provider, and the redundancy question is unresolved.'
+TRACEABILITY_CURRENT_LINE="**CURRENT LIF-02 traceability closure (2026-09-02):** Plan 08-18 propagated the repaired A1 result to exactly eight mutable A1 carriers and two live pointers. The release candidate then executed the shipping argv-marker reap in real Caido with kind=reap, exit=0, attempted=1 and ageMs=109; the target died before the token-bearing runtime root was removed. LIF-02 is closed at ROADMAP SC-2's two-mechanism contract; accepted residuals remain explicit and do not reopen that contract."
 WINDOWS_BEGIN='<!-- DRIFT:WINDOWS-TWO-CASE:BEGIN -->'
 WINDOWS_END='<!-- DRIFT:WINDOWS-TWO-CASE:END -->'
-WINDOWS_CURRENT_DESCRIPTION="Exactly two native win32 kill-tree cases form the 2/2 contract; both remain unexecuted because no windows-latest/native run exists. CI pins expectedTotal=2 and the behavioral full name win32 process-tree termination (LIF-01) the plan's argv brings down a real process tree. Commit e1ac837 removed the former already-exited/dead-pid exit-code and stderr measurement because a recycled pid could target an unrelated process. No reserved block exists. The missing exit-code/stderr datum is deferred and accepted until a safe owned-live-process measurement is designed; LIF-01 remains open."
-WINDOWS_CURRENT_LINE="**CURRENT Windows two-case correction (2026-08-31, Plan 08-23):** $WINDOWS_CURRENT_DESCRIPTION"
+WINDOWS_CURRENT_DESCRIPTION="Exactly two native win32 kill-tree cases form the 2/2 contract. CI run 33599694679 on candidate 9aa22bbd4c26fecabc17745438a2217a24b31d3e executed 2 passed, 0 pending and 0 failed; the behavioural case killed the live parent and grandchild, and the resolution case used the absolute system-root taskkill.exe. Commit e1ac837 removed the unsafe already-exited/dead-pid exit-code and stderr vehicle; no reserved block exists and that datum remains accepted and deferred. LIF-01 is closed at the owned live-tree contract; AR-01 and AR-04 remain accepted residuals."
+WINDOWS_CURRENT_LINE="**CURRENT Windows two-case closure (2026-09-02):** $WINDOWS_CURRENT_DESCRIPTION"
 
 SPIKE_PATH='.planning/phases/08-process-lifecycle/08-SPIKE.md'
 SPIKE_SHA256='7c482d7fd539f84c8e44fcfe9036b454a868767b719bd8a91d35ac70d8a9745f'
@@ -214,7 +214,7 @@ validate_lif02_traceability() {
 # Five living files carry the Windows contract, while WINDOWS.md carries it in
 # both a table and JSON register. The marker parser establishes which prose is
 # current; the ledger parser additionally requires its two machine-readable
-# representations to be byte-identical in meaning and still open.
+# representations to be byte-identical in meaning and fixed.
 WINDOWS_REASON=''
 WINDOWS_PATH='windows-contract'
 validate_windows_carrier_record() {
@@ -234,7 +234,7 @@ validate_windows_carrier_record() {
   if printf '%s\n' "$body" | grep -Eq '^[[:space:]]*$'; then WINDOWS_REASON='Windows record is separated'; return 1; fi
   flattened=$(printf '%s\n' "$body" | tr '\n' ' ' | sed -E 's/[[:space:]]+$//')
   if [ "$flattened" != "$WINDOWS_CURRENT_LINE" ]; then
-    WINDOWS_REASON='safe 2/2/e1ac837/recycled-pid/open contract missing or contradictory'; return 1
+    WINDOWS_REASON='safe 2/2/native-run/e1ac837/residual contract missing or contradictory'; return 1
   fi
   return 0
 }
@@ -264,9 +264,9 @@ validate_windows_ledger() {
       } catch { process.exit(1); }
     });
   ' 2>/dev/null) || { WINDOWS_REASON='entry 12 JSON object missing, duplicated, or malformed'; return 1; }
-  expected_record=$(printf '%s\n%s' "$WINDOWS_CURRENT_DESCRIPTION" 'open')
+  expected_record=$(printf '%s\n%s' "$WINDOWS_CURRENT_DESCRIPTION" 'fixed')
   if [ "$table_record" != "$json_record" ]; then WINDOWS_REASON='entry 12 table and JSON meanings diverge'; return 1; fi
-  if [ "$table_record" != "$expected_record" ]; then WINDOWS_REASON='entry 12 safe two-case meaning or open status is stale'; return 1; fi
+  if [ "$table_record" != "$expected_record" ]; then WINDOWS_REASON='entry 12 safe two-case meaning or fixed status is stale'; return 1; fi
   return 0
 }
 
@@ -282,28 +282,28 @@ validate_windows_two_case_contract() {
   return 0
 }
 
-# ROADMAP/REQUIREMENTS are pointers outside CARRIERS_A1. Open checkboxes prevent
-# this evidence-only plan from closing Phase 8 or either lifecycle requirement.
+# ROADMAP/REQUIREMENTS are pointers outside CARRIERS_A1. The closure acquisition
+# requires all three checkboxes plus the bounded LIF-02 traceability record.
 POINTER_REASON=''
 POINTER_PATH='pointer-set'
 validate_pointer_records() {
   local roadmap=$1 requirements=$2 pointer_failures=0
   POINTER_REASON=''; POINTER_PATH="$roadmap, $requirements"
   if ! validate_marker_record "$roadmap" markdown; then pointer_failures=$((pointer_failures + 1)); fi
-  if [ "$(grep -F -c -- '- [ ] **Phase 8: Process Lifecycle**' "$roadmap" 2>/dev/null || true)" != '1' ]; then
+  if [ "$(grep -F -c -- '- [x] **Phase 8: Process Lifecycle**' "$roadmap" 2>/dev/null || true)" != '1' ]; then
     pointer_failures=$((pointer_failures + 1))
   fi
   if ! validate_marker_record "$requirements" markdown; then pointer_failures=$((pointer_failures + 1)); fi
-  if [ "$(grep -F -c -- '- [ ] **LIF-01**' "$requirements" 2>/dev/null || true)" != '1' ]; then
+  if [ "$(grep -F -c -- '- [x] **LIF-01**' "$requirements" 2>/dev/null || true)" != '1' ]; then
     pointer_failures=$((pointer_failures + 1))
   fi
-  if [ "$(grep -F -c -- '- [ ] **LIF-02**' "$requirements" 2>/dev/null || true)" != '1' ]; then
+  if [ "$(grep -F -c -- '- [x] **LIF-02**' "$requirements" 2>/dev/null || true)" != '1' ]; then
     pointer_failures=$((pointer_failures + 1))
   fi
   if ! validate_lif02_traceability "$requirements"; then
     pointer_failures=$((pointer_failures + 1))
   fi
-  if [ "$pointer_failures" != '0' ]; then POINTER_REASON='one or more marker/open-state checks failed'; return 1; fi
+  if [ "$pointer_failures" != '0' ]; then POINTER_REASON='one or more marker/closed-state checks failed'; return 1; fi
   return 0
 }
 
@@ -401,7 +401,7 @@ write_self_windows_ledger() {
   local path=$1 table_description json_description status
   table_description=${2:-$WINDOWS_CURRENT_DESCRIPTION}
   json_description=${3:-$table_description}
-  status=${4:-open}
+  status=${4:-fixed}
   {
     printf '%s\n' '| id | phase | kind | file | line | description | status | reason | recorded_at | resolved_at |'
     printf '%s\n' '|----|-------|------|------|------|-------------|--------|--------|-------------|-------------|'
@@ -505,29 +505,29 @@ run_self_test() {
 
   mkdir -p "$tmp/pointers"
   write_self_markdown_record "$tmp/pointers/ROADMAP.md"
-  printf '%s\n' '- [ ] **Phase 8: Process Lifecycle**' >>"$tmp/pointers/ROADMAP.md"
+  printf '%s\n' '- [x] **Phase 8: Process Lifecycle**' >>"$tmp/pointers/ROADMAP.md"
   write_self_markdown_record "$tmp/pointers/REQUIREMENTS.md"
   write_self_traceability_record "$tmp/pointers/REQUIREMENTS.md"
-  printf '%s\n' '- [ ] **LIF-01**: open' '- [ ] **LIF-02**: open' >>"$tmp/pointers/REQUIREMENTS.md"
-  self_expect_pass 'open-live-pointers' validate_pointer_records "$tmp/pointers/ROADMAP.md" "$tmp/pointers/REQUIREMENTS.md"
+  printf '%s\n' '- [x] **LIF-01**: closed' '- [x] **LIF-02**: closed' >>"$tmp/pointers/REQUIREMENTS.md"
+  self_expect_pass 'closed-live-pointers' validate_pointer_records "$tmp/pointers/ROADMAP.md" "$tmp/pointers/REQUIREMENTS.md"
   : >"$tmp/pointers/stale-traceability.md"
   write_self_traceability_record "$tmp/pointers/stale-traceability.md" 'Plan 08-18 is pending; deferred item 10 must land before 08-SPIKE.md stops being the single carrier.'
   self_expect_fail 'stale-lif02-traceability' validate_lif02_traceability "$tmp/pointers/stale-traceability.md"
   cp "$tmp/pointers/REQUIREMENTS.md" "$tmp/pointers/empty-traceability.md"
-  sed -i.bak "/CURRENT LIF-02 traceability correction/d" "$tmp/pointers/empty-traceability.md"; rm -f "$tmp/pointers/empty-traceability.md.bak"
+  sed -i.bak "/CURRENT LIF-02 traceability closure/d" "$tmp/pointers/empty-traceability.md"; rm -f "$tmp/pointers/empty-traceability.md.bak"
   self_expect_fail 'empty-lif02-traceability' validate_lif02_traceability "$tmp/pointers/empty-traceability.md"
   cp "$tmp/pointers/REQUIREMENTS.md" "$tmp/pointers/duplicate-traceability.md"
   write_self_traceability_record "$tmp/pointers/duplicate-traceability.md"
   self_expect_fail 'duplicate-lif02-traceability' validate_lif02_traceability "$tmp/pointers/duplicate-traceability.md"
   cp "$tmp/pointers/REQUIREMENTS.md" "$tmp/pointers/separated-traceability.md"
-  sed -i.bak "/CURRENT LIF-02 traceability correction/i\\
+  sed -i.bak "/CURRENT LIF-02 traceability closure/i\\
 " "$tmp/pointers/separated-traceability.md"; rm -f "$tmp/pointers/separated-traceability.md.bak"
   self_expect_fail 'separated-lif02-traceability' validate_lif02_traceability "$tmp/pointers/separated-traceability.md"
   : >"$tmp/pointers/contradictory-traceability.md"
   write_self_traceability_record "$tmp/pointers/contradictory-traceability.md" "$TRACEABILITY_CURRENT_LINE 08-SPIKE.md is the single carrier."
   self_expect_fail 'contradictory-lif02-traceability' validate_lif02_traceability "$tmp/pointers/contradictory-traceability.md"
-  sed -i.bak 's/- \[ \] \*\*LIF-02\*\*/- [x] **LIF-02**/' "$tmp/pointers/REQUIREMENTS.md"; rm -f "$tmp/pointers/REQUIREMENTS.md.bak"
-  self_expect_fail 'closed-lif-checkbox' validate_pointer_records "$tmp/pointers/ROADMAP.md" "$tmp/pointers/REQUIREMENTS.md"
+  sed -i.bak 's/- \[x\] \*\*LIF-02\*\*/- [ ] **LIF-02**/' "$tmp/pointers/REQUIREMENTS.md"; rm -f "$tmp/pointers/REQUIREMENTS.md.bak"
+  self_expect_fail 'open-lif-checkbox' validate_pointer_records "$tmp/pointers/ROADMAP.md" "$tmp/pointers/REQUIREMENTS.md"
 
   mkdir -p "$tmp/windows"
   write_self_windows_ledger "$tmp/windows/WINDOWS.md"
@@ -542,8 +542,8 @@ run_self_test() {
   self_expect_fail 'promised-windows-reserved-block' validate_windows_two_case_contract "$tmp/windows/promised-reserved.md" "$tmp/windows/REQUIREMENTS.md" "$tmp/windows/08-VALIDATION.md" "$tmp/windows/08-UAT.md" "$tmp/windows/STATE.md"
   write_self_windows_ledger "$tmp/windows/divergent.md" "$WINDOWS_CURRENT_DESCRIPTION" 'The JSON representation is stale.'
   self_expect_fail 'windows-table-json-divergence' validate_windows_two_case_contract "$tmp/windows/divergent.md" "$tmp/windows/REQUIREMENTS.md" "$tmp/windows/08-VALIDATION.md" "$tmp/windows/08-UAT.md" "$tmp/windows/STATE.md"
-  write_self_windows_ledger "$tmp/windows/closed.md" "$WINDOWS_CURRENT_DESCRIPTION" "$WINDOWS_CURRENT_DESCRIPTION" 'fixed'
-  self_expect_fail 'windows-entry-must-stay-open' validate_windows_two_case_contract "$tmp/windows/closed.md" "$tmp/windows/REQUIREMENTS.md" "$tmp/windows/08-VALIDATION.md" "$tmp/windows/08-UAT.md" "$tmp/windows/STATE.md"
+  write_self_windows_ledger "$tmp/windows/open.md" "$WINDOWS_CURRENT_DESCRIPTION" "$WINDOWS_CURRENT_DESCRIPTION" 'open'
+  self_expect_fail 'windows-entry-must-be-fixed' validate_windows_two_case_contract "$tmp/windows/open.md" "$tmp/windows/REQUIREMENTS.md" "$tmp/windows/08-VALIDATION.md" "$tmp/windows/08-UAT.md" "$tmp/windows/STATE.md"
 
   init_self_git_fixture "$tmp/git-committed" 'pinned'
   pin=$(git -C "$tmp/git-committed" rev-parse HEAD:summaries/08-11-SUMMARY.md)

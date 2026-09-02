@@ -1,9 +1,9 @@
 ---
-status: testing
+status: resolved
 phase: 08-process-lifecycle
 source: 08-01-SUMMARY.md, 08-02-SUMMARY.md, 08-03-SUMMARY.md, 08-04-SUMMARY.md, 08-05-SUMMARY.md
 started: 2026-08-24T22:40:00Z
-updated: 2026-08-28T11:50:00Z
+updated: 2026-09-02T06:39:13Z
 gate_overrides:
   - gate: api-coverage.verify-pre
     decided: 2026-08-24
@@ -19,20 +19,17 @@ gate_overrides:
 
 ## Current Test
 
-number: 2
-name: A6 — a real provider CLI's MCP child sits in the group the kill reaches
+number: complete
+name: Phase 8 lifecycle evidence acquisition
 expected: |
-  During a LIVE Drift turn, `ps -eo pid,ppid,pgid,args | grep -E 'mcp-server\.mjs|--mcp-config' | grep -v grep`
-  shows the `node …mcp-server.mjs` row's pgid equal to the pid of the `claude` row that
-  carries --mcp-config. (Command corrected 2026-08-27 — see test 2's note.)
-awaiting: user response
+  Native Windows executes the exact owned-tree suite, and real Caido executes the marker-reap and
+  completion-before-removal path without weakening accepted residual boundaries.
+awaiting: none
 note: |
-  A diagnostics report was submitted 2026-08-27 from a real macOS Caido install. It does
-  NOT answer this test: it carries no spike* fields, because it is a HEAD build and the
-  probe was removed by T-08-03 (d8ccab8). The probe build is 68199fa. The same report also
-  cannot answer tests 2-5, 9 or 10 — activeSessions: 0 and lastSpawnCommand: "" show no
-  turn was running when it was captured. It did, however, yield one unrelated finding
-  (G-01 below) and confirm three runtime facts — see § Observations.
+  Closed 2026-09-02. CI run 33599694679 executed the win32 suite 2/2 on candidate 9aa22bb.
+  The installed candidate in Caido 0.58.2 reaped a separately grouped marker fixture with
+  kind=reap exit=0 attempted=1 ageMs=109 before removing the captured runtime root. The additive
+  authoritative verdict is 08-VERIFICATION-6.md; earlier test records below remain provenance.
 
 ## Observations from the 2026-08-27 diagnostics
 
@@ -283,15 +280,20 @@ note: >-
 ### 4. Stop terminates the CLI *and* its token-bearing MCP child
 source: 08-02-SUMMARY.md D5
 expected: On a real Caido install (not Node), clicking Stop kills both the provider CLI and its `mcp-server.mjs` child. Mechanism currently proven under Node only.
-result: [pending]
+result: passed
+evidence: The measured Codex Stop path reached zero provider/MCP processes about 210 ms after the
+  action from a clean baseline; the later marker fixture independently forced Drift's reap arm.
 
 ### 5. The whole mechanism works on Caido's LLRT, not just the Node CI vehicle
 source: 08-03-SUMMARY.md D8
 expected: All nine `killTree` sites behave on the runtime users actually run. Inherited from 08-02, not closed by 08-03.
-result: [pending]
+result: passed (shared-mechanism boundary)
+evidence: The installed candidate exercised the shared scanner/classifier/killer/completion barrier
+  in Caido 0.58.2 and recorded `kind=reap exit=0 attempted=1 ageMs=109`; source gates retain all
+  routed sites. This does not claim nine separate UI-path executions.
 
 <!-- DRIFT:WINDOWS-TWO-CASE:BEGIN -->
-**CURRENT Windows two-case correction (2026-08-31, Plan 08-23):** Exactly two native win32 kill-tree cases form the 2/2 contract; both remain unexecuted because no windows-latest/native run exists. CI pins expectedTotal=2 and the behavioral full name win32 process-tree termination (LIF-01) the plan's argv brings down a real process tree. Commit e1ac837 removed the former already-exited/dead-pid exit-code and stderr measurement because a recycled pid could target an unrelated process. No reserved block exists. The missing exit-code/stderr datum is deferred and accepted until a safe owned-live-process measurement is designed; LIF-01 remains open.
+**CURRENT Windows two-case closure (2026-09-02):** Exactly two native win32 kill-tree cases form the 2/2 contract. CI run 33599694679 on candidate 9aa22bbd4c26fecabc17745438a2217a24b31d3e executed 2 passed, 0 pending and 0 failed; the behavioural case killed the live parent and grandchild, and the resolution case used the absolute system-root taskkill.exe. Commit e1ac837 removed the unsafe already-exited/dead-pid exit-code and stderr vehicle; no reserved block exists and that datum remains accepted and deferred. LIF-01 is closed at the owned live-tree contract; AR-01 and AR-04 remain accepted residuals.
 <!-- DRIFT:WINDOWS-TWO-CASE:END -->
 
 > **SUPERSEDED 2026-08-31 by the correction above — preserved historical expectations:** Test 6 formerly required `kill-tree.win32.test.ts` to execute 3/3. Test 8 formerly required a reserved block to record `taskkill`'s exit code and first stderr line for an already-exited pid. Commit `e1ac837` removed that unsafe third vehicle; those expectations must not be reinstated.
@@ -299,12 +301,16 @@ result: [pending]
 ### 6. win32 — the built argv terminates a live parent AND its grandchild
 source: 08-04-SUMMARY.md D1
 expected: On a `windows-latest` runner, `kill-tree.win32.test.ts` executes exactly 2/2 and the full-name behavioural tree-kill assertion passes. Off Windows both cases remain collected-but-pending; that is not execution evidence.
-result: [pending]
+result: passed
+evidence: CI run `33599694679` on candidate `9aa22bb` executed 2 passed / 0 pending / 0 failed;
+  `the plan's argv brings down a real process tree` passed and both owned processes died.
 
 ### 7. taskkill.exe resolves by absolute path from the runner's system root
 source: 08-04-SUMMARY.md D2
 expected: The win32 leg confirms absolute-path resolution, with the bare-name fallback asserted when `SystemRoot` is unset. Turns assumption A7 into a measurement.
-result: [pending]
+result: passed
+evidence: The same native job measured `C:\Windows\System32\taskkill.exe`; the dedicated exact-count
+  gate then confirmed both expected cases ran.
 
 ### 8. The removed dead-pid measurement remains safely deferred
 source: 08-04-SUMMARY.md D3
@@ -313,8 +319,9 @@ result: passed
 evidence: >-
   The current native suite has exactly two cases, CI pins `expectedTotal = 2`, and
   `kill-tree.win32.gate.test.ts` executes the source assertion "never force-signals a raw fixture
-  pid after its owned process exited". This is safety/static evidence only; it supplies no native
-  Windows exit-code or stderr reading and does not close test 6, test 7, ledger entry 12, or LIF-01.
+  pid after its owned process exited". This supplies no native Windows exit-code or stderr reading.
+  Native CI run `33599694679` separately closes tests 6 and 7, ledger entry 12, and LIF-01 without
+  restoring the unsafe dead-pid vehicle.
 
 ### 9. A real cancel on macOS leaves zero mcp-server.mjs processes
 source: 08-05-SUMMARY.md D6

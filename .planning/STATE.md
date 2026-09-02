@@ -261,8 +261,12 @@ Recent decisions affecting current work:
 <!-- DRIFT:A1-CORRECTION:END -->
 
 <!-- DRIFT:WINDOWS-TWO-CASE:BEGIN -->
-**CURRENT Windows two-case correction (2026-08-31, Plan 08-23):** Exactly two native win32 kill-tree cases form the 2/2 contract; both remain unexecuted because no windows-latest/native run exists. CI pins expectedTotal=2 and the behavioral full name win32 process-tree termination (LIF-01) the plan's argv brings down a real process tree. Commit e1ac837 removed the former already-exited/dead-pid exit-code and stderr measurement because a recycled pid could target an unrelated process. No reserved block exists. The missing exit-code/stderr datum is deferred and accepted until a safe owned-live-process measurement is designed; LIF-01 remains open.
+**CURRENT Windows two-case closure (2026-09-02):** Exactly two native win32 kill-tree cases form the 2/2 contract. CI run 33599694679 on candidate 9aa22bbd4c26fecabc17745438a2217a24b31d3e executed 2 passed, 0 pending and 0 failed; the behavioural case killed the live parent and grandchild, and the resolution case used the absolute system-root taskkill.exe. Commit e1ac837 removed the unsafe already-exited/dead-pid exit-code and stderr vehicle; no reserved block exists and that datum remains accepted and deferred. LIF-01 is closed at the owned live-tree contract; AR-01 and AR-04 remain accepted residuals.
 <!-- DRIFT:WINDOWS-TWO-CASE:END -->
+
+- [Phase 08]: RELEASE-READINESS CLOSURE 2026-09-02 — LIF-01 and LIF-02 are complete at `08-VERIFICATION-6.md` (20/20). Native CI run `33599694679` executed the win32 kill-tree contract 2/2 on candidate `9aa22bb`; the real-Caido marker fixture reached `kind=reap exit=0 attempted=1 ageMs=109`, died, and the runtime root was removed only after teardown settled.
+- [Phase 08]: The current security audit boundary is `9aa22bbd4c26fecabc17745438a2217a24b31d3e`, package tree `d90d3e95`, digest `d28734fe…`, 64 package commits since `d2d502b`, and zero post-audit package commits. All 13 accepted residuals remain explicit; AR-01/AR-04 are not rewritten by the native owned-tree proof.
+- [Phase 08]: Candidate version is 0.2.0. Validation happened on the scratch branch only; `main` has not been pushed and no GitHub release has been created.
 
 - [Phase 08]: The repaired three-valued probe confirmed the favourable A1 outcome on 2026-08-31; the invalid 2026-08-27 reading remains retracted as of 2026-08-28.
 - [Phase 08]: LIF-01 and LIF-02 remain unchecked because record convergence does not supply native-Windows execution or real-turn causality evidence.

@@ -4,7 +4,7 @@ slug: process-lifecycle
 # status lifecycle: draft (seeded by plan-phase) → validated (set by validate-phase §6)
 # audit-milestone §5.5 distinguishes NOT-VALIDATED (draft) from PARTIAL (validated + nyquist_compliant: false) (#2117)
 status: validated
-nyquist_compliant: false
+nyquist_compliant: true
 wave_0_complete: true
 created: 2026-08-24
 filled: 2026-08-24
@@ -71,7 +71,7 @@ Full detail, per finding, in `08-REVIEW-GAPS-FIX.md`.
 <!-- DRIFT:A1-CORRECTION:END -->
 
 <!-- DRIFT:WINDOWS-TWO-CASE:BEGIN -->
-**CURRENT Windows two-case correction (2026-08-31, Plan 08-23):** Exactly two native win32 kill-tree cases form the 2/2 contract; both remain unexecuted because no windows-latest/native run exists. CI pins expectedTotal=2 and the behavioral full name win32 process-tree termination (LIF-01) the plan's argv brings down a real process tree. Commit e1ac837 removed the former already-exited/dead-pid exit-code and stderr measurement because a recycled pid could target an unrelated process. No reserved block exists. The missing exit-code/stderr datum is deferred and accepted until a safe owned-live-process measurement is designed; LIF-01 remains open.
+**CURRENT Windows two-case closure (2026-09-02):** Exactly two native win32 kill-tree cases form the 2/2 contract. CI run 33599694679 on candidate 9aa22bbd4c26fecabc17745438a2217a24b31d3e executed 2 passed, 0 pending and 0 failed; the behavioural case killed the live parent and grandchild, and the resolution case used the absolute system-root taskkill.exe. Commit e1ac837 removed the unsafe already-exited/dead-pid exit-code and stderr vehicle; no reserved block exists and that datum remains accepted and deferred. LIF-01 is closed at the owned live-tree contract; AR-01 and AR-04 remain accepted residuals.
 <!-- DRIFT:WINDOWS-TWO-CASE:END -->
 
 > **SUPERSEDED 2026-08-31 by the Windows correction above — preserved historical contract:** T-08-10 formerly promised three collected/pending cases and an already-dead-pid exit-code/stderr recording; the compliance text promised an empty reserved block that a later Windows run would fill. Commit `e1ac837` removed that unsafe third vehicle, so neither promise is current.
@@ -84,8 +84,8 @@ Full detail, per finding, in `08-REVIEW-GAPS-FIX.md`.
 - **After every plan:** `pnpm exec vitest run` + `pnpm lint` — ~2 s locally
 - **Before `/gsd-verify-work`:** full suite green on **both** the ubuntu matrix (Node 20/22/24/26)
   and the `windows-latest` leg, with the run URL, per-step conclusions and the win32 execution log
-  line recorded — the `07-VALIDATION.md` § *Windows evidence* format. **The `windows-latest` half of
-  this has NOT happened** — see § *Compliance declaration*.
+  line recorded — the `07-VALIDATION.md` § *Windows evidence* format. **Satisfied 2026-09-02:** CI
+  run `33599694679` executed the exact win32 lifecycle contract 2/2 on candidate `9aa22bb`.
 - **Max feedback latency:** < 5 s locally; ~90 s for the Windows leg
 
 ---
@@ -102,8 +102,8 @@ Full detail, per finding, in `08-REVIEW-GAPS-FIX.md`.
 | T-08-05 | 02 | 0 | LIF-02 / SC-2 | — | POSIX arm emits `kill` with `["-TERM","--","-<n>"]`; `"kill"` rung emits `-KILL`; **`undefined` platform takes the POSIX arm** (CMP-01) | unit | `pnpm exec vitest run packages/backend/src/kill-plan.test.ts` | ✅ | ✅ green |
 | T-08-05 | 02 | 0 | SC-2 | — | `shouldDetachProviderSpawn` returns `false` on `"win32"` and `true` on `"darwin"`, `"linux"` and `undefined` | unit | `pnpm exec vitest run packages/backend/src/kill-plan.test.ts` | ✅ | ✅ green |
 | T-08-04 | 02 | 0 | LIF-02 / SC-3 (POSIX half) | T-08-01 | **Behavioural.** Control: no `detached` + single-pid kill → grandchild **survives**. Then: `detached` + the production plan's argv → parent **and** grandchild die | integration (skipIf win32) | `pnpm exec vitest run packages/backend/src/kill-tree.posix.test.ts` | ✅ | ✅ green (2/2, control verified falsifiable by hand) |
-| T-08-10 | 04 | 0 | LIF-01 / SC-3 (Windows half) | T-08-01 | Exactly two native cases: the production argv terminates a live parent and grandchild; taskkill resolves from the runner's system root. Commit `e1ac837` removed the former already-exited/dead-pid exit-code/stderr vehicle because a recycled pid could target an unrelated process; the missing datum is accepted/deferred until a safe owned-live-process measurement exists | integration (skipIf ≠ win32) | `pnpm exec vitest run packages/backend/src/kill-tree.win32.test.ts` — **only executes on the `windows-latest` leg** | ✅ | ⚠️ **NOT EXECUTED** — 2 total / 2 pending off Windows; no `windows-latest` run exists. Ledger entry 12 remains open |
-| T-08-11 | 04 | 0 | LIF-01 / SC-3 | — | The win32 suite actually ran on Windows — JSON gate requires `pending === 0`, `total === expectedTotal === 2`, `passed === 2`, and one passed assertion with the exact behavioural full name | CI gate | the `Gate: the win32 kill-tree suite actually ran` step in `ci.yml`, writing `$RUNNER_TEMP/win32-kill-tree-report.json` | ✅ | ⚠️ **SHIPPED, NEVER FIRED** — current 2/2 contract is pinned statically; no runner has executed it |
+| T-08-10 | 04 | 0 | LIF-01 / SC-3 (Windows half) | T-08-01 | Exactly two native cases: the production argv terminates a live parent and grandchild; taskkill resolves from the runner's system root. Commit `e1ac837` removed the former already-exited/dead-pid exit-code/stderr vehicle because a recycled pid could target an unrelated process; the missing datum is accepted/deferred until a safe owned-live-process measurement exists | integration (skipIf ≠ win32) | `pnpm exec vitest run packages/backend/src/kill-tree.win32.test.ts` — **only executes on the `windows-latest` leg** | ✅ | ✅ **NATIVE PASS** — CI run `33599694679`: 2 passed / 0 pending / 0 failed; live parent and grandchild terminated, absolute killer path measured |
+| T-08-11 | 04 | 0 | LIF-01 / SC-3 | — | The win32 suite actually ran on Windows — JSON gate requires `pending === 0`, `total === expectedTotal === 2`, `passed === 2`, and one passed assertion with the exact behavioural full name | CI gate | the `Gate: the win32 kill-tree suite actually ran` step in `ci.yml`, writing `$RUNNER_TEMP/win32-kill-tree-report.json` | ✅ | ✅ **FIRED ON NATIVE WINDOWS** — exact-count and behavioral-identity gate passed in run `33599694679` |
 | T-08-11 | 04 | 0 | LIF-01 / SC-3 | — | The gate itself still exists, points at a file that exists, pins two tests plus the behavioural identity, and rejects raw-pid signalling after owned-process exit | unit (static) | `pnpm exec vitest run packages/backend/src/kill-tree.win32.gate.test.ts` — mirrors `spawn-plan.win32.gate.test.ts` | ✅ | ✅ green (11/11 on POSIX) |
 | T-08-09 | 03 | 1+ | SC-4 | T-08-01 | In `cleanupMcpRuntime`, `closeCliSession` and `deleteChat`, the kill statement precedes every `rm` | static gate | primary: `pnpm exec vitest run packages/backend/src/index.source.test.ts` (the `functionBody` positional gate, 3 sites); second read: the `awk`-scoped shell slice | ✅ | ✅ green (falsifiable in 3 directions, verified by hand) |
 | T-08-08 | 03 | 1+ | SC-4 | T-08-01 | `cleanupMcpRuntime` kills at all — the marker changes from seam to implementation | static gate | `awk '/^async function cleanupMcpRuntime/,/^}/' … \| grep -c 'killTree'` ≥ 1; asserted in-test by `index.source.test.ts` | ✅ | ✅ green (`activeProcesses.entries()` = 1, `await killTree` = 0) |
@@ -262,23 +262,21 @@ and so would have been changed invisibly. Recorded here instead:
 The `status` field in the frontmatter reads **validated** — every row names an owning task and an
 executed (or explicitly unexecuted) command.
 
-`nyquist_compliant: **false**` — deliberately, and it is not a formality. **Two rows are not ✅:**
+`nyquist_compliant: **true**` — the last two non-green rows closed on native Windows CI run
+`33599694679` at candidate `9aa22bbd4c26fecabc17745438a2217a24b31d3e`:
 
-1. **T-08-10 / plan 04 — the win32 integration suite has never executed.** It is `skipIf`-gated to
-   win32 and currently collects exactly **2 total / 2 pending** off Windows. Off Windows a skip is a
-   **non-result**, not a pass. Commit `e1ac837` removed the former third already-exited/dead-pid
-   exit-code/stderr measurement because the numeric pid could be recycled after its owned process
-   exited and `taskkill` could target an unrelated process. **No reserved block exists.** The missing
-   datum is accepted/deferred until a safe owned-live-process measurement is designed. Broken-Windows
-   ledger entry **12** stays open (`unrun-verify`).
-2. **T-08-11 / plan 04 — the CI gate step ships but has never fired.** The step exists, the YAML
-   parses, and the two-directional deletion measurement proves its anchors cannot be satisfied by
-   Phase 7's step. No runner has executed it, so there is no executed-count log line and no run URL.
+1. **T-08-10 / plan 04:** the exact native suite executed **2 passed / 0 pending / 0 failed**. The
+   behavioral case killed both the live parent and grandchild through the production plan; the path
+   case measured the absolute system-root `taskkill.exe`.
+2. **T-08-11 / plan 04:** the exact-count/identity CI gate fired and printed its favorable gate line.
 
-The two-case behavioural/path suite and its CI execution gate close on **one `windows-latest` run**.
-The separately deferred exit-code/stderr datum does not: it needs a new safe owned-live-process
-measurement design and is explicitly accepted as absent until then. Until the runner executes,
-LIF-01 has a unit argv contract plus source/static evidence, not native behaviour proof.
+The removed already-exited/dead-pid exit-code/stderr vehicle remains intentionally absent because a
+recycled pid could target an unrelated process. That accepted datum was not part of the safe 2/2
+contract and does not become a hidden requirement. Ledger entry **12** is fixed by the native run.
+
+**Historical pre-closure analysis follows.** It is retained to preserve why A1 was once a separate
+reason for `nyquist_compliant: false`; the repaired 2026-08-31 measurement and the current closure
+supersede its live status.
 
 **ADDED 2026-08-28 — a third reason, which is not a row in that table.** A1's 2026-08-27 reading is
 **RETRACTED** (`08-VERIFICATION.md` gap 1): the probe coalesced an absent `process.kill` into a
@@ -335,7 +333,7 @@ A6 is still unmeasured, and the Control was never taken.
 - [x] `packages/backend/src/kill-plan.ts` + `kill-plan.test.ts` — LIF-01, LIF-02, SC-1, SC-2 (08-02 T-08-04/T-08-05)
 - [x] `packages/backend/src/kill-tree.posix.test.ts` + a runtime-built fork-a-grandchild fixture
       (built by the test, **not** committed — the `spawn-plan.win32.test.ts` precedent) — LIF-02, SC-3 (08-02 T-08-04)
-- [x] `packages/backend/src/kill-tree.win32.test.ts` (skipIf ≠ win32) — LIF-01, SC-3 (08-04 T-08-10) — *file shipped; never executed, see § Compliance declaration*
+- [x] `packages/backend/src/kill-tree.win32.test.ts` (skipIf ≠ win32) — LIF-01, SC-3 (08-04 T-08-10) — *executed 2/2 on native Windows in CI run `33599694679`*
 - [x] `packages/backend/src/kill-tree.win32.gate.test.ts` + the matching `ci.yml` gate step — the false-green guard (08-04 T-08-11)
 - [⚠] **Spike (strongly recommended):** the temporary diagnostics path reporting, from a **real Caido
       install on macOS/Linux**, (a) `typeof process.kill`, (b) that a `detached: true` spawn's group
@@ -440,7 +438,8 @@ cover* rather than restated there.
 - [x] No watch-mode flags
 - [x] Feedback latency < 5s (local) / ~90s (Windows leg)
 - [x] Task ID column filled from the emitted PLAN.md files
-- [ ] `nyquist_compliant: true` set in frontmatter — **NOT set.** Two rows are ⚠️ (T-08-10 and
-      T-08-11, both closing on one `windows-latest` run). See § *Compliance declaration*.
+- [x] `nyquist_compliant: true` set in frontmatter — native run `33599694679` closed T-08-10 and
+      T-08-11 with two executed cases and the exact-count/identity gate.
 
-**Approval:** validated 2026-08-24 by plan 08-05 T-08-13, with `nyquist_compliant: false`.
+**Approval:** validated 2026-08-24 by plan 08-05 T-08-13; Nyquist closure recorded 2026-09-02 from
+native Windows CI run `33599694679`.
