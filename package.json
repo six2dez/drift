@@ -1,6 +1,6 @@
 {
   "name": "drift",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Security copilot for manual web security testing in Caido (MCP + local CLI)",
   "license": "MIT",

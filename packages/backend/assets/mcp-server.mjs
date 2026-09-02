@@ -725,7 +725,7 @@ if (process.argv.includes("--validate-auth")) {
 async function handleMessage(msg) {
   switch (msg.method) {
     case "initialize":
-      await send({ jsonrpc: "2.0", id: msg.id, result: { protocolVersion: "2024-11-05", capabilities: { tools: {} }, serverInfo: { name: "drift-mcp", version: "0.1.0" } } });
+      await send({ jsonrpc: "2.0", id: msg.id, result: { protocolVersion: "2024-11-05", capabilities: { tools: {} }, serverInfo: { name: "drift-mcp", version: "0.2.0" } } });
       break;
     case "notifications/initialized":
     case "notifications/cancelled":

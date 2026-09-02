@@ -7,18 +7,26 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-09-02
+
 ### Security
 
+- **Completion-aware process cleanup.** Drift now waits for provider exit, tree-killer settlement, and marker-scoped orphan-reap settlement before recursively removing token-bearing runtime files. Uncertain outcomes retain the runtime directory fail-closed.
+- **Cross-platform tree termination.** Windows uses an absolute `taskkill.exe /T /F` plan; POSIX combines process-group termination with a session-unique argv-marker reap for MCP children that leave the provider's process group.
 - **Deny-by-default MCP allowlist.** Disabling every tool-permission group left the allowlist empty, which the embedded MCP server treated as "allow all" — inverting the user's intent and exposing all tools. Empty now means deny-all (gated behind a `DRIFT_ALLOWLIST_ACTIVE` flag so the unconfigured standalone server still works); Claude's `--allowedTools` no longer falls back to the full tool set either. Covered by new `mcp-server.allowlist.test.ts`.
 - **Hardened temp-file handling.** The `/tmp/drift-mcp-<uuid>` dir is created `0o700`, token-bearing wrapper/launch scripts `0o700`, and other token-carrying temp files `0o600`, so other local users can no longer read the Caido session token. Orphaned `drift-mcp-*` dirs from an unclean shutdown are swept on MCP start.
 
 ### Fixed
 
+- **Native Windows launch and resolution.** MCP and provider processes use platform-aware direct spawn plans, Windows executable discovery, and cross-platform temp paths instead of assuming POSIX shell wrappers and `/tmp`.
+- **Cancellation and timeout cleanup.** Cancelled or timed-out turns terminate their provider tree and token-bearing MCP descendants; timeout enforcement is driven by both the native timer and Drift's frontend heartbeat.
+- **Caido teardown callback starvation.** The Settings Stop action now pumps cleanup status until terminal callbacks settle, and reports fail-closed cleanup instead of claiming completion early.
 - **Init race.** Settings and chats loaded without being awaited, so an early RPC could clobber freshly-pushed settings or surface an empty chat list (causing the UI to auto-create a chat that hid persisted ones). State handlers now await the initial load.
 - **Cross-chat streaming/error bleed.** A turn started in one chat could paint its streaming bubble or error banner into another chat after switching mid-turn. Streaming output and errors are now scoped to the chat that owns the turn.
 
 ### Added
 
+- Native `windows-latest` verification for the process-tree kill plan, including an exact-count gate that proves the behavioral tree-termination case executed rather than skipped.
 - Tool-safety settings now warn when every permission group is disabled, clarifying that the MCP server attaches but exposes no tools.
 
 ## [0.1.0] — 2026-04-16

@@ -14,7 +14,7 @@ export default defineConfig({
   name: "Drift",
   description:
     "Security copilot for manual web security testing in Caido (MCP + local CLI)",
-  version: "0.1.0",
+  version: "0.2.0",
   author: {
     name: "six2dez",
     email: "six2dez@gmail.com",
