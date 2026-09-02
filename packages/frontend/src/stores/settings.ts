@@ -13,6 +13,8 @@ import { useSDK } from "../plugins/sdk";
 import { INIT_REQUEST_TIMEOUT_MS, withTimeout } from "../utils/promise-timeout";
 
 const POST_INIT_BOOTSTRAP_DELAY_MS = 750;
+const MCP_CLEANUP_PUMP_INTERVAL_MS = 100;
+const MCP_CLEANUP_PUMP_TIMEOUT_MS = INIT_REQUEST_TIMEOUT_MS;
 
 type StoredData = { settings: Settings };
 type SubscriptionHandle = { stop: () => void };
@@ -137,7 +139,7 @@ export const useSettingsStore = defineStore("settings", () => {
     await syncCaidoHistoryContext();
   }
 
-  async function refreshMcpStatus() {
+  async function refreshMcpStatus(): Promise<McpServerInfo> {
     const result = await withTimeout(
       sdk.backend.getMcpStatus(),
       INIT_REQUEST_TIMEOUT_MS,
@@ -148,6 +150,24 @@ export const useSettingsStore = defineStore("settings", () => {
     }
     mcpStatus.value = result.value;
     clearInitErrorPrefix("mcp:");
+    return result.value;
+  }
+
+  async function pumpMcpCleanup(): Promise<string | undefined> {
+    const deadline = Date.now() + MCP_CLEANUP_PUMP_TIMEOUT_MS;
+    while (true) {
+      const status = await refreshMcpStatus();
+      if (status.cleanupState === "idle") return undefined;
+      if (status.cleanupState === "failed-closed") {
+        return "Drift could not confirm that every MCP process stopped, so it preserved the token-bearing runtime directory. Restart Caido before starting MCP again.";
+      }
+      if (Date.now() >= deadline) {
+        return `Drift cleanup did not settle after ${String(MCP_CLEANUP_PUMP_TIMEOUT_MS)}ms. Restart Caido before starting MCP again.`;
+      }
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, MCP_CLEANUP_PUMP_INTERVAL_MS);
+      });
+    }
   }
 
   async function refreshProvidersInternal(options?: {
@@ -378,13 +398,18 @@ export const useSettingsStore = defineStore("settings", () => {
     try {
       if (mcpStatus.value?.running) {
         const stopResult = await sdk.backend.stopMcpServer();
-        if (stopResult.kind === "Error") actionError = stopResult.error;
+        if (stopResult.kind === "Error") {
+          actionError = stopResult.error;
+          await refreshMcpStatus();
+        } else {
+          actionError = await pumpMcpCleanup();
+        }
       } else {
         await syncCaidoRuntimeContext();
         const startResult = await sdk.backend.startMcpServer();
         if (startResult.kind === "Error") actionError = startResult.error;
+        await refreshMcpStatus();
       }
-      await refreshMcpStatus();
       return actionError;
     } catch (e) {
       return String(e);

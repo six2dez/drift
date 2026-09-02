@@ -1250,6 +1250,14 @@ describe("index.ts wires the orphan reap at every counted site and nowhere else 
     }
   });
 
+  it("publishes pending cleanup state for the frontend teardown pump", () => {
+    const body = functionBody(code, "buildCurrentMcpStatus");
+    expect(body).not.toBe("");
+    expect(body).toContain(
+      'cleanupState: pendingMcpRuntimeCleanup?.status ?? "idle"',
+    );
+  });
+
   it("guards only the provider start commit with an epoch-bound lease", () => {
     const send = functionBody(code, "sendCliMessage");
     expect(send).not.toBe("");

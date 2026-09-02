@@ -1530,6 +1530,7 @@ async function buildCurrentMcpStatus(): Promise<McpServerInfo> {
   const storedContext = await readStoredMcpContext();
   return buildMcpServerInfo({
     running: ready,
+    cleanupState: pendingMcpRuntimeCleanup?.status ?? "idle",
     host: currentSettings.mcp.host,
     port: ready ? currentSettings.mcp.port : 0,
     token: "",

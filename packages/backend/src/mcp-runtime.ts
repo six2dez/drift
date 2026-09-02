@@ -6,6 +6,7 @@ import {
   MCP_TOOL_DEFINITIONS,
   type McpAuthSource,
   McpAuthState,
+  type McpCleanupState,
   type McpPermissionGroups,
   type McpPermissionSettings,
   McpSelfTestCheck,
@@ -277,6 +278,7 @@ export function buildSelfTestResult(input: {
 
 export function buildMcpServerInfo(input: {
   running: boolean;
+  cleanupState?: McpCleanupState;
   host: string;
   port: number;
   token: string;
@@ -294,6 +296,7 @@ export function buildMcpServerInfo(input: {
   const toolNames = [...(input.toolNames ?? toolPolicy.allowedToolNames)];
   return {
     running: input.running,
+    cleanupState: input.cleanupState ?? "idle",
     host: input.host,
     port: input.port,
     token: input.token,

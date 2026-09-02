@@ -161,8 +161,11 @@ export type McpSelfTestResult = {
 
 export type McpSelfTestResults = Record<string, McpSelfTestResult>;
 
+export type McpCleanupState = "idle" | "pending" | "removing" | "failed-closed";
+
 export type McpServerInfo = {
   running: boolean;
+  cleanupState: McpCleanupState;
   host: string;
   port: number;
   token: string;

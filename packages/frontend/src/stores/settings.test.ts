@@ -44,6 +44,7 @@ import { useSettingsStore } from "./settings";
 function createMcpStatus(): McpServerInfo {
   return {
     running: true,
+    cleanupState: "idle",
     host: "127.0.0.1",
     port: 9877,
     token: "",
@@ -150,6 +151,54 @@ describe("settings store", () => {
     await store.runMcpSelfTest();
 
     expect(mockSdk.backend.runMcpSelfTest).toHaveBeenCalledWith("");
+  });
+
+  it("keeps pumping backend status until MCP teardown cleanup settles", async () => {
+    vi.useFakeTimers();
+    try {
+      mockSdk.backend.getMcpStatus
+        .mockResolvedValueOnce({
+          kind: "Ok",
+          value: { ...createStoppedMcpStatus(), cleanupState: "pending" },
+        })
+        .mockResolvedValueOnce({
+          kind: "Ok",
+          value: { ...createStoppedMcpStatus(), cleanupState: "removing" },
+        })
+        .mockResolvedValueOnce({
+          kind: "Ok",
+          value: createStoppedMcpStatus(),
+        });
+      const store = useSettingsStore();
+      store.mcpStatus = createMcpStatus();
+
+      const togglePromise = store.toggleMcp();
+      await vi.runAllTimersAsync();
+
+      await expect(togglePromise).resolves.toBeUndefined();
+      expect(mockSdk.backend.stopMcpServer).toHaveBeenCalledTimes(1);
+      expect(mockSdk.backend.getMcpStatus).toHaveBeenCalledTimes(3);
+      expect(store.mcpStatus).toMatchObject({
+        running: false,
+        cleanupState: "idle",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("surfaces a failed-closed MCP teardown instead of claiming Stop completed", async () => {
+    mockSdk.backend.getMcpStatus.mockResolvedValueOnce({
+      kind: "Ok",
+      value: { ...createStoppedMcpStatus(), cleanupState: "failed-closed" },
+    });
+    const store = useSettingsStore();
+    store.mcpStatus = createMcpStatus();
+
+    const result = await store.toggleMcp();
+
+    expect(result).toContain("preserved the token-bearing runtime directory");
+    expect(store.mcpStatus?.cleanupState).toBe("failed-closed");
   });
 
   it("marks provider readiness as warn when at least one enabled provider is available", () => {

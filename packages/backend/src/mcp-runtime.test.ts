@@ -133,6 +133,7 @@ describe("mcp-runtime", () => {
 
     const status = buildMcpServerInfo({
       running: true,
+      cleanupState: "pending",
       host: "127.0.0.1",
       port: 0,
       token: "",
@@ -157,6 +158,7 @@ describe("mcp-runtime", () => {
     expect(selfTest.state).toBe("passed");
     expect(selfTest.durationMs).toBe(80);
     expect(status.toolCount).toBeGreaterThan(14);
+    expect(status.cleanupState).toBe("pending");
     expect(status.authSource).toBe("session");
     expect(status.effectiveContext.projectId).toBe("override-project");
     expect(status.effectiveContext.historyScopeId).toBe("");
